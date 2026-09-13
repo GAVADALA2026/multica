@@ -1878,7 +1878,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// teardown, which holds the issue and then reaches the same rows through
 		// the issue_id cascade, and Postgres aborts one side. Locking them at all
 		// still pins the requested set: an attachment deleted while this waited
-		// is refused before any comment exists, rather than the comment
+		// is refused before the comment is committed, rather than the comment
 		// committing without it.
 		tx, beginErr := h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
@@ -3652,9 +3652,9 @@ type commentDeletion struct {
 
 // lockCommentAttachments locks the unbound issue attachments a comment is
 // being created with and reports the first requested id that is not among
-// them: never eligible, or deleted while the lock waited. It must be the first
-// statement in the transaction to touch any row; see CreateComment for the
-// attachment -> issue lock order it exists to keep.
+// them: never eligible, or deleted while the lock waited. The caller must
+// already hold the issue's row lock — these are its children, and taking them
+// first is the inversion CreateComment documents.
 func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids []pgtype.UUID) (missing pgtype.UUID, err error) {
 	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
 		WorkspaceID:   workspaceID,

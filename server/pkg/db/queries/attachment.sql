@@ -181,9 +181,12 @@ WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
 -- name: LockAttachmentsForIssueLink :many
--- Issue updates bind attachments and then touch the owner row. Lock eligible
--- attachment rows first so every attachment -> issue mutation uses the same
--- lock order as DeleteAttachment and cannot deadlock with it.
+-- Issue updates bind attachments and then touch the owner row. Only rows that
+-- belong to no issue yet are eligible, and nothing reaches those through an
+-- issue — not teardown's cascade, not DeleteAttachment, which takes the owning
+-- issue first — so locking them before the owner cannot deadlock.
+-- Attachments that DO belong to the issue are locked after it; see
+-- LockAttachmentsForCommentLink.
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
@@ -197,8 +200,8 @@ FOR UPDATE;
 -- after the CreateComment statement has taken the issue row: issue -> comment
 -- -> child, the order every owner-first mutation here uses. This pins the
 -- requested set under that lock and returns the ids still eligible, so the
--- caller can refuse before the comment exists when a requested attachment was
--- deleted while the issue lock was contended.
+-- caller can refuse before the comment is committed when a requested
+-- attachment was deleted while the issue lock was contended.
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id = sqlc.arg(issue_id)
