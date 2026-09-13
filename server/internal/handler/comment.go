@@ -1871,16 +1871,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// a delete, so there is no window at all. Mirrors the attachment-set
 		// edit in UpdateComment.
 		//
-		// The attachments are locked before anything touches the issue row.
-		// DeleteAttachment deletes the row and then bumps its issue, so every
-		// attachment -> issue mutation takes that order (LockAttachmentsForIssueLink
-		// does the same for issue edits). CreateComment touches the issue; had the
-		// link been the first statement to lock the attachments, the create would
-		// hold the issue while waiting on an attachment that a concurrent delete
-		// holds while waiting on the issue, and Postgres would abort one side.
-		// Locking first also pins the requested set: an attachment deleted while
-		// this waited is refused here, before any comment exists, rather than the
-		// comment committing without it.
+		// Owner first: the CreateComment statement takes the issue row, and only
+		// then are the attachments locked — the issue -> comment -> child order
+		// LockIssueForDelete, UpdateComment, LockLiveComment and DeleteAttachment
+		// all share. Taking the attachments first inverts it against issue
+		// teardown, which holds the issue and then reaches the same rows through
+		// the issue_id cascade, and Postgres aborts one side. Locking them at all
+		// still pins the requested set: an attachment deleted while this waited
+		// is refused before any comment exists, rather than the comment
+		// committing without it.
 		tx, beginErr := h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
 			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", beginErr, "issue_id", issueID)...)
@@ -1889,17 +1888,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
-		missing, lockErr := lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
-		if lockErr != nil {
-			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", lockErr, "issue_id", issueID)...)
-			writeError(w, http.StatusInternalServerError, "failed to create comment: "+lockErr.Error())
-			return
-		}
-		if missing.Valid {
-			writeError(w, http.StatusConflict, "attachment "+uuidToString(missing)+" is no longer available")
-			return
-		}
 		created, err = qtx.CreateComment(r.Context(), createParams)
+		if err == nil {
+			var missing pgtype.UUID
+			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
+			if err == nil && missing.Valid {
+				writeError(w, http.StatusConflict, "attachment "+uuidToString(missing)+" is no longer available")
+				return
+			}
+		}
 		if err == nil {
 			err = qtx.LinkAttachmentsToComment(r.Context(), db.LinkAttachmentsToCommentParams{
 				CommentID: created.ID,
@@ -1912,6 +1909,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		created, err = h.Queries.CreateComment(r.Context(), createParams)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The issue was deleted, possibly while this waited for its row lock.
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
 	}
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)

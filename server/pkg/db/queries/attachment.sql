@@ -193,12 +193,12 @@ ORDER BY id
 FOR UPDATE;
 
 -- name: LockAttachmentsForCommentLink :many
--- CreateComment binds attachments and touches the owner issue in one
--- transaction. Lock the eligible attachment rows first so the mutation takes
--- the same attachment -> issue order as DeleteAttachment (and
--- LockAttachmentsForIssueLink) and cannot deadlock with it. Returns the ids
--- still eligible, so the caller can refuse before creating the comment when a
--- requested attachment was deleted while this waited.
+-- CreateComment binds attachments in the transaction that created the comment,
+-- after the CreateComment statement has taken the issue row: issue -> comment
+-- -> child, the order every owner-first mutation here uses. This pins the
+-- requested set under that lock and returns the ids still eligible, so the
+-- caller can refuse before the comment exists when a requested attachment was
+-- deleted while the issue lock was contended.
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id = sqlc.arg(issue_id)
@@ -206,6 +206,15 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND source_context_id IS NULL
   AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
 ORDER BY id
+FOR UPDATE;
+
+-- name: LockAttachmentRow :one
+-- Locks an attachment that has no owner to lock instead — a chat, avatar or
+-- still-unbound upload. Reading it under its own lock is what keeps it from
+-- gaining an owner between the read and the write, which would put the write
+-- back in the attachment -> issue order issue teardown deadlocks with.
+SELECT * FROM attachment
+WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;
 
 -- name: LinkAttachmentsToIssue :one

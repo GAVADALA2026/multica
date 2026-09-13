@@ -1457,21 +1457,16 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	var deleted db.DeleteAttachmentRow
 	deleteParams := db.DeleteAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID}
-	if att.CommentID.Valid {
-		// Owner first, like every comment mutation: deleting the row and then
-		// bumping its comment would invert the comment delete's lock order.
-		err = h.withLiveCommentLock(r.Context(), att.CommentID, att.WorkspaceID, func(qtx *db.Queries) error {
-			var deleteErr error
-			deleted, deleteErr = qtx.DeleteAttachment(r.Context(), deleteParams)
-			return deleteErr
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The comment was deleted, and its attachments with it.
-			writeError(w, http.StatusNotFound, "attachment not found")
-			return
-		}
-	} else {
-		deleted, err = h.Queries.DeleteAttachment(r.Context(), deleteParams)
+	err = h.withAttachmentOwnerLock(r.Context(), att, func(qtx *db.Queries) error {
+		var deleteErr error
+		deleted, deleteErr = qtx.DeleteAttachment(r.Context(), deleteParams)
+		return deleteErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The attachment is gone — with its comment, with its issue, or on its
+		// own — while this waited for the owner lock.
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
 	}
 	if err != nil {
 		slog.Error("failed to delete attachment", "error", err)
@@ -1516,6 +1511,87 @@ func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, worksp
 		AttachmentIds: ids,
 		BumpRevision:  bumpRevision,
 	})
+}
+
+// attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
+// owner once, when the issue or comment it was uploaded for links it, so one
+// retry is enough in practice; the bound is what keeps a pathological
+// interleaving from looping.
+const attachmentOwnerLockAttempts = 3
+
+// withAttachmentOwnerLock runs write in a transaction that locks the
+// attachment's owners first — the issue, then the comment when it has one —
+// which is the issue -> comment -> child order LockIssueForDelete,
+// UpdateComment, LockLiveComment and CreateComment all take. Locking the
+// attachment row and then touching its issue is the opposite order, and closes
+// a deadlock cycle with issue teardown: teardown holds the issue and reaches
+// the same attachment through the issue_id cascade.
+//
+// The row is re-read under those locks, so a link that committed while this
+// waited is seen before the write; an attachment that gained an owner is
+// retried with that owner locked. Returns pgx.ErrNoRows when the attachment,
+// or the comment owning it, is gone.
+func (h *Handler) withAttachmentOwnerLock(ctx context.Context, att db.Attachment, write func(*db.Queries) error) error {
+	for attempt := 0; ; attempt++ {
+		fresh, err := h.attachmentOwnerLockAttempt(ctx, att, write)
+		if !errors.Is(err, errAttachmentOwnerChanged) {
+			return err
+		}
+		if attempt+1 >= attachmentOwnerLockAttempts {
+			return errors.New("attachment owner kept changing under the lock")
+		}
+		att = fresh
+	}
+}
+
+// errAttachmentOwnerChanged reports that the attachment gained or changed an
+// owner while the transaction was waiting, so the locks it took are the wrong
+// ones and the attempt must be retried against the new owner.
+var errAttachmentOwnerChanged = errors.New("attachment owner changed")
+
+func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachment, write func(*db.Queries) error) (db.Attachment, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Attachment{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if att.IssueID.Valid {
+		// A missing issue is not an error here: its cascade took the attachment
+		// with it, which the re-read below reports as pgx.ErrNoRows.
+		if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+			ID:          att.IssueID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Attachment{}, err
+		}
+	}
+	if att.CommentID.Valid {
+		if _, err := qtx.LockLiveComment(ctx, db.LockLiveCommentParams{
+			ID:          att.CommentID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil {
+			return db.Attachment{}, err
+		}
+	}
+	var fresh db.Attachment
+	if att.IssueID.Valid || att.CommentID.Valid {
+		fresh, err = qtx.GetAttachment(ctx, db.GetAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	} else {
+		// Nothing to lock above: take the row itself so it cannot gain an owner
+		// between this read and the write.
+		fresh, err = qtx.LockAttachmentRow(ctx, db.LockAttachmentRowParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	}
+	if err != nil {
+		return db.Attachment{}, err
+	}
+	if fresh.IssueID != att.IssueID || fresh.CommentID != att.CommentID {
+		return fresh, errAttachmentOwnerChanged
+	}
+	if err := write(qtx); err != nil {
+		return db.Attachment{}, err
+	}
+	return fresh, tx.Commit(ctx)
 }
 
 // deleteS3Object removes a single file from S3 by its CDN URL.

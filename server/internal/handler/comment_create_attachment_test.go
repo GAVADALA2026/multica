@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // A comment and the attachments it was posted with are one database outcome
@@ -104,13 +105,14 @@ func TestCreateCommentRollsBackWhenAttachmentLinkFails(t *testing.T) {
 	}
 }
 
-// DeleteAttachment locks the attachment row and then its issue. A comment
-// created with that attachment must take the same order, the attachment and
-// then the issue, or the two close a lock cycle: the create holds the issue
-// (CreateComment's touch) waiting on the attachment, the delete holds the
-// attachment waiting on the issue, and Postgres aborts one of them with 40P01.
-// The holder below plays DeleteAttachment one statement at a time.
-func TestCreateCommentWithAttachmentFollowsDeleteAttachmentLockOrder(t *testing.T) {
+// Every mutation here takes its owners first — the issue, then the comment,
+// then the attachment. A comment created with an attachment takes the issue in
+// its CreateComment statement and only then locks the attachment rows, so it
+// cannot close a cycle with the two writers that reach an attachment through
+// its issue: DeleteAttachment (issue, then the row) and issue teardown (issue,
+// then the rows its cascade removes). The holders below play each of those one
+// statement at a time.
+func TestCreateCommentWithAttachmentFollowsOwnerFirstLockOrder(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -132,10 +134,10 @@ func TestCreateCommentWithAttachmentFollowsDeleteAttachmentLockOrder(t *testing.
 			wantLinked:   0,
 		},
 		{
-			// The holder only locked the row, like an attachment -> issue writer
-			// that commits without removing it: the create proceeds and links it.
+			// The holder took the issue and released it without touching the
+			// attachment: the create proceeds and links it.
 			name:         "attachment kept",
-			holdSQL:      `SELECT id FROM attachment WHERE id = $1 FOR UPDATE`,
+			holdSQL:      `SELECT id FROM attachment WHERE id = $1`,
 			wantCode:     http.StatusCreated,
 			wantComments: 1,
 			wantLinked:   1,
@@ -153,8 +155,12 @@ func TestCreateCommentWithAttachmentFollowsDeleteAttachmentLockOrder(t *testing.
 				t.Fatalf("begin holder: %v", err)
 			}
 			defer holder.Rollback(context.Background())
-			// First half of DeleteAttachment: the attachment row is locked, the
-			// issue not yet touched.
+			// DeleteAttachment's own order: the owner issue, then the row. The
+			// mode matches the issue bump its delete statement performs, which
+			// is what a concurrent create contends with.
+			if _, err := holder.Exec(ctx, `SELECT id FROM issue WHERE id = $1 FOR NO KEY UPDATE`, issueID); err != nil {
+				t.Fatalf("hold issue: %v", err)
+			}
 			if _, err := holder.Exec(ctx, tt.holdSQL, attachmentID); err != nil {
 				t.Fatalf("hold attachment: %v", err)
 			}
@@ -165,15 +171,10 @@ func TestCreateCommentWithAttachmentFollowsDeleteAttachmentLockOrder(t *testing.
 				got = createCommentWithAttachment(t, testHandler, issueID, attachmentID)
 				done <- nil
 			}()
-			waitForCommentMutationLock(t, "LockAttachmentsForCommentLink", done)
+			// The create waits for the issue while holding no attachment lock.
+			waitForCommentMutationLock(t, "CreateComment", done)
 
-			// Second half of DeleteAttachment: bump the issue. Had the create
-			// taken the issue before waiting on the attachment, this is where
-			// the cycle would close.
-			_, holdErr := holder.Exec(ctx, `UPDATE issue SET revision = revision + 1 WHERE id = $1`, issueID)
-			if holdErr == nil {
-				holdErr = holder.Commit(ctx)
-			}
+			holdErr := holder.Commit(ctx)
 			<-done
 			if holdErr != nil {
 				t.Fatalf("attachment delete deadlocked or failed: %v", holdErr)
@@ -186,5 +187,99 @@ func TestCreateCommentWithAttachmentFollowsDeleteAttachmentLockOrder(t *testing.
 				t.Fatalf("attachment linked rows = %d, want %d", n, tt.wantLinked)
 			}
 		})
+	}
+}
+
+// The symmetric side: issue teardown holds the issue and then reaches the
+// attachment through the issue_id cascade. A create that took the attachment
+// first would deadlock with it; taking the issue first means the create simply
+// waits, and then finds the issue gone.
+func TestCreateCommentWithAttachmentDoesNotDeadlockWithIssueTeardown(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	issueID := dbfx.Issue(t, "comment attachment vs issue teardown")
+	attachmentID := unlinkedIssueAttachment(t, issueID)
+
+	teardown, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin issue teardown: %v", err)
+	}
+	defer teardown.Rollback(context.Background())
+	qtx := testHandler.Queries.WithTx(teardown)
+	if _, err := qtx.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+		ID:          parseUUID(issueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	}); err != nil {
+		t.Fatalf("lock issue for teardown: %v", err)
+	}
+
+	var got *testutil.Response
+	done := make(chan error, 1)
+	go func() {
+		got = createCommentWithAttachment(t, testHandler, issueID, attachmentID)
+		done <- nil
+	}()
+	waitForCommentMutationLock(t, "CreateComment", done)
+
+	// The cascade reaches the attachment the blocked create asked for.
+	deleteErr := qtx.DeleteIssue(ctx, db.DeleteIssueParams{
+		ID:          parseUUID(issueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if deleteErr == nil {
+		deleteErr = teardown.Commit(ctx)
+	}
+	<-done
+	if deleteErr != nil {
+		t.Fatalf("issue teardown deadlocked or failed: %v", deleteErr)
+	}
+	got.Want(http.StatusNotFound)
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 0 {
+		t.Fatalf("deleted issue kept %d comments", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1`, attachmentID); n != 0 {
+		t.Fatalf("deleted issue kept its attachment")
+	}
+}
+
+// DeleteAttachment itself must take the issue before the attachment row, so it
+// queues behind issue teardown instead of deadlocking with it.
+func TestDeleteAttachmentTakesTheIssueBeforeTheRow(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	issueID := dbfx.Issue(t, "attachment delete vs issue lock")
+	attachmentID := unlinkedIssueAttachment(t, issueID)
+
+	holder, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin holder: %v", err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err := holder.Exec(ctx, `SELECT id FROM issue WHERE id = $1 FOR UPDATE`, issueID); err != nil {
+		t.Fatalf("hold issue: %v", err)
+	}
+
+	var got *testutil.Response
+	done := make(chan error, 1)
+	go func() {
+		req := newRequest(http.MethodDelete, "/api/attachments/"+attachmentID, nil)
+		got = testutil.Call(t, testHandler.DeleteAttachment, withURLParam(req, "id", attachmentID))
+		done <- nil
+	}()
+	waitForCommentMutationLock(t, "LockIssueForAttachmentWrite", done)
+
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatalf("release issue: %v", err)
+	}
+	<-done
+	got.Want(http.StatusNoContent)
+	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1`, attachmentID); n != 0 {
+		t.Fatalf("attachment survived its delete")
 	}
 }

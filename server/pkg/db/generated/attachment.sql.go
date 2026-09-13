@@ -1123,6 +1123,44 @@ func (q *Queries) ListSourceContextIssueAttachments(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const lockAttachmentRow = `-- name: LockAttachmentRow :one
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id, task_id, source_context_id FROM attachment
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockAttachmentRowParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Locks an attachment that has no owner to lock instead — a chat, avatar or
+// still-unbound upload. Reading it under its own lock is what keeps it from
+// gaining an owner between the read and the write, which would put the write
+// back in the attachment -> issue order issue teardown deadlocks with.
+func (q *Queries) LockAttachmentRow(ctx context.Context, arg LockAttachmentRowParams) (Attachment, error) {
+	row := q.db.QueryRow(ctx, lockAttachmentRow, arg.ID, arg.WorkspaceID)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.UploaderType,
+		&i.UploaderID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+		&i.ChatSessionID,
+		&i.ChatMessageID,
+		&i.TaskID,
+		&i.SourceContextID,
+	)
+	return i, err
+}
+
 const lockAttachmentsForCommentLink = `-- name: LockAttachmentsForCommentLink :many
 SELECT id FROM attachment
 WHERE workspace_id = $1
@@ -1140,12 +1178,12 @@ type LockAttachmentsForCommentLinkParams struct {
 	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
-// CreateComment binds attachments and touches the owner issue in one
-// transaction. Lock the eligible attachment rows first so the mutation takes
-// the same attachment -> issue order as DeleteAttachment (and
-// LockAttachmentsForIssueLink) and cannot deadlock with it. Returns the ids
-// still eligible, so the caller can refuse before creating the comment when a
-// requested attachment was deleted while this waited.
+// CreateComment binds attachments in the transaction that created the comment,
+// after the CreateComment statement has taken the issue row: issue -> comment
+// -> child, the order every owner-first mutation here uses. This pins the
+// requested set under that lock and returns the ids still eligible, so the
+// caller can refuse before the comment exists when a requested attachment was
+// deleted while the issue lock was contended.
 func (q *Queries) LockAttachmentsForCommentLink(ctx context.Context, arg LockAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, lockAttachmentsForCommentLink, arg.WorkspaceID, arg.IssueID, arg.AttachmentIds)
 	if err != nil {

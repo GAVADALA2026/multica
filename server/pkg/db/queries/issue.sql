@@ -95,6 +95,16 @@ SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
+-- name: LockIssueForAttachmentWrite :one
+-- Owner-first guard for a write to one of an issue's attachments. Key-share is
+-- enough: it conflicts with the issue delete's FOR UPDATE, so a teardown that
+-- reaches the same attachment rows through the issue_id cascade either waits
+-- for this write or is waited on — never both, which is what the opposite
+-- order (attachment, then its issue) produced.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
 -- name: LockIssueForDescriptionUpdate :one
 -- Serialize field-baseline checks and combined attachment binding on the
 -- owner row. The handler merges channel media that landed after the editor's

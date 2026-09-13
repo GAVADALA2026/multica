@@ -1426,6 +1426,29 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueForAttachmentWrite = `-- name: LockIssueForAttachmentWrite :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockIssueForAttachmentWriteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Owner-first guard for a write to one of an issue's attachments. Key-share is
+// enough: it conflicts with the issue delete's FOR UPDATE, so a teardown that
+// reaches the same attachment rows through the issue_id cascade either waits
+// for this write or is waited on — never both, which is what the opposite
+// order (attachment, then its issue) produced.
+func (q *Queries) LockIssueForAttachmentWrite(ctx context.Context, arg LockIssueForAttachmentWriteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForAttachmentWrite, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
