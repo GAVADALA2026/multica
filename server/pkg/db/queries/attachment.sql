@@ -192,6 +192,22 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 ORDER BY id
 FOR UPDATE;
 
+-- name: LockAttachmentsForCommentLink :many
+-- CreateComment binds attachments and touches the owner issue in one
+-- transaction. Lock the eligible attachment rows first so the mutation takes
+-- the same attachment -> issue order as DeleteAttachment (and
+-- LockAttachmentsForIssueLink) and cannot deadlock with it. Returns the ids
+-- still eligible, so the caller can refuse before creating the comment when a
+-- requested attachment was deleted while this waited.
+SELECT id FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id = sqlc.arg(issue_id)
+  AND comment_id IS NULL
+  AND source_context_id IS NULL
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+ORDER BY id
+FOR UPDATE;
+
 -- name: LinkAttachmentsToIssue :one
 WITH linked AS (
   UPDATE attachment

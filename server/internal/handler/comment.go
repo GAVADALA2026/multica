@@ -1870,6 +1870,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// (#8296 review). Inside this transaction the row is not yet visible to
 		// a delete, so there is no window at all. Mirrors the attachment-set
 		// edit in UpdateComment.
+		//
+		// The attachments are locked before anything touches the issue row.
+		// DeleteAttachment deletes the row and then bumps its issue, so every
+		// attachment -> issue mutation takes that order (LockAttachmentsForIssueLink
+		// does the same for issue edits). CreateComment touches the issue; had the
+		// link been the first statement to lock the attachments, the create would
+		// hold the issue while waiting on an attachment that a concurrent delete
+		// holds while waiting on the issue, and Postgres would abort one side.
+		// Locking first also pins the requested set: an attachment deleted while
+		// this waited is refused here, before any comment exists, rather than the
+		// comment committing without it.
 		tx, beginErr := h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
 			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", beginErr, "issue_id", issueID)...)
@@ -1878,6 +1889,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		missing, lockErr := lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
+		if lockErr != nil {
+			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", lockErr, "issue_id", issueID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create comment: "+lockErr.Error())
+			return
+		}
+		if missing.Valid {
+			writeError(w, http.StatusConflict, "attachment "+uuidToString(missing)+" is no longer available")
+			return
+		}
 		created, err = qtx.CreateComment(r.Context(), createParams)
 		if err == nil {
 			err = qtx.LinkAttachmentsToComment(r.Context(), db.LinkAttachmentsToCommentParams{
@@ -3625,6 +3646,32 @@ type commentDeletion struct {
 	// after commit.
 	AttachmentURLs []string
 	IssueRevision  int64
+}
+
+// lockCommentAttachments locks the unbound issue attachments a comment is
+// being created with and reports the first requested id that is not among
+// them: never eligible, or deleted while the lock waited. It must be the first
+// statement in the transaction to touch any row; see CreateComment for the
+// attachment -> issue lock order it exists to keep.
+func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids []pgtype.UUID) (missing pgtype.UUID, err error) {
+	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
+		WorkspaceID:   workspaceID,
+		IssueID:       issueID,
+		AttachmentIds: ids,
+	})
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	have := make(map[pgtype.UUID]struct{}, len(locked))
+	for _, id := range locked {
+		have[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := have[id]; !ok {
+			return id, nil
+		}
+	}
+	return pgtype.UUID{}, nil
 }
 
 // withLiveCommentLock runs write in a transaction that first locks the

@@ -1123,6 +1123,49 @@ func (q *Queries) ListSourceContextIssueAttachments(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const lockAttachmentsForCommentLink = `-- name: LockAttachmentsForCommentLink :many
+SELECT id FROM attachment
+WHERE workspace_id = $1
+  AND issue_id = $2
+  AND comment_id IS NULL
+  AND source_context_id IS NULL
+  AND id = ANY($3::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+type LockAttachmentsForCommentLinkParams struct {
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// CreateComment binds attachments and touches the owner issue in one
+// transaction. Lock the eligible attachment rows first so the mutation takes
+// the same attachment -> issue order as DeleteAttachment (and
+// LockAttachmentsForIssueLink) and cannot deadlock with it. Returns the ids
+// still eligible, so the caller can refuse before creating the comment when a
+// requested attachment was deleted while this waited.
+func (q *Queries) LockAttachmentsForCommentLink(ctx context.Context, arg LockAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockAttachmentsForCommentLink, arg.WorkspaceID, arg.IssueID, arg.AttachmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAttachmentsForIssueLink = `-- name: LockAttachmentsForIssueLink :many
 SELECT id FROM attachment
 WHERE workspace_id = $1

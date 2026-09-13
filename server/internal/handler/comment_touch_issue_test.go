@@ -452,7 +452,7 @@ func waitForCommentMutationLock(t *testing.T, queryName string, done <-chan erro
 				  AND wait_event_type = 'Lock'
 				  AND query LIKE '%' || $1 || '%'
 			)
-		`, "-- name: "+queryName+" :one").Scan(&waiting); err != nil {
+		`, "-- name: "+queryName+" :").Scan(&waiting); err != nil {
 			t.Fatalf("observe blocked %s: %v", queryName, err)
 		}
 		if waiting {
