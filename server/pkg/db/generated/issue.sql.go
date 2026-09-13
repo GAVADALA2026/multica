@@ -1429,7 +1429,7 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 const lockIssueForAttachmentWrite = `-- name: LockIssueForAttachmentWrite :one
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
-FOR KEY SHARE
+FOR NO KEY UPDATE
 `
 
 type LockIssueForAttachmentWriteParams struct {
@@ -1437,11 +1437,17 @@ type LockIssueForAttachmentWriteParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Owner-first guard for a write to one of an issue's attachments. Key-share is
-// enough: it conflicts with the issue delete's FOR UPDATE, so a teardown that
-// reaches the same attachment rows through the issue_id cascade either waits
-// for this write or is waited on — never both, which is what the opposite
-// order (attachment, then its issue) produced.
+// Owner-first guard for a write to one of an issue's attachments: take the
+// issue before the attachment row, so a writer that reaches the same row
+// through the issue — teardown's issue_id cascade, or the revision bump this
+// write itself performs — either waits for this transaction or is waited on,
+// never both.
+//
+// FOR NO KEY UPDATE, the mode of that revision bump, is the weakest mode that
+// actually serializes issue writers. FOR KEY SHARE is NOT enough: it is
+// compatible with FOR NO KEY UPDATE (see LockLiveComment), so a concurrent
+// CreateComment would take the issue anyway, wait on the attachment this
+// transaction holds, and deadlock with its bump.
 func (q *Queries) LockIssueForAttachmentWrite(ctx context.Context, arg LockIssueForAttachmentWriteParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockIssueForAttachmentWrite, arg.ID, arg.WorkspaceID)
 	var id pgtype.UUID
