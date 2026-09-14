@@ -81,9 +81,10 @@ the same runner rather than deleting ledger rows or bypassing readiness.
 
 Release sequence:
 
-1. Review PR #8405 (MUL-7364) together with phase 1. Phase 1 builds on its GC
-   lifecycle protocol and adds the legacy `cancelled` spelling to its recovery
-   prefilter. Both are required before permitting data conversion.
+1. Phase 1 is based on main, including the GC/recovery fix merged in PR #8405
+   (MUL-7364). It builds on that GC lifecycle protocol and adds the legacy
+   `cancelled` spelling to its recovery prefilter. Both are required before
+   permitting data conversion.
 2. Apply the matching runner through 478, then finish the agreed full backend
    replacement. Mixed storage is supported; long-lived old backend instances
    and application rollback are not part of the agreed fix-forward policy.
