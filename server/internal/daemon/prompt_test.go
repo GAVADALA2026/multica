@@ -1100,26 +1100,31 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "across all threads") {
 		t.Errorf("hint must state the count is issue-wide, got:\n%s", out)
 	}
-	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --compact --output json") {
-		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
+	// ONE read, and it is the issue-wide delta the server already computed
+	// (MUL-7344): `--since` without `--thread` returns every comment created
+	// after the anchor in every thread, so it IS the scan's answer.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --compact --output json") {
+		t.Errorf("hint must point at the issue-wide --since delta read, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--tail 30") {
-		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
+	if !strings.Contains(out, "reading it is the scan workflow step 2 requires") {
+		t.Errorf("hint must say the delta read answers the scan, got:\n%s", out)
 	}
-	// The scan is phrased as a flag swap on the thread command (MUL-5721
-	// OPT-1) instead of a second full command that restated the UUID and
-	// anchor, and it is pointed at as the wide read step 2 requires.
-	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --since ...`") {
-		t.Errorf("hint must hand over the scan as the wide read, got:\n%s", out)
+	// The full-thread read stays available for the reply itself, on --tail 30
+	// (never `--thread ... --since ...`, which drops the thread root).
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --compact --output json") {
+		t.Errorf("hint must offer the full-thread (--tail 30) read, got:\n%s", out)
+	}
+	// The scan the delta read replaces must not also be handed over.
+	if strings.Contains(out, "--roots-only --summary") {
+		t.Errorf("warm hint must not hand over the roots scan alongside the delta read, got:\n%s", out)
+	}
+	if strings.Contains(out, "--thread thread-root-1 --since") {
+		t.Errorf("warm hint must not combine --thread with --since (drops the thread root), got:\n%s", out)
 	}
 	for _, banned := range []string{"blindly", "Only if you need", "rerun it without `--thread`"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("warm hint must not make the wide read optional (%q), got:\n%s", banned, out)
 		}
-	}
-	if strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("warm hint must not render a second full issue-wide command (MUL-5721 OPT-1), got:\n%s", out)
 	}
 	// The old cursor-heavy paragraph must be gone.
 	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
