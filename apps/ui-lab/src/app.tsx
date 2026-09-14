@@ -34,6 +34,8 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import {
   type ButtonScale,
+  isColorToken,
+  type ColorToken,
   changeCount,
   editHistory,
   emptyDraft,
@@ -47,6 +49,7 @@ import {
 import { Inspector } from "./inspector";
 import {
   playbackSpeeds,
+  isColorSelection,
   dialogActions,
   type DialogCommand,
   type PreviewSettings,
@@ -65,12 +68,16 @@ function PreviewFrame({
   scene,
   buttonScale,
   original = false,
+  selectedColor,
+  onColorSelect,
 }: {
   draft: Draft;
   theme: Theme;
   scene: Scene;
   buttonScale: ButtonScale;
   original?: boolean;
+  selectedColor: ColorToken;
+  onColorSelect: (token: string) => void;
 }) {
   const { t, i18n } = useTranslation("uiLab");
   const locale: LabLocale = i18n.language === "zh-Hans" ? "zh" : "en";
@@ -86,12 +93,20 @@ function PreviewFrame({
         buttonScale,
         locale,
         playbackSpeed,
+        selectedColor,
       } satisfies PreviewSettings,
       location.origin,
     );
-  }, [draft, theme, scene, buttonScale, locale, playbackSpeed]);
+  }, [draft, theme, scene, buttonScale, locale, playbackSpeed, selectedColor]);
   useEffect(() => {
     const onReady = (event: MessageEvent<{ type?: string }>) => {
+      if (
+        event.origin === location.origin &&
+        event.source === ref.current?.contentWindow &&
+        scene === "colors" &&
+        isColorSelection(event.data)
+      )
+        onColorSelect(event.data.token);
       if (
         event.origin === location.origin &&
         event.source === ref.current?.contentWindow &&
@@ -102,7 +117,7 @@ function PreviewFrame({
     window.addEventListener("message", onReady);
     send();
     return () => window.removeEventListener("message", onReady);
-  }, [send]);
+  }, [send, scene, onColorSelect]);
   return (
     <section className="preview-frame">
       <div className="frame-toolbar">
@@ -212,7 +227,13 @@ function Workbench({
     value: number;
   } | null>(null);
   const [colorPreview, setColorPreview] = useState<string | null>(null);
-  const [color, setColor] = useState<string>("--brand");
+  const [color, setColor] = useState<ColorToken>("--brand");
+  const selectColor = useCallback((key: string) => {
+    if (!isColorToken(key)) return;
+    setColorPreview(null);
+    setNumberPreview(null);
+    setColor(key);
+  }, []);
   const [designs, setDesigns] = useState<SavedDesign[]>(session.designs);
   const [saveOpen, setSaveOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -484,6 +505,8 @@ function Workbench({
                   theme={theme}
                   scene={scene}
                   buttonScale={buttonScale}
+                  selectedColor={color}
+                  onColorSelect={selectColor}
                   original
                 />
               )}
@@ -492,6 +515,8 @@ function Workbench({
                 theme={theme}
                 scene={scene}
                 buttonScale={buttonScale}
+                selectedColor={color}
+                onColorSelect={selectColor}
                 original={original}
               />
             </div>
@@ -593,11 +618,7 @@ function Workbench({
             setNumberPreview({ key, value });
           }}
           onNumberCancel={() => setNumberPreview(null)}
-          onColorSelect={(key) => {
-            setColorPreview(null);
-            setNumberPreview(null);
-            setColor(key);
-          }}
+          onColorSelect={selectColor}
           onColorPreview={setColorPreview}
           onColorCancel={() => setColorPreview(null)}
           onExport={() => setExportOpen(true)}

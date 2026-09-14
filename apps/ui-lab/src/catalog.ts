@@ -19,14 +19,8 @@ export const catalog: readonly CatalogModule[] = [
   {
     id: "foundations",
     pages: [
-      ...planned(
-        "colors",
-        "typography",
-        "spacing",
-        "radius",
-        "shadows",
-        "icons",
-      ),
+      { id: "colors", content: { kind: "preview", scene: "colors" } },
+      ...planned("typography", "spacing", "radius", "shadows", "icons"),
       { id: "motion", content: { kind: "preview", scene: "motion" } },
     ],
   },

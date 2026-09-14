@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { HexColorPicker } from "react-colorful";
 import { Check, ChevronDown, Copy, RotateCcw, Search } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -10,7 +10,8 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { colorToHex, hexToOklch, isSrgb } from "./color";
-import { colorTokens, parseColor } from "./tokens";
+import { NumberField } from "./number-field";
+import { colorTokens, parseColor, colorAlpha, withColorAlpha } from "./tokens";
 
 const presets = [
   "#FFFFFF",
@@ -34,6 +35,7 @@ export function ColorEditor({
   onTokenChange,
   onPreview,
   onCommit,
+  onCancel,
 }: {
   showRoleSelector?: boolean;
   token: string;
@@ -44,6 +46,7 @@ export function ColorEditor({
   onTokenChange: (token: string) => void;
   onPreview: (color: string) => void;
   onCommit: (color: string) => void;
+  onCancel: () => void;
 }) {
   const { t } = useTranslation("uiLab");
   const [open, setOpen] = useState(false);
@@ -54,12 +57,15 @@ export function ColorEditor({
     null,
   );
   const errorId = useId();
+  const hexDirty = useRef(false);
   const hex = colorToHex(value);
   const channels = parseColor(value);
+  const alpha = colorAlpha(value);
   const label = t(
     ($) => $.tokens.labels[colorTokens.find(([key]) => key === token)![1]],
   );
   useEffect(() => {
+    hexDirty.current = false;
     setHexInput(hex);
     setError(false);
   }, [hex]);
@@ -69,15 +75,17 @@ export function ColorEditor({
     return () => clearTimeout(timeout);
   }, [copyState]);
   const commitHex = () => {
+    if (!hexDirty.current) return;
     const next = hexToOklch(hexInput);
     if (!next) {
       setError(true);
       return;
     }
+    hexDirty.current = false;
     setError(false);
     setHexInput(colorToHex(next));
     // Focusing/blurring an approximate HEX display must not rewrite a wide-gamut token.
-    if (colorToHex(next) !== hex) onCommit(next);
+    if (colorToHex(next) !== hex) onCommit(withColorAlpha(next, alpha));
   };
   return (
     <div className="color-editor">
@@ -164,8 +172,12 @@ export function ColorEditor({
       <div className="color-picker-panel">
         <HexColorPicker
           color={hex}
-          onChange={(next) => onPreview(hexToOklch(next)!)}
-          onChangeEnd={(next) => onCommit(hexToOklch(next)!)}
+          onChange={(next) =>
+            onPreview(withColorAlpha(hexToOklch(next)!, alpha))
+          }
+          onChangeEnd={(next) =>
+            onCommit(withColorAlpha(hexToOklch(next)!, alpha))
+          }
           aria-label={t(($) => $.color.controls.picker)}
         />
       </div>
@@ -180,6 +192,7 @@ export function ColorEditor({
             aria-invalid={!!error}
             aria-describedby={error ? errorId : undefined}
             onChange={(event) => {
+              hexDirty.current = true;
               setHexInput(event.target.value);
               setError(false);
             }}
@@ -190,6 +203,7 @@ export function ColorEditor({
                 commitHex();
               }
               if (event.key === "Escape") {
+                hexDirty.current = false;
                 setHexInput(hex);
                 setError(false);
               }
@@ -226,6 +240,23 @@ export function ColorEditor({
       {!isSrgb(value) && (
         <p className="color-feedback">{t(($) => $.color.feedback.gamut)}</p>
       )}
+      <div className="color-opacity">
+        <NumberField
+          label={t(($) => $.color.controls.opacity)}
+          symbol="A"
+          token={token}
+          min={0}
+          max={100}
+          step={1}
+          unit="%"
+          value={Number((alpha * 100).toFixed(3))}
+          modified={alpha !== colorAlpha(original)}
+          onPreview={(next) => onPreview(withColorAlpha(value, next / 100))}
+          onCommit={(next) => onCommit(withColorAlpha(value, next / 100))}
+          onCancel={onCancel}
+          onReset={() => onCommit(withColorAlpha(value, colorAlpha(original)))}
+        />
+      </div>
       <div className="color-comparison">
         <button
           type="button"
@@ -265,7 +296,7 @@ export function ColorEditor({
             title={preset}
             aria-pressed={hex === preset}
             style={{ background: preset }}
-            onClick={() => onCommit(hexToOklch(preset)!)}
+            onClick={() => onCommit(withColorAlpha(hexToOklch(preset)!, alpha))}
           />
         ))}
       </div>
@@ -298,7 +329,7 @@ export function ColorEditor({
                 onChange={(event) => {
                   const next = [...channels];
                   next[index] = Number(event.target.value);
-                  onCommit(`oklch(${next.join(" ")})`);
+                  onCommit(withColorAlpha(`oklch(${next.join(" ")})`, alpha));
                 }}
               />
             </label>

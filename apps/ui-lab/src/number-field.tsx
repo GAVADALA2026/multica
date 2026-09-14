@@ -34,6 +34,7 @@ export function NumberField({
   const { t } = useTranslation("uiLab");
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
+  const dirty = useRef(false);
   const drag = useRef<{
     x: number;
     value: number;
@@ -45,15 +46,18 @@ export function NumberField({
   const clamp = (n: number) =>
     Number(Math.max(min, Math.min(max, n)).toFixed(3));
   useEffect(() => {
+    dirty.current = false;
     setText(String(value));
     setInvalid(false);
   }, [value]);
   const commit = () => {
+    if (!dirty.current) return;
     const n = Number(text.trim());
     if (!text.trim() || !Number.isFinite(n)) {
       setInvalid(true);
       return;
     }
+    dirty.current = false;
     const next = clamp(n);
     setText(String(next));
     setInvalid(false);
@@ -151,6 +155,7 @@ export function NumberField({
           value={text}
           onFocus={(event) => event.target.select()}
           onChange={(event) => {
+            dirty.current = true;
             setText(event.target.value);
             setInvalid(false);
           }}
@@ -163,6 +168,7 @@ export function NumberField({
             }
             if (event.key === "Escape") {
               event.preventDefault();
+              dirty.current = false;
               setText(String(value));
               setInvalid(false);
               onCancel();
@@ -175,12 +181,14 @@ export function NumberField({
                     step *
                     (event.shiftKey ? 10 : event.altKey ? 0.1 : 1),
               );
+              dirty.current = false;
               setText(String(next));
               onCommit(next);
             }
             if (event.key === "Home" || event.key === "End") {
               event.preventDefault();
               const next = event.key === "Home" ? min : max;
+              dirty.current = false;
               setText(String(next));
               onCommit(next);
             }

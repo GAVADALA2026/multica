@@ -1,6 +1,6 @@
 import { TokenChanges } from "./token-changes";
 import { useTranslation } from "react-i18next";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ChevronDown,
@@ -30,6 +30,7 @@ import {
   buttonTokens,
   changeCount,
   colorTokens,
+  colorAlpha,
   sizeTokens,
   sizeValue,
   tokenValue,
@@ -103,6 +104,9 @@ export function Inspector({
   const { t } = useTranslation("uiLab");
   const [tab, setTab] = useState("design");
   const [openColor, setOpenColor] = useState<string | null>(null);
+  useEffect(() => {
+    if (scene === "colors") setTab("design");
+  }, [color, scene]);
   const count = changeCount(draft);
   const reset = (scope: Scope, key: string) =>
     onEdit(updateToken(draft, scope, key, baseline[scope][key]!));
@@ -187,7 +191,11 @@ export function Inspector({
               className="property-color-chip"
               style={{ background: value }}
             />
-            <code>{colorToHex(value).slice(1)}</code>
+            <code>
+              {colorToHex(value).slice(1)}
+              {colorAlpha(value) < 1 &&
+                ` · ${Math.round(colorAlpha(value) * 100)}%`}
+            </code>
             {draft[theme][key] && (
               <span
                 className="property-modified"
@@ -238,6 +246,7 @@ export function Inspector({
             )}
             onTokenChange={onColorSelect}
             onPreview={onColorPreview}
+            onCancel={onColorCancel}
             onCommit={(next) => onEdit(updateToken(draft, theme, key, next))}
           />
         </PopoverContent>
@@ -283,184 +292,220 @@ export function Inspector({
           </Button>
         </div>
         <TabsContent value="design" className="property-tab-panel">
-          <div className="property-object">
-            <div>
-              <Component className="size-4" />
-              <strong>
-                {scene === "button"
-                  ? "Button"
-                  : scene === "dialog" || scene === "motion"
-                    ? "Dialog"
-                    : t(($) => $.inspector.panel.system)}
-              </strong>
-            </div>
-          </div>
-          {scene === "button" && (
-            <PropertySection
-              title={t(($) => $.inspector.sections.size)}
-              scope={t(($) => $.inspector.scope.component)}
-              actions={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t(($) => $.inspector.changes.resetButton)}
-                  title={t(($) => $.inspector.changes.resetButtonTitle)}
-                  disabled={
-                    !buttonTokens.some((token) => draft.shared[token.key])
-                  }
-                  onClick={() =>
-                    onEdit({
-                      ...draft,
-                      shared: Object.fromEntries(
-                        Object.entries(draft.shared).filter(
-                          ([key]) => !key.startsWith("--button-"),
-                        ),
-                      ),
-                    })
+          {scene === "colors" ? (
+            <section
+              className="palette-editor-section"
+              aria-label={t(($) => $.palette.page.selected)}
+            >
+              <div className="palette-editor-theme">
+                {t(($) => $.lab.theme[theme])}
+              </div>
+              <ColorEditor
+                key={`${theme}:${color}`}
+                token={color}
+                value={currentColor}
+                original={baseline[theme][color]!}
+                modified={!!draft[theme][color]}
+                values={Object.fromEntries(
+                  colorTokens.map(([token]) => [
+                    token,
+                    tokenValue(draft, theme, token),
+                  ]),
+                )}
+                onTokenChange={onColorSelect}
+                onPreview={onColorPreview}
+                onCancel={onColorCancel}
+                onCommit={(value) =>
+                  onEdit(updateToken(draft, theme, color, value))
+                }
+              />
+            </section>
+          ) : (
+            <>
+              <div className="property-object">
+                <div>
+                  <Component className="size-4" />
+                  <strong>
+                    {scene === "button"
+                      ? "Button"
+                      : scene === "dialog" || scene === "motion"
+                        ? "Dialog"
+                        : t(($) => $.inspector.panel.system)}
+                  </strong>
+                </div>
+              </div>
+              {scene === "button" && (
+                <PropertySection
+                  title={t(($) => $.inspector.sections.size)}
+                  scope={t(($) => $.inspector.scope.component)}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t(($) => $.inspector.changes.resetButton)}
+                      title={t(($) => $.inspector.changes.resetButtonTitle)}
+                      disabled={
+                        !buttonTokens.some((token) => draft.shared[token.key])
+                      }
+                      onClick={() =>
+                        onEdit({
+                          ...draft,
+                          shared: Object.fromEntries(
+                            Object.entries(draft.shared).filter(
+                              ([key]) => !key.startsWith("--button-"),
+                            ),
+                          ),
+                        })
+                      }
+                    >
+                      <RotateCcw />
+                    </Button>
                   }
                 >
-                  <RotateCcw />
-                </Button>
-              }
-            >
-              <div
-                className="property-segments"
-                role="group"
-                aria-label={t(($) => $.inspector.sections.adjustSize)}
-              >
-                {buttonScales.map((scale) => (
-                  <button
-                    key={scale}
-                    type="button"
-                    aria-label={t(($) => $.inspector.actions.size, {
-                      size: scale,
-                    })}
-                    aria-pressed={buttonScale === scale}
-                    onClick={() => onScaleChange(scale)}
+                  <div
+                    className="property-segments"
+                    role="group"
+                    aria-label={t(($) => $.inspector.sections.adjustSize)}
                   >
-                    {scale === "default"
-                      ? "M"
-                      : scale === "sm"
-                        ? "S"
-                        : scale.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-              <div className="property-grid">
-                {buttonTokens
-                  .filter((token) => token.scale === buttonScale)
-                  .map(number)}
-              </div>
-            </PropertySection>
-          )}
-          {(scene === "dialog" || scene === "motion") && (
-            <PropertySection
-              title={t(($) => $.motion.controls.title)}
-              scope="Dialog"
-            >
-              <div className="property-grid">{motionTokens.map(number)}</div>
-              {easingTokens.map((token) => (
-                <div className="motion-easing" key={token.key}>
-                  <span>{t(($) => $.tokens.labels[token.label])}</span>
-                  <select
-                    aria-label={t(($) => $.tokens.labels[token.label])}
-                    value={tokenValue(draft, "shared", token.key)}
-                    onChange={(event) =>
-                      onEdit(
-                        updateToken(
-                          draft,
-                          "shared",
-                          token.key,
-                          event.target.value,
-                        ),
-                      )
-                    }
-                  >
-                    {motionEasings.map((easing) => (
-                      <option key={easing.value} value={easing.value}>
-                        {t(($) => $.motion.easing[easing.label])}
-                      </option>
+                    {buttonScales.map((scale) => (
+                      <button
+                        key={scale}
+                        type="button"
+                        aria-label={t(($) => $.inspector.actions.size, {
+                          size: scale,
+                        })}
+                        aria-pressed={buttonScale === scale}
+                        onClick={() => onScaleChange(scale)}
+                      >
+                        {scale === "default"
+                          ? "M"
+                          : scale === "sm"
+                            ? "S"
+                            : scale.toUpperCase()}
+                      </button>
                     ))}
-                  </select>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    disabled={!draft.shared[token.key]}
-                    aria-label={t(($) => $.inspector.actions.restore, {
-                      key: token.key,
-                      scope: t(($) => $.inspector.scope.shared),
-                    })}
-                    onClick={() => reset("shared", token.key)}
-                  >
-                    <RotateCcw />
-                  </Button>
+                  </div>
+                  <div className="property-grid">
+                    {buttonTokens
+                      .filter((token) => token.scale === buttonScale)
+                      .map(number)}
+                  </div>
+                </PropertySection>
+              )}
+              {(scene === "dialog" || scene === "motion") && (
+                <PropertySection
+                  title={t(($) => $.motion.controls.title)}
+                  scope="Dialog"
+                >
+                  <div className="property-grid">
+                    {motionTokens.map(number)}
+                  </div>
+                  {easingTokens.map((token) => (
+                    <div className="motion-easing" key={token.key}>
+                      <span>{t(($) => $.tokens.labels[token.label])}</span>
+                      <select
+                        aria-label={t(($) => $.tokens.labels[token.label])}
+                        value={tokenValue(draft, "shared", token.key)}
+                        onChange={(event) =>
+                          onEdit(
+                            updateToken(
+                              draft,
+                              "shared",
+                              token.key,
+                              event.target.value,
+                            ),
+                          )
+                        }
+                      >
+                        {motionEasings.map((easing) => (
+                          <option key={easing.value} value={easing.value}>
+                            {t(($) => $.motion.easing[easing.label])}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        disabled={!draft.shared[token.key]}
+                        aria-label={t(($) => $.inspector.actions.restore, {
+                          key: token.key,
+                          scope: t(($) => $.inspector.scope.shared),
+                        })}
+                        onClick={() => reset("shared", token.key)}
+                      >
+                        <RotateCcw />
+                      </Button>
+                    </div>
+                  ))}
+                </PropertySection>
+              )}
+              <PropertySection
+                title={t(($) => $.inspector.sections.appearance)}
+                scope={t(($) => $.inspector.scope.global)}
+              >
+                <div className="property-grid">
+                  {sizeTokens
+                    .filter((token) => token.group === "radius")
+                    .map(number)}
+                  <div className="property-radius-preview" aria-hidden="true">
+                    <span
+                      style={{
+                        borderRadius: sizeValue(
+                          tokenValue(previewDraft, "shared", "--radius"),
+                        ),
+                      }}
+                    />
+                  </div>
                 </div>
-              ))}
-            </PropertySection>
-          )}
-          <PropertySection
-            title={t(($) => $.inspector.sections.appearance)}
-            scope={t(($) => $.inspector.scope.global)}
-          >
-            <div className="property-grid">
-              {sizeTokens
-                .filter((token) => token.group === "radius")
-                .map(number)}
-              <div className="property-radius-preview" aria-hidden="true">
-                <span
-                  style={{
-                    borderRadius: sizeValue(
-                      tokenValue(previewDraft, "shared", "--radius"),
-                    ),
-                  }}
-                />
-              </div>
-            </div>
-          </PropertySection>
-          <PropertySection
-            title={t(($) => $.inspector.sections.colors)}
-            scope={t(($) => $.inspector.scope.theme, {
-              theme: t(($) => $.lab.theme[theme]),
-            })}
-          >
-            <div className="property-colors">
-              {colorTokens
-                .filter(([key]) => prominent.includes(key))
-                .map(colorRow)}
-            </div>
-            <details className="property-more-colors">
-              <summary>
-                {t(($) => $.inspector.sections.moreColors)}
-                <ChevronDown className="size-3" />
-              </summary>
-              <div className="property-colors">
-                {colorTokens
-                  .filter(([key]) => !prominent.includes(key))
-                  .map(colorRow)}
-              </div>
-            </details>
-          </PropertySection>
-          <PropertySection
-            title={t(($) => $.inspector.sections.type)}
-            scope={t(($) => $.inspector.scope.global)}
-          >
-            <div className="property-grid">
-              {sizeTokens.filter((token) => token.group === "type").map(number)}
-            </div>
-          </PropertySection>
-          {(scene === "list" ||
-            scene === "detail" ||
-            scene === "components") && (
-            <PropertySection
-              title={t(($) => $.inspector.sections.density)}
-              scope={t(($) => $.inspector.scope.global)}
-            >
-              <div className="property-grid">
-                {sizeTokens
-                  .filter((token) => token.group === "density")
-                  .map(number)}
-              </div>
-            </PropertySection>
+              </PropertySection>
+              <PropertySection
+                title={t(($) => $.inspector.sections.colors)}
+                scope={t(($) => $.inspector.scope.theme, {
+                  theme: t(($) => $.lab.theme[theme]),
+                })}
+              >
+                <div className="property-colors">
+                  {colorTokens
+                    .filter(([key]) => prominent.includes(key))
+                    .map(colorRow)}
+                </div>
+                <details className="property-more-colors">
+                  <summary>
+                    {t(($) => $.inspector.sections.moreColors)}
+                    <ChevronDown className="size-3" />
+                  </summary>
+                  <div className="property-colors">
+                    {colorTokens
+                      .filter(([key]) => !prominent.includes(key))
+                      .map(colorRow)}
+                  </div>
+                </details>
+              </PropertySection>
+              <PropertySection
+                title={t(($) => $.inspector.sections.type)}
+                scope={t(($) => $.inspector.scope.global)}
+              >
+                <div className="property-grid">
+                  {sizeTokens
+                    .filter((token) => token.group === "type")
+                    .map(number)}
+                </div>
+              </PropertySection>
+              {(scene === "list" ||
+                scene === "detail" ||
+                scene === "components") && (
+                <PropertySection
+                  title={t(($) => $.inspector.sections.density)}
+                  scope={t(($) => $.inspector.scope.global)}
+                >
+                  <div className="property-grid">
+                    {sizeTokens
+                      .filter((token) => token.group === "density")
+                      .map(number)}
+                  </div>
+                </PropertySection>
+              )}
+            </>
           )}
         </TabsContent>
         <TabsContent value="changes" className="property-tab-panel">

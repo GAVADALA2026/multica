@@ -1,12 +1,15 @@
 import { isLabLocale, type LabLocale } from "./locale";
 import {
   isDraft,
+  isColorToken,
+  type ColorToken,
   buttonScales,
   type ButtonScale,
   type Draft,
   type Theme,
 } from "./tokens";
 export const scenes = [
+  { id: "colors", label: "colors" },
   { id: "dialog", label: "dialog" },
   { id: "motion", label: "motion" },
   {
@@ -35,6 +38,7 @@ export type PreviewSettings = {
   buttonScale: ButtonScale;
   locale: LabLocale;
   playbackSpeed: number;
+  selectedColor: ColorToken;
 };
 export function isPreviewSettings(value: unknown): value is PreviewSettings {
   if (!value || typeof value !== "object") return false;
@@ -45,6 +49,7 @@ export function isPreviewSettings(value: unknown): value is PreviewSettings {
     scenes.some((scene) => scene.id === data.scene) &&
     buttonScales.some((scale) => scale === data.buttonScale) &&
     isLabLocale(data.locale) &&
+    isColorToken(data.selectedColor) &&
     playbackSpeeds.some((speed) => speed === data.playbackSpeed) &&
     isDraft(data.draft)
   );
@@ -62,5 +67,17 @@ export function isDialogCommand(value: unknown): value is DialogCommand {
   return (
     data.type === "multica-ui-lab:dialog" &&
     dialogActions.some((action) => action === data.action)
+  );
+}
+
+export type ColorSelection = {
+  type: "multica-ui-lab:color-select";
+  token: ColorToken;
+};
+export function isColorSelection(value: unknown): value is ColorSelection {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Record<string, unknown>;
+  return (
+    data.type === "multica-ui-lab:color-select" && isColorToken(data.token)
   );
 }

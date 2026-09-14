@@ -7,6 +7,7 @@ describe("motion preview boundary", () => {
   it("accepts only supported playback speeds and commands", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      selectedColor: "--brand",
       draft: emptyDraft(),
       theme: "light",
       scene: "motion",

@@ -21,7 +21,7 @@ The overview links to six modules: Foundations, Components, Patterns, Product,
 Layouts, and Changes. Each module has an index and a collapsible navigation group.
 Pages marked **To build** are placeholders; their content and editing controls are
 not implemented yet. Button, Dialog and the component gallery live under
-Components. Foundations → Motion previews the shared Dialog motion; production issue list/detail previews live under Layouts. Changes
+Components. Foundations → Colors edits semantic colors, and Motion previews shared Dialog motion; production issue list/detail previews live under Layouts. Changes
 contains the working token review, saved designs, and CSS export pages. Impact
 analysis and source application remain planned.
 
@@ -128,7 +128,8 @@ A color-plane or hue drag previews live and commits one undo step on release.
 Color.js converts edited HEX values to OKLCH for persistence/export. Opening the
 picker does not quantize the source color. Out-of-sRGB colors retain their exact
 OKLCH value; only the HEX/plane preview uses a gamut-mapped approximation. HEX
-input accepts 3 or 6 digits and does not support alpha. The chroma validation
+input accepts 3 or 6 digits; opacity has a separate numeric/scrub control. Color
+and OKLCH edits preserve existing alpha, including transparent dark-mode borders. The chroma validation
 range is 0–0.4 to include saturated sRGB colors such as pure blue.
 
 ## Property inspector
@@ -173,3 +174,19 @@ Button and Dialog have a collapsed Usage & code section backed directly by
 are also readable by agents and document supported APIs, usage, correct/incorrect
 examples, affected tokens and how to apply exported changes. Keep the rules next
 to the production components up to date when their contracts change.
+
+
+## Colors
+
+`#/foundations/colors` exposes 43 existing semantic colors in seven groups:
+surfaces, content, actions, feedback, borders/focus, charts and sidebar. Search
+by localized label or token name, then select a swatch to edit it in the right
+inspector. Original comparison, both themes, live preview, saved schemes,
+undo/redo and CSS export use the same draft as all other component pages.
+
+Background, card and popover aliases point to their existing source tokens;
+selecting an alias edits its target rather than replacing the relationship.
+HEX is a gamut-mapped RGB display; the separate opacity control preserves
+transparency, while OKLCH retains the source color. Percentage and decimal
+alpha are equivalent when restoring defaults. Specialty tokens such as scrollbar
+and find highlights are not part of this initial catalog.

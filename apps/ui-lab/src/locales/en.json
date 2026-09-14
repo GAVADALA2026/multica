@@ -63,7 +63,8 @@
       "list": "Issue list",
       "detail": "Issue detail",
       "dialog": "Dialog",
-      "motion": "Motion"
+      "motion": "Motion",
+      "colors": "Colors"
     },
     "language": {
       "label": "Language"
@@ -215,7 +216,35 @@
       "enterDuration": "Enter duration",
       "exitDuration": "Exit duration",
       "enterEasing": "Enter easing",
-      "exitEasing": "Exit easing"
+      "exitEasing": "Exit easing",
+      "faint": "Subtle icons",
+      "surfaceText": "Surface text",
+      "selectedText": "Selected text",
+      "cardText": "Card text",
+      "popoverText": "Popover text",
+      "brandText": "Brand text",
+      "accent": "Accent fill",
+      "accentText": "Accent text",
+      "mutedFill": "Muted fill",
+      "success": "Success",
+      "warning": "Warning",
+      "info": "Information",
+      "border": "Border",
+      "surfaceBorder": "Surface border",
+      "inputBorder": "Input border",
+      "sidebar": "Sidebar background",
+      "sidebarText": "Sidebar text",
+      "sidebarPrimary": "Sidebar primary",
+      "sidebarPrimaryText": "Sidebar primary text",
+      "sidebarAccent": "Sidebar hover",
+      "sidebarAccentText": "Sidebar hover text",
+      "sidebarBorder": "Sidebar border",
+      "sidebarRing": "Sidebar focus ring",
+      "chart1": "Chart 1",
+      "chart2": "Chart 2",
+      "chart3": "Chart 3",
+      "chart4": "Chart 4",
+      "chart5": "Chart 5"
     }
   },
   "color": {
@@ -245,7 +274,8 @@
       "advanced": "Advanced",
       "close": "Close color editor",
       "use": "Use color {{color}}",
-      "editor": "{{label}} color editor"
+      "editor": "{{label}} color editor",
+      "opacity": "Opacity"
     },
     "channels": {
       "lightness": "Lightness",
@@ -443,6 +473,34 @@
       "open": "Open",
       "closed": "Closed",
       "saved": "Example saved"
+    }
+  },
+  "palette": {
+    "page": {
+      "title": "Colors",
+      "search": "Search colors",
+      "placeholder": "Search by name or token…",
+      "empty": "No matching colors",
+      "count": "{{count}} tokens",
+      "edit": "Edit {{label}}",
+      "aliases": "Aliases",
+      "selected": "Selected color",
+      "sample": "In use"
+    },
+    "groups": {
+      "surfaces": "Surfaces",
+      "content": "Content",
+      "actions": "Actions",
+      "feedback": "Feedback",
+      "borders": "Borders & focus",
+      "charts": "Charts",
+      "sidebar": "Sidebar"
+    },
+    "sample": {
+      "title": "Review interface",
+      "description": "Update the task before assigning it.",
+      "create": "Create issue",
+      "cancel": "Cancel"
     }
   }
 }

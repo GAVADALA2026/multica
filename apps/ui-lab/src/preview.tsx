@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@multica/ui/components/ui/dialog";
 import { StatusIcon } from "@multica/views/issues/visuals";
+import { ColorsScene } from "./colors-scene";
 import { DialogScene } from "./dialog-scene";
 import { ButtonScene } from "./button-scene";
 import { ProductPreview } from "./product-preview";
@@ -246,6 +247,7 @@ export function Preview() {
     buttonScale: "default",
     locale: "en",
     playbackSpeed: 1,
+    selectedColor: "--brand",
   });
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>) => {
@@ -276,12 +278,23 @@ export function Preview() {
     <LabI18nProvider locale={settings.locale}>
       <div className="preview-root">
         <style>{previewCss(settings.draft)}</style>
-        {settings.scene === "components" ? (
+        {settings.scene === "colors" ? (
+          <ColorsScene
+            draft={settings.draft}
+            theme={settings.theme}
+            selected={settings.selectedColor}
+          />
+        ) : settings.scene === "components" ? (
           <ComponentsScene />
         ) : settings.scene === "button" ? (
           <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
         ) : settings.scene === "dialog" || settings.scene === "motion" ? (
-          <DialogScene key={settings.scene} motion={settings.scene === "motion"} draft={settings.draft} speed={settings.playbackSpeed} />
+          <DialogScene
+            key={settings.scene}
+            motion={settings.scene === "motion"}
+            draft={settings.draft}
+            speed={settings.playbackSpeed}
+          />
         ) : settings.scene === "list" ? (
           <ProductPreview key="list" scene="list" locale={settings.locale} />
         ) : (

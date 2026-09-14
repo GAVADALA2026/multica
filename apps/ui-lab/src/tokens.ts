@@ -7,22 +7,94 @@ export type TokenValues = Record<string, string>;
 export type Draft = Record<Scope, TokenValues>;
 export const emptyDraft = (): Draft => ({ light: {}, dark: {}, shared: {} });
 
-export const colorTokens = [
-  ["--brand", "brand"],
-  ["--primary", "primary"],
-  ["--primary-foreground", "primaryText"],
-  ["--secondary", "secondary"],
-  ["--secondary-foreground", "secondaryText"],
-  ["--destructive", "destructive"],
-  ["--ring", "ring"],
-  ["--app-shell", "shell"],
-  ["--page-canvas", "page"],
-  ["--surface", "surface"],
-  ["--surface-raised", "raised"],
-  ["--surface-hover", "hover"],
-  ["--surface-selected", "selected"],
-  ["--foreground", "foreground"],
-  ["--muted-foreground", "muted"],
+export const colorGroups = [
+  {
+    id: "surfaces",
+    tokens: [
+      ["--app-shell", "shell"],
+      ["--page-canvas", "page"],
+      ["--surface", "surface"],
+      ["--surface-raised", "raised"],
+      ["--surface-hover", "hover"],
+      ["--surface-selected", "selected"],
+    ],
+  },
+  {
+    id: "content",
+    tokens: [
+      ["--foreground", "foreground"],
+      ["--muted-foreground", "muted"],
+      ["--faint-foreground", "faint"],
+      ["--surface-foreground", "surfaceText"],
+      ["--surface-selected-foreground", "selectedText"],
+      ["--card-foreground", "cardText"],
+      ["--popover-foreground", "popoverText"],
+    ],
+  },
+  {
+    id: "actions",
+    tokens: [
+      ["--brand", "brand"],
+      ["--brand-foreground", "brandText"],
+      ["--primary", "primary"],
+      ["--primary-foreground", "primaryText"],
+      ["--secondary", "secondary"],
+      ["--secondary-foreground", "secondaryText"],
+      ["--accent", "accent"],
+      ["--accent-foreground", "accentText"],
+      ["--muted", "mutedFill"],
+    ],
+  },
+  {
+    id: "feedback",
+    tokens: [
+      ["--destructive", "destructive"],
+      ["--success", "success"],
+      ["--warning", "warning"],
+      ["--info", "info"],
+    ],
+  },
+  {
+    id: "borders",
+    tokens: [
+      ["--border", "border"],
+      ["--surface-border", "surfaceBorder"],
+      ["--input", "inputBorder"],
+      ["--ring", "ring"],
+    ],
+  },
+  {
+    id: "charts",
+    tokens: [
+      ["--chart-1", "chart1"],
+      ["--chart-2", "chart2"],
+      ["--chart-3", "chart3"],
+      ["--chart-4", "chart4"],
+      ["--chart-5", "chart5"],
+    ],
+  },
+  {
+    id: "sidebar",
+    tokens: [
+      ["--sidebar", "sidebar"],
+      ["--sidebar-foreground", "sidebarText"],
+      ["--sidebar-primary", "sidebarPrimary"],
+      ["--sidebar-primary-foreground", "sidebarPrimaryText"],
+      ["--sidebar-accent", "sidebarAccent"],
+      ["--sidebar-accent-foreground", "sidebarAccentText"],
+      ["--sidebar-border", "sidebarBorder"],
+      ["--sidebar-ring", "sidebarRing"],
+    ],
+  },
+] as const;
+export const colorTokens = colorGroups.flatMap((group) => [...group.tokens]);
+export type ColorToken = (typeof colorTokens)[number][0];
+export const isColorToken = (value: unknown): value is ColorToken =>
+  colorTokens.some(([key]) => key === value);
+export const colorAliases = [
+  ["--background", "--page-canvas"],
+  ["--card", "--surface"],
+  ["--popover", "--surface-raised"],
 ] as const;
 export const buttonScales = ["xs", "sm", "default", "lg"] as const;
 export type ButtonScale = (typeof buttonScales)[number];
@@ -211,10 +283,33 @@ export function numericTokenValue(key: string, value: number): string {
   if (!token) throw new Error(`Unknown numeric token: ${key}`);
   return `${value}${token.unit}`;
 }
+const colorPattern =
+  /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+)(%)?)?\)$/;
 export function parseColor(value: string): [number, number, number] {
-  const match = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)$/.exec(value);
+  const match = colorPattern.exec(value);
   if (!match) throw new Error(`Unsupported color: ${value}`);
   return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+export function colorAlpha(value: string): number {
+  const match = colorPattern.exec(value);
+  if (!match) throw new Error(`Unsupported color: ${value}`);
+  return match[4] === undefined ? 1 : Number(match[4]) / (match[5] ? 100 : 1);
+}
+export function withColorAlpha(value: string, alpha: number): string {
+  if (alpha === colorAlpha(value)) return value;
+  return `oklch(${parseColor(value).join(" ")}${alpha === 1 ? "" : ` / ${Number(alpha.toFixed(6))}`})`;
+}
+function equalColors(value: string, original: string): boolean {
+  try {
+    return (
+      colorAlpha(value) === colorAlpha(original) &&
+      parseColor(value).every(
+        (channel, index) => channel === parseColor(original)[index],
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 export function updateToken(
   draft: Draft,
@@ -226,7 +321,8 @@ export function updateToken(
   const original = baseline[scope][key];
   const equal =
     value === original ||
-    (scope === "shared" && sizeValue(value) === sizeValue(original ?? ""));
+    (scope === "shared" && sizeValue(value) === sizeValue(original ?? "")) ||
+    (scope !== "shared" && !!original && equalColors(value, original));
   if (equal) delete values[key];
   else values[key] = value;
   return { ...draft, [scope]: values };
@@ -303,7 +399,17 @@ export function isDraft(value: unknown): value is Draft {
       if (!colorTokens.some(([token]) => token === key)) return false;
       try {
         const [l, c, h] = parseColor(v);
-        return l >= 0 && l <= 1 && c >= 0 && c <= 0.4 && h >= 0 && h <= 360;
+        const alpha = colorAlpha(v);
+        return (
+          l >= 0 &&
+          l <= 1 &&
+          c >= 0 &&
+          c <= 0.4 &&
+          h >= 0 &&
+          h <= 360 &&
+          alpha >= 0 &&
+          alpha <= 1
+        );
       } catch {
         return false;
       }

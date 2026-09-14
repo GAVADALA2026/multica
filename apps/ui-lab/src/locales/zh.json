@@ -63,7 +63,8 @@
       "list": "任务列表",
       "detail": "任务详情",
       "dialog": "弹窗",
-      "motion": "动效"
+      "motion": "动效",
+      "colors": "颜色"
     },
     "language": {
       "label": "语言"
@@ -215,7 +216,35 @@
       "enterDuration": "进入时长",
       "exitDuration": "退出时长",
       "enterEasing": "进入曲线",
-      "exitEasing": "退出曲线"
+      "exitEasing": "退出曲线",
+      "faint": "弱化图标",
+      "surfaceText": "容器文字",
+      "selectedText": "选中文字",
+      "cardText": "卡片文字",
+      "popoverText": "浮层文字",
+      "brandText": "品牌色上的文字",
+      "accent": "强调背景",
+      "accentText": "强调文字",
+      "mutedFill": "弱化背景",
+      "success": "成功",
+      "warning": "警告",
+      "info": "信息",
+      "border": "边框",
+      "surfaceBorder": "容器边框",
+      "inputBorder": "输入框边框",
+      "sidebar": "侧栏背景",
+      "sidebarText": "侧栏文字",
+      "sidebarPrimary": "侧栏主要操作",
+      "sidebarPrimaryText": "侧栏主要操作文字",
+      "sidebarAccent": "侧栏悬停",
+      "sidebarAccentText": "侧栏悬停文字",
+      "sidebarBorder": "侧栏边框",
+      "sidebarRing": "侧栏焦点环",
+      "chart1": "图表 1",
+      "chart2": "图表 2",
+      "chart3": "图表 3",
+      "chart4": "图表 4",
+      "chart5": "图表 5"
     }
   },
   "color": {
@@ -245,7 +274,8 @@
       "advanced": "精确调整",
       "close": "关闭颜色编辑器",
       "use": "使用颜色 {{color}}",
-      "editor": "{{label}}颜色编辑器"
+      "editor": "{{label}}颜色编辑器",
+      "opacity": "不透明度"
     },
     "channels": {
       "lightness": "明度",
@@ -443,6 +473,34 @@
       "open": "已打开",
       "closed": "已关闭",
       "saved": "已保存示例"
+    }
+  },
+  "palette": {
+    "page": {
+      "title": "颜色",
+      "search": "搜索颜色",
+      "placeholder": "搜索名称或 token...",
+      "empty": "没有匹配的颜色",
+      "count": "{{count}} 个 token",
+      "edit": "编辑{{label}}",
+      "aliases": "别名",
+      "selected": "当前颜色",
+      "sample": "实际效果"
+    },
+    "groups": {
+      "surfaces": "背景与容器",
+      "content": "文字与图标",
+      "actions": "操作",
+      "feedback": "反馈",
+      "borders": "边框与焦点",
+      "charts": "图表",
+      "sidebar": "侧栏"
+    },
+    "sample": {
+      "title": "检查界面",
+      "description": "分配前更新任务内容。",
+      "create": "新建任务",
+      "cancel": "取消"
     }
   }
 }
