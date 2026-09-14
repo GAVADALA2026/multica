@@ -47,6 +47,12 @@ func TestChatSessionDeleteIndexMigrationsPreserveCoverageAndRollback(t *testing.
 			ON agent_task_queue (chat_session_id, created_at DESC)
 			WHERE chat_session_id IS NOT NULL
 			  AND session_id IS NOT NULL`,
+		`INSERT INTO agent_task_queue (chat_session_id, created_at, session_id)
+			SELECT
+				('00000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid,
+				TIMESTAMPTZ '2026-01-01 00:00:00+00' + make_interval(secs => n),
+				CASE WHEN n % 5 = 0 THEN NULL ELSE 'provider-session-' || n END
+			FROM generate_series(1, 5000) AS n`,
 		`CREATE TABLE dingtalk_bot_identity (
 			workspace_id UUID NOT NULL,
 			installation_id UUID NOT NULL
@@ -71,6 +77,9 @@ func TestChatSessionDeleteIndexMigrationsPreserveCoverageAndRollback(t *testing.
 	}); err != nil {
 		t.Fatalf("apply chat-session delete index migrations: %v", err)
 	}
+	if _, err := pool.Exec(ctx, "ANALYZE agent_task_queue"); err != nil {
+		t.Fatalf("analyze agent task fixture: %v", err)
+	}
 
 	assertIndexValidity(t, pool, schema, "idx_agent_task_queue_chat_session", true)
 	assertIndexExists(t, pool, schema, "idx_agent_task_queue_chat_with_session_created_at", false)
@@ -85,6 +94,23 @@ func TestChatSessionDeleteIndexMigrationsPreserveCoverageAndRollback(t *testing.
 		"USING btree (workspace_id)",
 		"",
 	)
+	// Row 5000 has no session_id, so migration 465's narrower predicate could
+	// not serve this foreign-key-shaped lookup.
+	assertPlanUsesIndex(t, pool, `
+		SELECT id
+		FROM agent_task_queue
+		WHERE chat_session_id = '00000000-0000-0000-0000-000000005000'
+	`, "idx_agent_task_queue_chat_session")
+	// Row 4999 has a provider session and exercises the newer-task guard shape
+	// that migration 465 served before migration 473 removed it.
+	assertPlanUsesIndex(t, pool, `
+		SELECT 1
+		FROM agent_task_queue newer
+		WHERE newer.chat_session_id = '00000000-0000-0000-0000-000000004999'
+		  AND newer.id <> 4999
+		  AND newer.session_id IS NOT NULL
+		  AND newer.created_at > TIMESTAMPTZ '2026-01-01 00:00:00+00'
+	`, "idx_agent_task_queue_chat_session")
 
 	reversedVersions := []string{
 		"474_dingtalk_bot_identity_workspace_index",
