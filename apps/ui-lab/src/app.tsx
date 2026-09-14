@@ -1,3 +1,7 @@
+import { useSyncExternalStore } from "react";
+import { resolveCatalogRoute, pageHref } from "./catalog";
+import { CatalogNavigation } from "./catalog-navigation";
+import { CatalogContent } from "./catalog-content";
 import { LabI18nProvider } from "./lab-i18n";
 import { loadLocale, LOCALE_STORAGE_KEY, type LabLocale } from "./locale";
 import { useTranslation } from "react-i18next";
@@ -9,10 +13,7 @@ import {
   Code2,
   Columns2,
   Copy,
-  LayoutGrid,
-  ListTodo,
   Moon,
-  MousePointer2,
   PanelLeft,
   Redo2,
   Save,
@@ -43,7 +44,7 @@ import {
   type Theme,
 } from "./tokens";
 import { Inspector } from "./inspector";
-import { scenes, type PreviewSettings, type Scene } from "./protocol";
+import { type PreviewSettings, type Scene } from "./protocol";
 import {
   encodeSession,
   loadSession,
@@ -122,6 +123,11 @@ function PreviewFrame({
   );
 }
 const originalDraft = emptyDraft();
+const subscribeRoute = (notify: () => void) => {
+  window.addEventListener("hashchange", notify);
+  return () => window.removeEventListener("hashchange", notify);
+};
+const routeSnapshot = () => window.location.hash;
 
 export function App() {
   const [locale, setLocale] = useState(loadLocale);
@@ -148,7 +154,12 @@ function Workbench({
   });
   const draft = history.present;
   const [theme, setTheme] = useState<Theme>("light");
-  const [scene, setScene] = useState<Scene>("button");
+  const hash = useSyncExternalStore(subscribeRoute, routeSnapshot);
+  const route = resolveCatalogRoute(hash);
+  const scene =
+    route.kind === "page" && route.page.content.kind === "preview"
+      ? route.page.content.scene
+      : null;
   const [buttonScale, setButtonScale] = useState<ButtonScale>("default");
   const [compare, setCompare] = useState(false);
   const [original, setOriginal] = useState(false);
@@ -169,7 +180,21 @@ function Workbench({
   const [storageError, setStorageError] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const count = changeCount(draft);
-  const currentScene = scenes.find((item) => item.id === scene)!;
+  const title =
+    route.kind === "overview"
+      ? t(($) => $.system.navigation.title)
+      : route.kind === "notFound"
+        ? t(($) => $.system.empty.notFound)
+        : route.kind === "module"
+          ? t(($) => $.system.modules[route.module.id])
+          : t(($) => $.system.pages[route.page.id]);
+  useEffect(() => {
+    setColorPreview(null);
+    setNumberPreview(null);
+    setOriginal(false);
+    setCompare(false);
+    setNavOpen(false);
+  }, [hash]);
   const currentColor = colorPreview ?? tokenValue(draft, theme, color);
   const previewDraft = colorPreview
     ? updateToken(draft, theme, color, colorPreview)
@@ -239,7 +264,7 @@ function Workbench({
     setNotice({ key: "exported" });
   };
   return (
-    <div className="lab-shell">
+    <div className={`lab-shell ${scene ? "" : "catalog-shell"}`}>
       <header className="lab-header">
         <Button
           className="mobile-nav-toggle"
@@ -250,7 +275,7 @@ function Workbench({
         >
           <PanelLeft />
         </Button>
-        <a className="lab-brand" href="./" aria-label="Multica UI Lab">
+        <a className="lab-brand" href="#/overview" aria-label="Multica UI Lab">
           <span className="logo-mark">
             <MulticaIcon className="size-4" noSpin />
           </span>
@@ -317,188 +342,223 @@ function Workbench({
         </div>
       </header>
       <aside className={`lab-nav ${navOpen ? "nav-open" : ""}`}>
-        <div className="nav-heading">
-          {t(($) => $.lab.nav.scenes)}
-          <span>{String(scenes.length).padStart(2, "0")}</span>
-        </div>
-        <nav aria-label={t(($) => $.lab.nav.previewScenes)}>
-          {scenes.map((item, index) => {
-            const Icon = [LayoutGrid, MousePointer2, ListTodo, PanelLeft][
-              index
-            ]!;
-            return (
-              <button
-                key={item.id}
-                aria-current={scene === item.id ? "page" : undefined}
-                onClick={() => {
-                  setScene(item.id);
-                  setNavOpen(false);
-                }}
-              >
-                <Icon />
-                <span>{t(($) => $.lab.scenes[item.label])}</span>
-                {scene === item.id && <ChevronRight className="ml-auto" />}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="nav-heading saved-heading">
-          {t(($) => $.lab.nav.saved)}
-          <span>{String(designs.length).padStart(2, "0")}</span>
-        </div>
-        <div className="saved-designs">
-          {designs.length ? (
-            designs.map((design) => (
-              <div className="saved-design" key={design.id}>
-                <button
-                  title={design.name}
-                  onClick={() => {
-                    edit(design.draft);
-                    setNotice({ key: "loaded", name: design.name });
-                  }}
-                >
-                  <span
-                    className="design-swatch"
-                    style={{
-                      background: tokenValue(design.draft, "light", "--brand"),
-                    }}
-                  />
-                  <span>{design.name}</span>
-                </button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t(($) => $.lab.actions.deleteDesign, {
-                    name: design.name,
-                  })}
-                  onClick={() =>
-                    setDesigns(designs.filter((item) => item.id !== design.id))
-                  }
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            ))
-          ) : (
-            <p className="nav-empty">{t(($) => $.lab.nav.empty)}</p>
-          )}
-        </div>
+        <CatalogNavigation route={route} onNavigate={() => setNavOpen(false)} />
       </aside>
       <main className="lab-main">
         <div className="workspace-heading">
           <div>
             <div className="workspace-breadcrumb">
-              {t(($) => $.lab.nav.workbench)}
-              <ChevronRight /> {t(($) => $.lab.scenes[currentScene.label])}
+              <a href="#/overview">{t(($) => $.system.navigation.overview)}</a>
+              {"module" in route && (
+                <>
+                  <ChevronRight />
+                  <a href={pageHref(route.module.id)}>
+                    {t(($) => $.system.modules[route.module.id])}
+                  </a>
+                </>
+              )}
+              {route.kind === "page" && (
+                <>
+                  <ChevronRight />
+                  <span>{title}</span>
+                </>
+              )}
             </div>
-            <h1>{t(($) => $.lab.scenes[currentScene.label])}</h1>
+            <h1>{title}</h1>
           </div>
-          <div
-            className="theme-toggle"
-            aria-label={t(($) => $.lab.theme.label)}
-          >
-            <Button
-              variant={theme === "light" ? "secondary" : "ghost"}
-              size="icon"
-              aria-label={t(($) => $.lab.theme.lightLabel)}
-              aria-pressed={theme === "light"}
-              onClick={() => {
-                setColorPreview(null);
-                setTheme("light");
-              }}
+          {scene && (
+            <div
+              className="theme-toggle"
+              aria-label={t(($) => $.lab.theme.label)}
             >
-              <Sun />
-            </Button>
-            <Button
-              variant={theme === "dark" ? "secondary" : "ghost"}
-              size="icon"
-              aria-label={t(($) => $.lab.theme.darkLabel)}
-              aria-pressed={theme === "dark"}
-              onClick={() => {
-                setColorPreview(null);
-                setTheme("dark");
-              }}
-            >
-              <Moon />
-            </Button>
-          </div>
-        </div>
-        <div className="canvas-toolbar">
-          <span className="canvas-caption">
-            <span className="status-dot" />
-            {count
-              ? t(($) => $.lab.preview.changeCount, { count })
-              : t(($) => $.lab.preview.unchanged)}
-          </span>
-          <div className="ml-auto flex gap-1">
-            <Button
-              variant={original ? "secondary" : "ghost"}
-              size="sm"
-              aria-pressed={original}
-              disabled={compare}
-              onClick={() => setOriginal(!original)}
-            >
-              {original
-                ? t(($) => $.lab.preview.back)
-                : t(($) => $.lab.preview.original)}
-            </Button>
-            <Button
-              variant={compare ? "secondary" : "ghost"}
-              size="sm"
-              aria-pressed={compare}
-              onClick={() => {
-                setCompare(!compare);
-                setOriginal(false);
-              }}
-            >
-              <Columns2 />
-              {t(($) => $.lab.preview.compare)}
-            </Button>
-          </div>
-        </div>
-        <div className={`preview-canvas ${compare ? "compare" : ""}`}>
-          {compare && (
-            <PreviewFrame
-              draft={originalDraft}
-              theme={theme}
-              scene={scene}
-              buttonScale={buttonScale}
-              original
-            />
+              <Button
+                variant={theme === "light" ? "secondary" : "ghost"}
+                size="icon"
+                aria-label={t(($) => $.lab.theme.lightLabel)}
+                aria-pressed={theme === "light"}
+                onClick={() => {
+                  setColorPreview(null);
+                  setTheme("light");
+                }}
+              >
+                <Sun />
+              </Button>
+              <Button
+                variant={theme === "dark" ? "secondary" : "ghost"}
+                size="icon"
+                aria-label={t(($) => $.lab.theme.darkLabel)}
+                aria-pressed={theme === "dark"}
+                onClick={() => {
+                  setColorPreview(null);
+                  setTheme("dark");
+                }}
+              >
+                <Moon />
+              </Button>
+            </div>
           )}
-          <PreviewFrame
-            draft={original ? originalDraft : previewDraft}
-            theme={theme}
-            scene={scene}
-            buttonScale={buttonScale}
-            original={original}
-          />
         </div>
+        {scene ? (
+          <>
+            <div className="canvas-toolbar">
+              <span className="canvas-caption">
+                <span className="status-dot" />
+                {count
+                  ? t(($) => $.lab.preview.changeCount, { count })
+                  : t(($) => $.lab.preview.unchanged)}
+              </span>
+              <div className="ml-auto flex gap-1">
+                <Button
+                  variant={original ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={original}
+                  disabled={compare}
+                  onClick={() => setOriginal(!original)}
+                >
+                  {original
+                    ? t(($) => $.lab.preview.back)
+                    : t(($) => $.lab.preview.original)}
+                </Button>
+                <Button
+                  variant={compare ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={compare}
+                  onClick={() => {
+                    setCompare(!compare);
+                    setOriginal(false);
+                  }}
+                >
+                  <Columns2 />
+                  {t(($) => $.lab.preview.compare)}
+                </Button>
+              </div>
+            </div>
+            <div className={`preview-canvas ${compare ? "compare" : ""}`}>
+              {compare && (
+                <PreviewFrame
+                  draft={originalDraft}
+                  theme={theme}
+                  scene={scene}
+                  buttonScale={buttonScale}
+                  original
+                />
+              )}
+              <PreviewFrame
+                draft={original ? originalDraft : previewDraft}
+                theme={theme}
+                scene={scene}
+                buttonScale={buttonScale}
+                original={original}
+              />
+            </div>
+          </>
+        ) : (
+          <CatalogContent
+            route={route}
+            draft={draft}
+            onEdit={edit}
+            onSave={() => setSaveOpen(true)}
+            onExport={() => setExportOpen(true)}
+            savedDesigns={
+              <>
+                <div className="nav-heading saved-heading">
+                  {t(($) => $.lab.nav.saved)}
+                  <span>{String(designs.length).padStart(2, "0")}</span>
+                </div>
+                <div className="saved-designs">
+                  {designs.length ? (
+                    designs.map((design) => (
+                      <div className="saved-design" key={design.id}>
+                        <button
+                          title={design.name}
+                          onClick={() => {
+                            edit(design.draft);
+                            setNotice({ key: "loaded", name: design.name });
+                          }}
+                        >
+                          <span
+                            className="design-swatch"
+                            style={{
+                              background: tokenValue(
+                                design.draft,
+                                "light",
+                                "--brand",
+                              ),
+                            }}
+                          />
+                          <span>{design.name}</span>
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={t(($) => $.lab.actions.deleteDesign, {
+                            name: design.name,
+                          })}
+                          onClick={() =>
+                            setDesigns(
+                              designs.filter((item) => item.id !== design.id),
+                            )
+                          }
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="nav-empty">{t(($) => $.lab.nav.empty)}</p>
+                  )}
+                </div>
+              </>
+            }
+            exportContent={
+              <>
+                <p className="catalog-export-note">
+                  {t(($) => $.lab.export.description)}
+                </p>
+                <pre className="export-code" tabIndex={0}>
+                  <code>{css}</code>
+                </pre>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={copyCss}>
+                    <Copy />
+                    {t(($) => $.lab.export.copy)}
+                  </Button>
+                  <Button onClick={downloadCss}>
+                    <ArrowDownToLine />
+                    {t(($) => $.lab.export.download)}
+                  </Button>
+                </div>
+              </>
+            }
+          />
+        )}
       </main>
-      <Inspector
-        scene={scene}
-        theme={theme}
-        draft={draft}
-        previewDraft={previewDraft}
-        buttonScale={buttonScale}
-        color={color}
-        currentColor={currentColor}
-        onScaleChange={setButtonScale}
-        onEdit={edit}
-        onNumberPreview={(key, value) => {
-          setColorPreview(null);
-          setNumberPreview({ key, value });
-        }}
-        onNumberCancel={() => setNumberPreview(null)}
-        onColorSelect={(key) => {
-          setColorPreview(null);
-          setNumberPreview(null);
-          setColor(key);
-        }}
-        onColorPreview={setColorPreview}
-        onColorCancel={() => setColorPreview(null)}
-        onExport={() => setExportOpen(true)}
-      />
+      {scene && (
+        <Inspector
+          scene={scene}
+          theme={theme}
+          draft={draft}
+          previewDraft={previewDraft}
+          buttonScale={buttonScale}
+          color={color}
+          currentColor={currentColor}
+          onScaleChange={setButtonScale}
+          onEdit={edit}
+          onNumberPreview={(key, value) => {
+            setColorPreview(null);
+            setNumberPreview({ key, value });
+          }}
+          onNumberCancel={() => setNumberPreview(null)}
+          onColorSelect={(key) => {
+            setColorPreview(null);
+            setNumberPreview(null);
+            setColor(key);
+          }}
+          onColorPreview={setColorPreview}
+          onColorCancel={() => setColorPreview(null)}
+          onExport={() => setExportOpen(true)}
+        />
+      )}
       {storageError && (
         <div className="storage-warning" role="alert">
           {t(($) => $.lab.notice.storageFailed)}

@@ -313,5 +313,82 @@
     "comments": {
       "first": "先检查列表的密度，再比较详情页中的文字层级。"
     }
+  },
+  "system": {
+    "modules": {
+      "foundations": "设计基础",
+      "components": "基础组件",
+      "patterns": "组合模式",
+      "product": "业务组件",
+      "layouts": "页面布局",
+      "changes": "修改管理"
+    },
+    "descriptions": {
+      "foundations": "颜色、字体、间距与视觉规则。",
+      "components": "基础控件、变体与交互状态。",
+      "patterns": "由组件组成的常用操作流程。",
+      "product": "任务、团队与智能体界面。",
+      "layouts": "页面结构与响应式布局。",
+      "changes": "查看、保存与导出设计修改。"
+    },
+    "pages": {
+      "colors": "颜色",
+      "typography": "字体",
+      "spacing": "间距",
+      "radius": "圆角",
+      "shadows": "阴影",
+      "motion": "动效",
+      "icons": "图标",
+      "gallery": "组件总览",
+      "button": "按钮",
+      "input": "输入框",
+      "select": "选择器",
+      "checkbox": "复选框",
+      "switch": "开关",
+      "badge": "标签",
+      "tabs": "选项卡",
+      "tooltip": "提示框",
+      "dialog": "对话框",
+      "popover": "弹出层",
+      "forms": "表单",
+      "filters": "搜索与筛选",
+      "properties": "属性编辑",
+      "confirmation": "操作确认",
+      "feedback": "加载、空状态与错误",
+      "issueRow": "任务行",
+      "statusPicker": "状态选择器",
+      "assigneePicker": "负责人选择器",
+      "comments": "评论",
+      "agentRun": "智能体运行",
+      "sidebar": "侧边栏",
+      "list": "任务列表",
+      "detail": "任务详情",
+      "settings": "设置页",
+      "split": "分栏布局",
+      "review": "修改记录",
+      "saved": "保存方案",
+      "export": "CSS 导出",
+      "impact": "影响范围",
+      "source": "应用到源码"
+    },
+    "navigation": {
+      "overview": "总览",
+      "title": "设计系统",
+      "expand": "展开或收起{{module}}"
+    },
+    "status": {
+      "available": "已接入",
+      "planned": "待补充",
+      "progress": "{{ready}} / {{total}} 已接入"
+    },
+    "empty": {
+      "message": "后续在这里补充示例与规范。",
+      "back": "返回{{module}}",
+      "notFound": "页面不存在"
+    },
+    "changes": {
+      "reset": "重置全部",
+      "return": "打开按钮工作台"
+    }
   }
 }

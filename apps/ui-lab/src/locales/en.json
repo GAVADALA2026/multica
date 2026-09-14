@@ -313,5 +313,82 @@
     "comments": {
       "first": "Check list density, then compare typography in the detail page."
     }
+  },
+  "system": {
+    "modules": {
+      "foundations": "Foundations",
+      "components": "Components",
+      "patterns": "Patterns",
+      "product": "Product",
+      "layouts": "Layouts",
+      "changes": "Changes"
+    },
+    "descriptions": {
+      "foundations": "Colors, type, spacing and visual rules.",
+      "components": "Primitives, variants and interaction states.",
+      "patterns": "Reusable flows built from components.",
+      "product": "Issue, team and agent interfaces.",
+      "layouts": "Page structure and responsive behavior.",
+      "changes": "Review, save and export design edits."
+    },
+    "pages": {
+      "colors": "Colors",
+      "typography": "Typography",
+      "spacing": "Spacing",
+      "radius": "Radius",
+      "shadows": "Shadows",
+      "motion": "Motion",
+      "icons": "Icons",
+      "gallery": "Component gallery",
+      "button": "Button",
+      "input": "Input",
+      "select": "Select",
+      "checkbox": "Checkbox",
+      "switch": "Switch",
+      "badge": "Badge",
+      "tabs": "Tabs",
+      "tooltip": "Tooltip",
+      "dialog": "Dialog",
+      "popover": "Popover",
+      "forms": "Forms",
+      "filters": "Search & filters",
+      "properties": "Property editing",
+      "confirmation": "Confirmation",
+      "feedback": "Loading, empty & error",
+      "issueRow": "Issue row",
+      "statusPicker": "Status picker",
+      "assigneePicker": "Assignee picker",
+      "comments": "Comments",
+      "agentRun": "Agent run",
+      "sidebar": "Sidebar",
+      "list": "Issue list",
+      "detail": "Issue detail",
+      "settings": "Settings",
+      "split": "Split view",
+      "review": "Change review",
+      "saved": "Saved designs",
+      "export": "CSS export",
+      "impact": "Impact scope",
+      "source": "Apply to source"
+    },
+    "navigation": {
+      "overview": "Overview",
+      "title": "Design system",
+      "expand": "Toggle {{module}}"
+    },
+    "status": {
+      "available": "Available",
+      "planned": "To build",
+      "progress": "{{ready}} / {{total}} available"
+    },
+    "empty": {
+      "message": "This page is ready for its first examples.",
+      "back": "Back to {{module}}",
+      "notFound": "Page not found"
+    },
+    "changes": {
+      "reset": "Reset all",
+      "return": "Open Button"
+    }
   }
 }

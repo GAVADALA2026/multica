@@ -15,6 +15,25 @@ The interface defaults to English. Use EN / 中文 in the header to switch the
 workbench and all previews together. The browser remembers your language; switching
 languages preserves design overrides, saved schemes, and local sample edits.
 
+## Catalog structure
+
+The overview links to six modules: Foundations, Components, Patterns, Product,
+Layouts, and Changes. Each module has an index and a collapsible navigation group.
+Pages marked **To build** are placeholders; their content and editing controls are
+not implemented yet. The existing Button and component gallery live under
+Components; production issue list/detail previews live under Layouts. Changes
+contains the working token review, saved designs, and CSS export pages. Impact
+analysis and source application remain planned.
+
+Pages have hash URLs (for example `#/components/button`) that support direct links,
+reload, and browser back/forward. Drafts and edit history stay in the workbench
+while navigating. Only live preview pages display the property inspector.
+
+To add content, update the page entry in `src/catalog.ts`, provide the renderer,
+and add English/Chinese copy in `src/locales/`. The registry supplies navigation,
+module indexes, availability counts, and route validation. Preview scenes still
+use the validated iframe protocol in `src/protocol.ts`.
+
 ## Workflow
 
 1. Choose Button, the component gallery, an issue list, or an issue detail fixture.
