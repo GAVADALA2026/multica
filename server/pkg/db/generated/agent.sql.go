@@ -5728,10 +5728,9 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  -- Match loadDelegatedFailureRecoveryTarget: lifecycle permits recovery only
+  -- Match canDispatchDelegatedFailureRecovery: lifecycle permits recovery only
   -- for open work; parking belongs exclusively to the fixed Backlog status.
-  -- Built-ins resolve without catalog rows. Normalize pre-backfill categories
-  -- without restoring their old custom parking/review/recovery behavior.
+  -- Built-ins resolve without catalog rows; unknown custom states stay pending.
   AND source_issue.status <> 'backlog'
   AND CASE
       WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
@@ -5739,15 +5738,7 @@ WHERE recovery.author_type = 'system'
       WHEN source_issue.status = 'done' THEN 'done'
       WHEN source_issue.status = 'cancelled' THEN 'closed'
       WHEN source_issue.status = 'triage' THEN 'triage'
-      ELSE CASE source_status.category
-          WHEN 'backlog' THEN 'unstarted'
-          WHEN 'todo' THEN 'unstarted'
-          WHEN 'in_progress' THEN 'started'
-          WHEN 'in_review' THEN 'started'
-          WHEN 'blocked' THEN 'started'
-          WHEN 'cancelled' THEN 'closed'
-          ELSE source_status.category
-      END
+      ELSE source_status.category
   END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL

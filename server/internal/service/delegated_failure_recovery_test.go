@@ -64,94 +64,57 @@ func TestPendingDelegatedFailureSweepDoesNotStarveOtherWorkspaces(t *testing.T) 
 }
 
 func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
-	ctx := context.Background()
-	f, svc := seedDelegatedFailureFixture(t)
-	fx := dbfx.New(f.pool, f.workspaceID, f.userID)
-	if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
-		t.Fatal(err)
-	}
-	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
-	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
-	if err != nil || target == nil || !created {
-		t.Fatalf("seed recovery: created=%v err=%v", created, err)
-	}
-	cases := []struct {
-		status, category, legacy      string
-		allowed, archived, unresolved bool
-	}{
-		{status: "backlog"},
-		{status: "todo", allowed: true},
-		{status: "in_progress", allowed: true},
-		{status: "in_review", allowed: true},
-		{status: "blocked", allowed: true},
-		{status: "done"},
-		{status: "cancelled"},
-		{status: "triage"},
-		{status: "missing_recovery_status", unresolved: true},
-		{status: "custom_backlog", category: "unstarted", legacy: "backlog", allowed: true},
-		{status: "custom_todo", category: "unstarted", legacy: "todo", allowed: true},
-		{status: "custom_active", category: "started", legacy: "in_progress", allowed: true},
-		{status: "custom_review", category: "started", legacy: "in_review", allowed: true},
-		{status: "custom_blocked", category: "started", legacy: "blocked", allowed: true},
-		{status: "custom_done", category: "done", legacy: "done"},
-		{status: "custom_closed", category: "closed", legacy: "cancelled"},
-		{status: "archived_done", category: "done", legacy: "done", archived: true},
-		{status: "archived_open", category: "started", legacy: "in_review", allowed: true, archived: true},
-	}
-	for _, tc := range cases {
-		if tc.category == "" {
-			continue
+	for _, seeded := range []bool{true, false} {
+		name := "seeded_catalog"
+		if !seeded {
+			name = "missing_builtin_catalog"
 		}
-		cols := dbfx.Cols{"workspace_id": f.workspaceID, "key": tc.status, "name": tc.status,
-			"category": tc.category, "color": "#22c55e", "position": 1}
-		if tc.archived {
-			cols["archived_at"] = dbfx.Raw("now()")
-		}
-		fx.Insert(t, "issue_status", cols)
-	}
-	for _, format := range []string{"current", "legacy", "mixed", "missing_builtin_catalog"} {
-		t.Run(format, func(t *testing.T) {
-			tx, err := f.pool.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback(ctx)
-			// Model pre-backfill catalogs without weakening the real database's
-			// four-category CHECK or affecting another connection's catalog.
-			for _, sql := range []string{
-				`CREATE TEMP TABLE issue_status (LIKE public.issue_status INCLUDING DEFAULTS) ON COMMIT DROP`,
-				`INSERT INTO pg_temp.issue_status SELECT * FROM public.issue_status`,
-				`SET LOCAL search_path = pg_temp, public`,
-			} {
-				if _, err := tx.Exec(ctx, sql); err != nil {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			if seeded {
+				if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if format == "legacy" || format == "mixed" {
-				if _, err := tx.Exec(ctx, `UPDATE issue_status SET category = key WHERE is_system`); err != nil {
-					t.Fatal(err)
-				}
-				for i, tc := range cases {
-					if tc.legacy == "" || (format == "mixed" && i%2 == 0) {
-						continue
-					}
-					if _, err := tx.Exec(ctx, `UPDATE issue_status SET category = $2 WHERE key = $1`, tc.status, tc.legacy); err != nil {
-						t.Fatal(err)
-					}
-				}
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed recovery: created=%v err=%v", created, err)
 			}
-			if format == "missing_builtin_catalog" {
-				if _, err := tx.Exec(ctx, `DELETE FROM issue_status WHERE is_system`); err != nil {
-					t.Fatal(err)
-				}
+			cases := []struct {
+				status, category              string
+				allowed, archived, unresolved bool
+			}{
+				{status: "backlog"},
+				{status: "todo", allowed: true},
+				{status: "in_progress", allowed: true},
+				{status: "in_review", allowed: true},
+				{status: "blocked", allowed: true},
+				{status: "done"},
+				{status: "cancelled"},
+				{status: "triage"},
+				{status: "missing_recovery_status", unresolved: true},
+				{status: "custom_unstarted", category: "unstarted", allowed: true},
+				{status: "custom_started", category: "started", allowed: true},
+				{status: "custom_done", category: "done"},
+				{status: "custom_closed", category: "closed"},
+				{status: "archived_done", category: "done", archived: true},
+				{status: "archived_open", category: "started", allowed: true, archived: true},
 			}
-			q := db.New(tx)
 			for _, tc := range cases {
 				t.Run(tc.status, func(t *testing.T) {
-					if _, err := tx.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status); err != nil {
-						t.Fatal(err)
+					if tc.category != "" {
+						cols := dbfx.Cols{"workspace_id": f.workspaceID, "key": tc.status, "name": tc.status,
+							"category": tc.category, "color": "#22c55e", "position": 1}
+						if tc.archived {
+							cols["archived_at"] = dbfx.Raw("now()")
+						}
+						fx.Insert(t, "issue_status", cols)
 					}
-					pending, err := q.ListPendingDelegatedFailureRecoveries(ctx, 100)
+					fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status)
+					pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -162,12 +125,16 @@ func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
 					if included != tc.allowed {
 						t.Errorf("SQL selected recovery = %v, want %v", included, tc.allowed)
 					}
-					loaded, err := loadDelegatedFailureRecoveryTarget(ctx, q, target.failed)
+					loaded, err := loadDelegatedFailureRecoveryTarget(ctx, svc.Queries, target.failed)
+					if err != nil || loaded == nil {
+						t.Fatalf("lifecycle must not prevent loading the signal target: %v", err)
+					}
+					allowed, err := canDispatchDelegatedFailureRecovery(ctx, svc.Queries, loaded.issue)
 					if (err != nil) != tc.unresolved {
 						t.Errorf("Go eligibility error = %v, want unresolved=%v", err, tc.unresolved)
 					}
-					if (loaded != nil) != tc.allowed {
-						t.Errorf("Go allowed recovery = %v, want %v", loaded != nil, tc.allowed)
+					if allowed != tc.allowed {
+						t.Errorf("Go allowed recovery = %v, want %v", allowed, tc.allowed)
 					}
 				})
 			}
@@ -235,20 +202,67 @@ type recoveryCatalogErrorRow struct{ err error }
 
 func (r recoveryCatalogErrorRow) Scan(...any) error { return r.err }
 
-func TestDelegatedFailureRecoveryPropagatesCatalogReadError(t *testing.T) {
-	ctx := context.Background()
-	f, svc := seedDelegatedFailureFixture(t)
-	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
-	failed, err := svc.Queries.GetAgentTask(ctx, failedID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fx := dbfx.New(f.pool, f.workspaceID, f.userID)
-	fx.Exec(t, `UPDATE issue SET status = 'custom_status' WHERE id = $1`, f.issueID)
-	catalogErr := errors.New("catalog temporarily unavailable")
-	q := db.New(recoveryCatalogErrorDB{DBTX: f.pool, err: catalogErr})
-	if target, err := loadDelegatedFailureRecoveryTarget(ctx, q, failed); target != nil || !errors.Is(err, catalogErr) {
-		t.Fatalf("unreadable catalog: target=%v err=%v; want no target and original error", target != nil, err)
+func TestDelegatedFailureRecoveryPreservesSignalWhenStatusUnavailable(t *testing.T) {
+	for _, readError := range []bool{false, true} {
+		name := "missing_catalog_entry"
+		if readError {
+			name = "catalog_read_error"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			const status = "recovery_custom_status"
+			createStatus := func() {
+				fx.Insert(t, "issue_status", dbfx.Cols{"workspace_id": f.workspaceID, "key": status,
+					"name": "Active", "category": "started", "color": "#22c55e", "position": 1})
+			}
+			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			queries := svc.Queries
+			failed, err := queries.GetAgentTask(ctx, failedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantErr := error(pgx.ErrNoRows)
+			if readError {
+				createStatus()
+				wantErr = errors.New("catalog temporarily unavailable")
+				svc.Queries = db.New(recoveryCatalogErrorDB{DBTX: f.pool, err: wantErr})
+			}
+			// This post-terminal hook runs only once. A failure to read lifecycle
+			// must pause dispatch without losing the durable obligation to retry.
+			if handled, err := svc.recoverDelegatedTaskFailure(ctx, failed); !handled || !errors.Is(err, wantErr) {
+				t.Errorf("initial recovery: handled=%v err=%v; want handled and %v", handled, err, wantErr)
+			}
+			comment, err := queries.GetDelegatedFailureRecoveryComment(ctx, db.GetDelegatedFailureRecoveryCommentParams{
+				IssueID: util.MustParseUUID(f.issueID), WorkspaceID: util.MustParseUUID(f.workspaceID), SourceTaskID: failedID,
+			})
+			if err != nil {
+				t.Fatalf("recovery signal must survive status resolution failure: %v", err)
+			}
+			var count int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
+				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 || f.settled(t, comment.ID) {
+				t.Fatalf("unresolved recovery: tasks=%d; want no dispatch or permanent receipt", count)
+			}
+			if !readError {
+				if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+					t.Fatalf("unresolved signal occupies the batch: %+v, %v", result, err)
+				}
+				createStatus()
+			}
+			svc.Queries = queries
+			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
+				t.Fatalf("catalog repaired: %+v, %v; want one replay without repeating the failure hook", result, err)
+			}
+			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+				t.Fatalf("repeat sweep: %+v, %v; want no duplicate", result, err)
+			}
+		})
 	}
 }
 
@@ -537,6 +551,106 @@ func TestPendingDelegatedFailureSweepSkipsCustomTerminalSourceIssue(t *testing.T
 	}
 	if recoveryTasks != 0 {
 		t.Fatalf("recovery tasks = %d, want none for a custom terminal source issue", recoveryTasks)
+	}
+}
+
+// The SQL prefilter is what keeps the recovery outbox scan from growing with
+// history. A signal whose source issue can never resume has to be dropped
+// THERE: the Go gate downstream discards it without stamping
+// recovery_settled_at, so anything that reaches Go stays in the scan forever
+// and spends part of maxPerTick on every tick.
+//
+// MUL-7240 disabled most of it silently. The predicate read
+// issue_status.category but compared it against the old seven-value key
+// vocabulary, and once a workspace's catalog is seeded — every production
+// workspace, per migration 469 — COALESCE returns that category: 'cancelled'
+// arrives as 'closed' and 'backlog' as 'unstarted', leaving only 'done' still
+// excluded. An unseeded workspace falls back to the raw key, so both are
+// covered here: the two vocabularies are each only reachable in one of them.
+// (MUL-7364)
+func TestPendingDelegatedFailureSweepPrefiltersUnresumableSourceIssues(t *testing.T) {
+	ctx := context.Background()
+	for _, catalog := range []struct {
+		name   string
+		seeded bool
+	}{
+		{"seeded catalog", true},
+		{"unseeded catalog", false},
+	} {
+		t.Run(catalog.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				// status the source issue ends up on. customCategory, when set,
+				// makes it a custom key created with that lifecycle first.
+				status         string
+				customCategory string
+				wantScanned    bool
+			}{
+				{name: "built-in cancelled", status: "cancelled"},
+				{name: "built-in backlog", status: "backlog"},
+				{name: "built-in done", status: "done"},
+				{name: "custom closed-category status", status: "shelved", customCategory: "closed"},
+				{name: "source issue still live", status: "in_progress", wantScanned: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					f, svc := seedDelegatedFailureFixture(t)
+					workspaceUUID, err := util.ParseUUID(f.workspaceID)
+					if err != nil {
+						t.Fatalf("parse workspace id: %v", err)
+					}
+					if catalog.seeded {
+						if err := svc.Queries.SeedIssueStatusEntries(ctx, workspaceUUID); err != nil {
+							t.Fatalf("seed status catalog: %v", err)
+						}
+					}
+					if tc.customCategory != "" {
+						if _, err := f.pool.Exec(ctx, `
+							INSERT INTO issue_status (
+								workspace_id, key, name, description, category, color, is_system, position
+							) VALUES ($1, $2, 'Shelved', '', $3, '#6b7280', false, 1)`,
+							f.workspaceID, tc.status, tc.customCategory); err != nil {
+							t.Fatalf("insert custom status: %v", err)
+						}
+					}
+
+					failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+					if _, err := f.pool.Exec(ctx, `
+						UPDATE agent_task_queue
+						SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+						WHERE id = $1`, failedID); err != nil {
+						t.Fatalf("stamp failed task: %v", err)
+					}
+					// The signal has to exist before the source issue moves:
+					// creating it runs the same Go gate being bypassed here.
+					target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+					if err != nil || target == nil || !created {
+						t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+					}
+					if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status); err != nil {
+						t.Fatalf("move source issue to %q: %v", tc.status, err)
+					}
+
+					// Asserted against this fixture's own signal rather than the
+					// sweep's totals: the scan is not workspace-scoped.
+					pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 1000)
+					if err != nil {
+						t.Fatalf("list pending recoveries: %v", err)
+					}
+					scanned := false
+					for _, comment := range pending {
+						if comment.ID == target.comment.ID {
+							scanned = true
+							break
+						}
+					}
+					if scanned != tc.wantScanned {
+						t.Fatalf("recovery signal scanned = %v, want %v — a source issue on %q %s",
+							scanned, tc.wantScanned, tc.status,
+							map[bool]string{true: "must stay in the outbox scan", false: "can never resume, so the row is rescanned and re-discarded forever"}[tc.wantScanned])
+					}
+				})
+			}
+		})
 	}
 }
 
