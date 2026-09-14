@@ -33,7 +33,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
-import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import {
+  commentLandingTarget,
+  isDeletedComment,
+} from "@multica/core/issues/comment-deletion";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useActorLookup } from "@/data/use-actor-name";
@@ -128,6 +131,14 @@ export function CommentCard({
   }, [resolved, highlightedCommentId, entry.id, replies]);
 
   const visibleReplies = replies.filter((reply) => !isDeletedComment(reply));
+  // A deleted reply renders nothing, so a notification pointing at one has no
+  // row to flash. Flash the comment just above where it was instead — the
+  // expansion above still keys off the original id, which is in this thread
+  // either way. Web does the same in its deep-link effect
+  // (packages/views/issues/components/issue-detail.tsx).
+  const highlightId = highlightedCommentId
+    ? commentLandingTarget(highlightedCommentId, entry.id, replies)
+    : highlightedCommentId;
 
   if (resolved && !expanded) {
     return (
@@ -190,12 +201,12 @@ export function CommentCard({
                 onPressChange={handlePressChange}
               />
               <ReplyHighlightOverlay
-                active={highlightedCommentId === reply.id}
+                active={highlightId === reply.id}
               />
             </View>
           ))}
         </View>
-        <RootHighlightOverlay active={highlightedCommentId === entry.id} />
+        <RootHighlightOverlay active={highlightId === entry.id} />
       </View>
     </View>
   );
