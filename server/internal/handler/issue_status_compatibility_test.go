@@ -174,3 +174,73 @@ func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 		t.Fatalf("cross-workspace terminal behavior: %s", got)
 	}
 }
+
+func TestStatusCompatibilityGCBeforeAndAfterBackfill(t *testing.T) {
+	for _, old := range installedStatusBuckets {
+		category, _ := issuestatus.CategoryForBehavior(old)
+		for _, stored := range []string{old, category} {
+			t.Run(old+"/"+stored, func(t *testing.T) {
+				key := "gc_" + uuid.NewString()[:8]
+				dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": stored, "color": "#123456"})
+				id := dbfx.Issue(t, key, testutil.Cols{"status": key})
+				type result struct {
+					Status   string `json:"status"`
+					Category string `json:"category"`
+				}
+				check := func(got result) {
+					t.Helper()
+					if got.Status != issuestatus.WireCategory(key, category) || got.Category != category {
+						t.Fatalf("GC wire=%+v for stored %s", got, stored)
+					}
+				}
+				var single result
+				req := withURLParam(newDaemonTokenRequest("GET", "/api/daemon/issues/"+id+"/gc-check", nil, testWorkspaceID, "compat-daemon"), "issueId", id)
+				testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&single)
+				check(single)
+				var batch struct {
+					Issues []result `json:"issues"`
+				}
+				req = withURLParam(newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{"issue_ids": []string{id}}, testWorkspaceID, "compat-daemon"), "workspaceId", testWorkspaceID)
+				testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&batch)
+				if len(batch.Issues) != 1 {
+					t.Fatalf("GC results=%d", len(batch.Issues))
+				}
+				check(batch.Issues[0])
+			})
+		}
+	}
+}
+
+func TestStatusCompatibilityCursorRejectsDifferentCategoryFormat(t *testing.T) {
+	project, _ := seedStatusCategoryFixture(t)
+	key := "status_category:in_progress"
+	request := issueTableRowsRequest{Query: statusCategoryQuery(project), Group: issueTableGroupSpec{Kind: "status_category"}, GroupKey: &key, Page: issueTablePageRequest{Limit: 1}}
+	var rows issueTableRowsResponse
+	testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", request)).Want(http.StatusOK).JSON(&rows)
+	if rows.NextCursor == nil {
+		t.Fatal("expected a second legacy page")
+	}
+	request.Page.Cursor = rows.NextCursor
+	request.Group.CategoryFormat = "lifecycle"
+	testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", request)).Want(http.StatusConflict)
+}
+
+func TestStatusCompatibilityParentLaneUsesExpandedVisibleKeys(t *testing.T) {
+	project := dbfx.Insert(t, "project", testutil.Cols{"workspace_id": testWorkspaceID, "title": "Category parent lane"})
+	key := "child_" + uuid.NewString()[:8]
+	dbfx.Insert(t, "issue_status", testutil.Cols{"workspace_id": testWorkspaceID, "key": key, "name": key, "category": "in_review", "color": "#123456"})
+	parent := dbfx.Issue(t, "Parent", testutil.Cols{"project_id": project, "status": "in_progress"})
+	dbfx.Issue(t, "Child", testutil.Cols{"project_id": project, "status": key, "parent_issue_id": parent})
+	group := issueTableGroupSpec{Kind: "compound", Primary: "parent", Secondary: "status_category", SecondaryValues: []string{"in_progress"}}
+	var groups issueTableGroupsResponse
+	testutil.Call(t, testHandler.ListIssueTableGroups, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{Query: statusCategoryQuery(project), Group: group, Page: issueTablePageRequest{Limit: 10}})).Want(http.StatusOK).JSON(&groups)
+	if groups.Total != 1 || len(groups.Groups) != 1 || groups.Groups[0].Key != "parent:"+parent {
+		t.Fatalf("visible parent groups = %+v", groups)
+	}
+	noParent := compoundCellGroupKey("parent:none", "in_progress", true)
+	var rows issueTableRowsResponse
+	testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{Query: statusCategoryQuery(project), Group: group, GroupKey: &noParent, Page: issueTablePageRequest{Limit: 10}})).Want(http.StatusOK).JSON(&rows)
+	if len(rows.Rows) != 0 {
+		t.Fatalf("promoted parent duplicated in No parent: %+v", rows.Rows)
+	}
+}

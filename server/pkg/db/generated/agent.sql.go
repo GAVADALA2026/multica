@@ -5737,7 +5737,8 @@ WHERE recovery.author_type = 'system'
   -- 'backlog' stopped matching at all. 'backlog' stays a key test: parking is
   -- built-in behavior a custom unstarted status does not inherit. (MUL-7364)
   AND source_issue.status NOT IN ('done', 'cancelled', 'backlog')
-  AND COALESCE(source_status.category, '') NOT IN ('done', 'closed')
+  -- Include the old terminal spelling until the independent backfill finishes.
+  AND COALESCE(source_status.category, '') NOT IN ('done', 'closed', 'cancelled')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id

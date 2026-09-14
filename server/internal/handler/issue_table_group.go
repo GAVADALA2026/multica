@@ -170,11 +170,20 @@ func (h *Handler) resolveStatusCategoryMaps(
 }
 
 func issueTableGroupIdentity(group issueTableGroupSpec) string {
-	if group.CategoryFormat != "" {
+	identity := issueTableGroupBaseIdentity(group)
+	if group.Kind == "status_category" || (group.Kind == "compound" && group.Secondary == "status_category") {
 		format := group.CategoryFormat
-		group.CategoryFormat = ""
-		return issueTableGroupIdentity(group) + ":category_format=" + format
+		if format == "" {
+			format = "legacy"
+		}
+		// Do not accept cursors minted before the category wire contract was
+		// explicit, or cursors from the other format.
+		return identity + ":category_format=" + format
 	}
+	return identity
+}
+
+func issueTableGroupBaseIdentity(group issueTableGroupSpec) string {
 	if group.Kind == "property" {
 		return "group:property:" + group.PropertyID + ":empty=" + strconv.FormatBool(group.IncludeEmpty)
 	}

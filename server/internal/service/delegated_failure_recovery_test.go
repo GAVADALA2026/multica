@@ -338,6 +338,8 @@ func TestPendingDelegatedFailureSweepPrefiltersUnresumableSourceIssues(t *testin
 				{name: "built-in backlog", status: "backlog"},
 				{name: "built-in done", status: "done"},
 				{name: "custom closed-category status", status: "shelved", customCategory: "closed"},
+				{name: "pre-backfill cancelled category", status: "legacy_shelved", customCategory: "cancelled"},
+				{name: "pre-backfill custom backlog stays live", status: "legacy_later", customCategory: "backlog", wantScanned: true},
 				{name: "source issue still live", status: "in_progress", wantScanned: true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
