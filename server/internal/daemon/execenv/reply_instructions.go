@@ -32,6 +32,13 @@ import "fmt"
 // BuildResumedCommentsHint, where a server-computed EMPTY delta answers the
 // scan (MUL-7344).
 //
+// The count and the read deliberately do not agree, and the text says so. The
+// COUNT is what the agent needs to size the catch-up, so it excludes the
+// injected trigger and the agent's own comments (CountNewCommentsSince). The
+// READ has no such filter — `--since` returns everything after the anchor —
+// and narrowing it to match would mean building a second, count-shaped query
+// for no gain. An agent that sees more rows than the number was told why.
+//
 // Known bounds of the `--since` read, unchanged by this hint: the handler caps
 // a page at 2000 comments and reports the cut in `X-Comments-Truncated`, which
 // the CLI does not surface; and `--thread` combined with `--since` drops the
@@ -61,7 +68,8 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 			"the server computed this delta, and reading it is the scan workflow step 2 requires. "+
 			"Read exactly those comments with "+
 			"`multica issue comment list %s --since %s --compact --output json` "+
-			"(every comment created after that anchor, in every thread, including the triggering one and your own replies).",
+			"(every comment created after that anchor, in every thread — it also returns the triggering comment and your own replies, "+
+			"which the count above excludes, so expect more rows than that number).",
 		newCommentCount, issueID, newCommentsSince,
 	)
 	// Defensive: comment triggers always carry a trigger id, but if one is

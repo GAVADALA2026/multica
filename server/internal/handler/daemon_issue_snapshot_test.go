@@ -212,3 +212,47 @@ func TestClaimTaskByRuntime_RecordsItsOwnIssueSnapshot(t *testing.T) {
 		t.Errorf("snapshot must store a hash, never the issue text: %s", string(raw))
 	}
 }
+
+// TestClaimTaskByRuntime_BothDeltasShareOneAnchor pins the merge: the comment
+// delta and the issue-state delta are resolved from the SAME prior-run row
+// (GetLastRunAnchorForIssueAndAgent), so "since your last run" is one fact on a
+// claim rather than two independently-resolved ones that could disagree — and a
+// comment-triggered claim reads that row once, not twice.
+func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Shared anchor runtime")
+	const name = "Shared anchor agent"
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
+
+	// One prior run carries both halves of the anchor: its started_at dates the
+	// comment delta, its snapshot dates the issue-state delta.
+	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
+		issueSnapshotJSON(t, 1, name+" issue", "", "in_progress", "none"))
+
+	// A member comment after that anchor, so the comment delta is non-zero and
+	// the two deltas cannot both be trivially empty.
+	dbfx.Comment(t, issueID, "something happened while you were away")
+	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+
+	resp := claimCommentTask(t, runtimeID, "shared-anchor-claim")
+	if !resp.Task.DeltaKnown {
+		t.Errorf("new_comments_delta_known must be true — the shared anchor carries started_at")
+	}
+	if resp.Task.NewCommentCount != 1 {
+		t.Errorf("new_comment_count = %d, want 1", resp.Task.NewCommentCount)
+	}
+	if !resp.Task.IssueStateDeltaKnown {
+		t.Errorf("issue_state_delta_known must be true — the same anchor row carries the snapshot")
+	}
+	if len(resp.Task.IssueChangedFields) != 0 {
+		t.Errorf("issue_changed_fields = %v, want empty", resp.Task.IssueChangedFields)
+	}
+	// Both anchors describe the same prior run, so the comment anchor must be
+	// that run's started_at, not this claim's own timestamp.
+	if resp.Task.NewCommentsSince == "" {
+		t.Errorf("new_comments_since must carry the shared anchor")
+	}
+}

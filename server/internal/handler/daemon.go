@@ -2504,14 +2504,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		} else {
 			issueSnapshot = encoded
 		}
-		// Best-effort, exactly like the comment delta above: any error leaves
+		// ONE read of the previous run's anchor row, shared by both deltas this
+		// claim reports. The comment block further down reuses priorRunStartedAt
+		// rather than resolving the same row again — that is what makes "since
+		// your last run" a single fact on this claim instead of two
+		// separately-resolved ones that could disagree.
+		//
+		// Best-effort, exactly like the comment delta: any error leaves
 		// IssueStateDeltaKnown false, which the daemon reads as "not compared"
-		// and answers with the unconditional issue read.
-		if prevRaw, err := h.Queries.GetLastTaskIssueSnapshotForIssueAndAgent(r.Context(), db.GetLastTaskIssueSnapshotForIssueAndAgentParams{
+		// and answers with the unconditional issue read. A first run on the
+		// issue returns no row (pgx.ErrNoRows) and takes the same path.
+		var priorRunStartedAt pgtype.Timestamptz
+		if anchor, err := h.Queries.GetLastRunAnchorForIssueAndAgent(r.Context(), db.GetLastRunAnchorForIssueAndAgentParams{
 			AgentID: task.AgentID,
 			IssueID: task.IssueID,
 		}); err == nil {
-			if prev, ok := decodeIssueStateSnapshot(prevRaw); ok {
+			priorRunStartedAt = anchor.StartedAt
+			if prev, ok := decodeIssueStateSnapshot(anchor.IssueSnapshot); ok {
 				resp.IssueStateDeltaKnown = true
 				resp.IssueChangedFields = currentSnapshot.changedFieldsSince(prev)
 			}
@@ -2743,21 +2752,25 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// hint to render from a zero — but the daemon must still be able
 				// to tell a computed zero from a failed read, because only the
 				// computed one may waive the workflow's comment scan (MUL-6984).
-				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
-					AgentID: task.AgentID,
-					IssueID: comment.IssueID,
-				}); err == nil && startedAt.Valid {
+				//
+				// The anchor itself was already resolved once above, with the
+				// issue-state snapshot it shares a row with (MUL-7344), so this
+				// block reads priorRunStartedAt instead of querying again. An
+				// invalid value means no prior run OR a failed anchor read; both
+				// leave NewCommentsDeltaKnown false, which is the same
+				// conservative reading the separate query produced.
+				if priorRunStartedAt.Valid {
 					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
 						AnchorID:    effectiveTriggerUUID,
 						IssueID:     comment.IssueID,
 						WorkspaceID: comment.WorkspaceID,
-						Since:       startedAt,
+						Since:       priorRunStartedAt,
 						AuthorID:    task.AgentID,
 					}); err == nil {
 						resp.NewCommentsDeltaKnown = true
 						if cnt > 0 {
 							resp.NewCommentCount = int(cnt)
-							resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+							resp.NewCommentsSince = priorRunStartedAt.Time.UTC().Format(time.RFC3339)
 						}
 					}
 				}

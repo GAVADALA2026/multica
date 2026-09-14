@@ -4344,32 +4344,50 @@ func (q *Queries) GetCommentThreadRootID(ctx context.Context, commentID pgtype.U
 	return id, err
 }
 
-const getLastTaskIssueSnapshotForIssueAndAgent = `-- name: GetLastTaskIssueSnapshotForIssueAndAgent :one
-SELECT issue_snapshot FROM agent_task_queue
+const getLastRunAnchorForIssueAndAgent = `-- name: GetLastRunAnchorForIssueAndAgent :one
+SELECT started_at, issue_snapshot FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
 ORDER BY started_at DESC
 LIMIT 1
 `
 
-type GetLastTaskIssueSnapshotForIssueAndAgentParams struct {
+type GetLastRunAnchorForIssueAndAgentParams struct {
 	AgentID pgtype.UUID `json:"agent_id"`
 	IssueID pgtype.UUID `json:"issue_id"`
 }
 
-// Returns the issue_snapshot recorded by the most recent prior task for this
-// (agent, issue) pair — the comparable issue state that run was handed when it
-// was claimed. Same WHERE and ORDER as GetLastTaskStartedAtForIssueAndAgent, so
-// both deltas are measured from the same anchor run: "since your last run" means
-// one thing on this claim, not two. Tasks with no started_at (never dispatched /
-// the just-claimed current task) are excluded, so this never compares the claim
-// against itself. A NULL result means that run predates the column or its write
-// lost the CAS; the caller must report the comparison as not done, never as
+type GetLastRunAnchorForIssueAndAgentRow struct {
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	IssueSnapshot []byte             `json:"issue_snapshot"`
+}
+
+// Returns everything a claim needs to know about this agent's PREVIOUS run on
+// this issue, in one row: when it started, and the issue state it was handed.
+//
+// started_at is the "since" anchor for counting comments that arrived since
+// that run. MUST be started_at, never completed_at: a long run would otherwise
+// miss comments posted while it ran.
+//
+// issue_snapshot is the comparable issue state recorded when that run was
+// claimed (MUL-7344). NULL means that run predates the column or its write lost
+// the CAS; the caller must report the comparison as not done, never as
 // unchanged.
-func (q *Queries) GetLastTaskIssueSnapshotForIssueAndAgent(ctx context.Context, arg GetLastTaskIssueSnapshotForIssueAndAgentParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getLastTaskIssueSnapshotForIssueAndAgent, arg.AgentID, arg.IssueID)
-	var issue_snapshot []byte
-	err := row.Scan(&issue_snapshot)
-	return issue_snapshot, err
+//
+// The two deltas a claim reports — comments and issue state — deliberately
+// share this one anchor row. That is not only a saved round trip: it is what
+// makes "since your last run" mean ONE thing on a claim rather than two
+// separately-resolved things that could disagree. The shared read also shares a
+// failure mode, and both consumers degrade the same safe way (comment scan
+// required, issue comparison unknown).
+//
+// Any terminal state counts as "a run happened". Tasks with no started_at
+// (never dispatched / the just-claimed current task) are excluded, so this
+// never returns the current claim's own row.
+func (q *Queries) GetLastRunAnchorForIssueAndAgent(ctx context.Context, arg GetLastRunAnchorForIssueAndAgentParams) (GetLastRunAnchorForIssueAndAgentRow, error) {
+	row := q.db.QueryRow(ctx, getLastRunAnchorForIssueAndAgent, arg.AgentID, arg.IssueID)
+	var i GetLastRunAnchorForIssueAndAgentRow
+	err := row.Scan(&i.StartedAt, &i.IssueSnapshot)
+	return i, err
 }
 
 const getLastTaskSession = `-- name: GetLastTaskSession :one
@@ -4554,31 +4572,6 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 	var i GetLastTaskSessionRow
 	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
 	return i, err
-}
-
-const getLastTaskStartedAtForIssueAndAgent = `-- name: GetLastTaskStartedAtForIssueAndAgent :one
-SELECT started_at FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
-ORDER BY started_at DESC
-LIMIT 1
-`
-
-type GetLastTaskStartedAtForIssueAndAgentParams struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-// Returns the started_at of the most recent prior task for this (agent, issue)
-// pair, used as the "since" anchor for counting comments that arrived since the
-// agent's last run. Any terminal state counts as "a run happened". Tasks with
-// no started_at (never dispatched / the just-claimed current task) are excluded,
-// so this never returns the current claim's own row. MUST use started_at, never
-// completed_at: a long run would otherwise miss comments posted while it ran.
-func (q *Queries) GetLastTaskStartedAtForIssueAndAgent(ctx context.Context, arg GetLastTaskStartedAtForIssueAndAgentParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, getLastTaskStartedAtForIssueAndAgent, arg.AgentID, arg.IssueID)
-	var started_at pgtype.Timestamptz
-	err := row.Scan(&started_at)
-	return started_at, err
 }
 
 const getLatestChatTaskRolloutMissing = `-- name: GetLatestChatTaskRolloutMissing :one
