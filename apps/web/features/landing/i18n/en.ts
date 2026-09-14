@@ -294,37 +294,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.4.44",
-        date: "2026-09-14",
-        title: "DingTalk quoted replies, reworked Issue status settings, safer comment deletion, and a steadier Lark binding QR",
-        changes: [],
-        features: [
-          "A DingTalk reply in a group now quotes the message you sent.",
-          "DingTalk marks your request with a reaction while it runs, and again when it is done.",
-          "A DingTalk command confirmation keeps what you typed, and links the Issue it created.",
-          "Issue statuses in Settings are grouped as Unstarted, Started, Done, and Closed.",
-          "Drag a status, built-in ones included, to set its place in boards, lists, and status menus.",
-          "Give a custom status the icon shape you want.",
-          "DeepSeek Harness Desktop is picked up as a runtime on its own, with no manual setup.",
-        ],
-        improvements: [
-          "Archiving a status tells you how many Issues still use it, and takes you to them.",
-          "A DeepSeek Harness runtime that cannot start now says what is missing.",
-          "The command line shows how each Autopilot's last run went.",
-        ],
-        fixes: [
-          "Deleting a comment keeps the replies people left under it.",
-          "A deleted reply leaves nothing behind, and a link to one lands on the message beside it.",
-          "A skill archive packed on Windows imports as a skill you can use.",
-          "Hermes skills show up in the Skills tab and the import dialog on Windows, and under your own Hermes home.",
-          "WeCom no longer sends a blank message ahead of a file, and says when the file did not go through.",
-          "The Lark binding QR code lasts its full hour, and no longer dies on the first check.",
-          "A desktop app on an older version keeps your custom statuses after the server updates.",
-          "Two comments handing the same agent work at once join one run instead of failing.",
-          "A Claude run that ends without a final tally no longer overstates the tokens it used.",
-        ],
-      },
-      {
         version: "0.4.43",
         date: "2026-09-11",
         title: "Comment and description annotations, desktop history menus, new Issue board defaults, and performance improvements",
