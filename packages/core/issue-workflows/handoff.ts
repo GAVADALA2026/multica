@@ -24,7 +24,7 @@ export function workflowHandoff(
   const active = execution !== undefined && isAutomationActive(execution.status);
   const awaitingConfirmation = execution?.status === "completed" &&
     policy?.executor.type !== "none" && policy?.advance === "human_confirms";
-  const terminal = current?.phase === "completed" || current?.phase === "cancelled";
+  const terminal = current?.phase === "done" || current?.phase === "closed";
   const canHandoff = !execution || ["dormant", "completed", "superseded"].includes(execution.status);
   const showNext = !terminal && canHandoff && !active && next !== undefined && (
     awaitingConfirmation || next.entry_policy.executor.type !== "none" ||

@@ -50,7 +50,7 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 		CREATE TABLE issue_status (
 			workspace_id UUID NOT NULL, key TEXT NOT NULL, name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '', color TEXT NOT NULL, position DOUBLE PRECISION NOT NULL,
-			category TEXT NOT NULL, archived_at TIMESTAMPTZ,
+			is_system BOOLEAN NOT NULL DEFAULT FALSE, icon TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, archived_at TIMESTAMPTZ,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		CREATE TABLE agent_task_queue (id UUID PRIMARY KEY, status TEXT NOT NULL DEFAULT 'queued');
@@ -74,42 +74,42 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 	if _, err := conn.Exec(ctx, `
 		INSERT INTO issue_status (workspace_id, key, name, color, position, category) VALUES
-			($1, 'backlog', 'Backlog', '#6b7280', 0, 'backlog'),
-			($1, 'todo', 'Todo', '#6b7280', 1, 'todo'),
-			($1, 'in_progress', 'In Progress', '#6b7280', 2, 'in_progress'),
-			($1, 'in_review', 'In Review', '#6b7280', 3, 'in_review'),
-			($1, 'human_review', 'Human Review', '#6b7280', 4, 'in_review'),
+			($1, 'backlog', 'Backlog', '#6b7280', 0, 'unstarted'),
+			($1, 'todo', 'Todo', '#6b7280', 1, 'unstarted'),
+			($1, 'in_progress', 'In Progress', '#6b7280', 2, 'started'),
+			($1, 'in_review', 'In Review', '#6b7280', 3, 'started'),
+			($1, 'human_review', 'Human Review', '#6b7280', 4, 'started'),
 			($1, 'done', 'Done', '#6b7280', 5, 'done'),
-			($1, 'blocked', 'Blocked', '#6b7280', 6, 'blocked'),
-			($1, 'cancelled', 'Cancelled', '#6b7280', 7, 'cancelled');
+			($1, 'blocked', 'Blocked', '#6b7280', 6, 'started'),
+			($1, 'cancelled', 'Cancelled', '#6b7280', 7, 'closed');
 	`, workspaceID); err != nil {
 		t.Fatalf("seed legacy status catalog: %v", err)
 	}
 
 	up := []string{
-		"460_issue_workflow_foundation.up.sql",
-		"461_issue_workflow_pkey_index.up.sql",
-		"462_issue_workflow_status_pkey_index.up.sql",
-		"463_issue_transition_pkey_index.up.sql",
-		"464_automation_execution_pkey_index.up.sql",
-		"465_issue_workflow_primary_keys.up.sql",
-		"466_issue_workflow_scope_index.up.sql",
-		"467_issue_workflow_legacy_status_index.up.sql",
-		"468_issue_transition_revision_index.up.sql",
-		"469_automation_execution_trigger_index.up.sql",
-		"470_issue_transition_timeline_index.up.sql",
-		"471_issue_workflow_binding_index.up.sql",
-		"472_agent_task_automation_execution_index.up.sql",
-		"473_issue_workflow_backfill.up.sql",
-		"474_automation_execution_task_status.up.sql",
-		"475_issue_workflow_spec_fields.up.sql",
-		"476_issue_workflow_spec_key_index.up.sql",
+		"472_issue_workflow_foundation.up.sql",
+		"473_issue_workflow_pkey_index.up.sql",
+		"474_issue_workflow_status_pkey_index.up.sql",
+		"475_issue_transition_pkey_index.up.sql",
+		"476_automation_execution_pkey_index.up.sql",
+		"477_issue_workflow_primary_keys.up.sql",
+		"478_issue_workflow_scope_index.up.sql",
+		"479_issue_workflow_legacy_status_index.up.sql",
+		"480_issue_transition_revision_index.up.sql",
+		"481_automation_execution_trigger_index.up.sql",
+		"482_issue_transition_timeline_index.up.sql",
+		"483_issue_workflow_binding_index.up.sql",
+		"484_agent_task_automation_execution_index.up.sql",
+		"485_issue_workflow_backfill.up.sql",
+		"486_automation_execution_task_status.up.sql",
+		"487_issue_workflow_spec_fields.up.sql",
+		"488_issue_workflow_spec_key_index.up.sql",
 	}
 	for _, name := range up {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
 	}
 	// The backfill itself is explicitly restartable after partial operator runs.
-	applyMigrationFile(t, ctx, conn.Conn(), "473_issue_workflow_backfill.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "485_issue_workflow_backfill.up.sql")
 
 	assertWorkflowMigrationCount(t, ctx, conn, "issue_workflow", 1)
 	assertWorkflowMigrationCount(t, ctx, conn, "issue_workflow_status", 8)
@@ -152,7 +152,7 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	`).Scan(&orderedStatuses, &orderedPositions); err != nil {
 		t.Fatalf("read workflow status order: %v", err)
 	}
-	wantOrder := []string{"backlog", "todo", "in_progress", "in_review", "human_review", "done", "blocked", "cancelled"}
+	wantOrder := []string{"backlog", "todo", "in_progress", "in_review", "human_review", "blocked", "done", "cancelled"}
 	for i := range wantOrder {
 		if orderedStatuses[i] != wantOrder[i] || orderedPositions[i] != float64(i) {
 			t.Fatalf("workflow status[%d] = key %q position %v, want key %q position %d", i, orderedStatuses[i], orderedPositions[i], wantOrder[i], i)
@@ -160,23 +160,23 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	down := []string{
-		"476_issue_workflow_spec_key_index.down.sql",
-		"475_issue_workflow_spec_fields.down.sql",
-		"474_automation_execution_task_status.down.sql",
-		"473_issue_workflow_backfill.down.sql",
-		"472_agent_task_automation_execution_index.down.sql",
-		"471_issue_workflow_binding_index.down.sql",
-		"470_issue_transition_timeline_index.down.sql",
-		"469_automation_execution_trigger_index.down.sql",
-		"468_issue_transition_revision_index.down.sql",
-		"467_issue_workflow_legacy_status_index.down.sql",
-		"466_issue_workflow_scope_index.down.sql",
-		"465_issue_workflow_primary_keys.down.sql",
-		"464_automation_execution_pkey_index.down.sql",
-		"463_issue_transition_pkey_index.down.sql",
-		"462_issue_workflow_status_pkey_index.down.sql",
-		"461_issue_workflow_pkey_index.down.sql",
-		"460_issue_workflow_foundation.down.sql",
+		"488_issue_workflow_spec_key_index.down.sql",
+		"487_issue_workflow_spec_fields.down.sql",
+		"486_automation_execution_task_status.down.sql",
+		"485_issue_workflow_backfill.down.sql",
+		"484_agent_task_automation_execution_index.down.sql",
+		"483_issue_workflow_binding_index.down.sql",
+		"482_issue_transition_timeline_index.down.sql",
+		"481_automation_execution_trigger_index.down.sql",
+		"480_issue_transition_revision_index.down.sql",
+		"479_issue_workflow_legacy_status_index.down.sql",
+		"478_issue_workflow_scope_index.down.sql",
+		"477_issue_workflow_primary_keys.down.sql",
+		"476_automation_execution_pkey_index.down.sql",
+		"475_issue_transition_pkey_index.down.sql",
+		"474_issue_workflow_status_pkey_index.down.sql",
+		"473_issue_workflow_pkey_index.down.sql",
+		"472_issue_workflow_foundation.down.sql",
 	}
 	for _, name := range down {
 		applyMigrationFile(t, ctx, conn.Conn(), name)

@@ -72,7 +72,7 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 		Key:         "human_review",
 		Name:        "Human Review",
 		Description: "Custom review gate",
-		Category:    "in_review",
+		Category:    "started",
 		Color:       "#22c55e",
 	}); err != nil {
 		t.Fatalf("create custom review status: %v", err)

@@ -19,7 +19,7 @@ WHERE id = $1::uuid
   AND workspace_id = $2::uuid
   AND workflow_id = $3::uuid
   AND archived_at IS NULL
-RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 `
 
 type ArchiveIssueWorkflowStatusParams struct {
@@ -39,6 +39,7 @@ func (q *Queries) ArchiveIssueWorkflowStatus(ctx context.Context, arg ArchiveIss
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -213,7 +214,7 @@ WHERE task.automation_execution_id = execution.id
   AND execution.workspace_id = $2::uuid
   AND execution.status = 'superseded'
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.automation_execution_id
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.automation_execution_id
 `
 
 type CancelTasksForSupersededAutomationExecutionsParams struct {
@@ -286,6 +287,9 @@ func (q *Queries) CancelTasksForSupersededAutomationExecutions(ctx context.Conte
 			&i.DurableWorkDir,
 			&i.ChannelContextRevision,
 			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
 			&i.AutomationExecutionID,
 		); err != nil {
 			return nil, err
@@ -336,7 +340,7 @@ func (q *Queries) ClearProjectIssueWorkflow(ctx context.Context, arg ClearProjec
 
 const cloneIssueWorkflowStatuses = `-- name: CloneIssueWorkflowStatuses :execrows
 INSERT INTO issue_workflow_status (
-    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color,
+    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color, icon,
     position, phase, outcome, entry_policy, entry_policy_revision, archived_at,
     created_at, updated_at
 )
@@ -348,6 +352,7 @@ SELECT
     source.name,
     source.description,
     source.color,
+    source.icon,
     source.position,
     source.phase,
     source.outcome,
@@ -469,7 +474,7 @@ func (q *Queries) CreateAutomationExecution(ctx context.Context, arg CreateAutom
 const createIssueWorkflowStatus = `-- name: CreateIssueWorkflowStatus :one
 INSERT INTO issue_workflow_status (
     id, workspace_id, workflow_id, legacy_status_key, spec_key, name,
-    description, color, position, phase, outcome, entry_policy,
+    description, color, icon, position, phase, outcome, entry_policy,
     entry_policy_revision, archived_at
 ) VALUES (
     COALESCE($1::uuid, gen_random_uuid()),
@@ -480,14 +485,15 @@ INSERT INTO issue_workflow_status (
     $6::text,
     $7::text,
     $8::text,
-    $9::double precision,
-    $10::text,
+    $9::text,
+    $10::double precision,
     $11::text,
-    $12::jsonb,
+    $12::text,
+    $13::jsonb,
     1,
-    $13::timestamptz
+    $14::timestamptz
 )
-RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 `
 
 type CreateIssueWorkflowStatusParams struct {
@@ -499,6 +505,7 @@ type CreateIssueWorkflowStatusParams struct {
 	Name            string             `json:"name"`
 	Description     string             `json:"description"`
 	Color           string             `json:"color"`
+	Icon            string             `json:"icon"`
 	Position        float64            `json:"position"`
 	Phase           string             `json:"phase"`
 	Outcome         pgtype.Text        `json:"outcome"`
@@ -516,6 +523,7 @@ func (q *Queries) CreateIssueWorkflowStatus(ctx context.Context, arg CreateIssue
 		arg.Name,
 		arg.Description,
 		arg.Color,
+		arg.Icon,
 		arg.Position,
 		arg.Phase,
 		arg.Outcome,
@@ -531,6 +539,7 @@ func (q *Queries) CreateIssueWorkflowStatus(ctx context.Context, arg CreateIssue
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -805,10 +814,9 @@ SELECT
         WHERE i.workspace_id = w.id
           AND i.workflow_status_id IS NOT NULL
           AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
-                  WHEN 'backlog' THEN 'backlog'
                   WHEN 'unstarted' THEN 'todo'
-                  WHEN 'completed' THEN 'done'
-                  WHEN 'cancelled' THEN 'cancelled'
+                  WHEN 'done' THEN 'done'
+                  WHEN 'closed' THEN 'cancelled'
                   ELSE 'in_progress'
               END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,
@@ -852,7 +860,7 @@ func (q *Queries) GetIssueWorkflowConsistency(ctx context.Context, id pgtype.UUI
 }
 
 const getIssueWorkflowStatusByID = `-- name: GetIssueWorkflowStatusByID :one
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1
   AND workflow_id = $2
@@ -876,6 +884,7 @@ func (q *Queries) GetIssueWorkflowStatusByID(ctx context.Context, arg GetIssueWo
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -890,7 +899,7 @@ func (q *Queries) GetIssueWorkflowStatusByID(ctx context.Context, arg GetIssueWo
 }
 
 const getIssueWorkflowStatusByLegacyKey = `-- name: GetIssueWorkflowStatusByLegacyKey :one
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1
   AND workflow_id = $2
@@ -914,6 +923,7 @@ func (q *Queries) GetIssueWorkflowStatusByLegacyKey(ctx context.Context, arg Get
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -928,7 +938,7 @@ func (q *Queries) GetIssueWorkflowStatusByLegacyKey(ctx context.Context, arg Get
 }
 
 const getIssueWorkflowStatusBySpecKey = `-- name: GetIssueWorkflowStatusBySpecKey :one
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1
   AND workflow_id = $2
@@ -952,6 +962,7 @@ func (q *Queries) GetIssueWorkflowStatusBySpecKey(ctx context.Context, arg GetIs
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -1016,7 +1027,7 @@ func (q *Queries) InsertIssueTransition(ctx context.Context, arg InsertIssueTran
 }
 
 const listActiveIssueWorkflowStatuses = `-- name: ListActiveIssueWorkflowStatuses :many
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1::uuid
   AND workflow_id = $2::uuid
@@ -1046,6 +1057,7 @@ func (q *Queries) ListActiveIssueWorkflowStatuses(ctx context.Context, arg ListA
 			&i.Name,
 			&i.Description,
 			&i.Color,
+			&i.Icon,
 			&i.Position,
 			&i.Phase,
 			&i.Outcome,
@@ -1178,10 +1190,9 @@ SELECT
         WHERE i.workspace_id = w.id
           AND i.workflow_status_id IS NOT NULL
           AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
-                  WHEN 'backlog' THEN 'backlog'
                   WHEN 'unstarted' THEN 'todo'
-                  WHEN 'completed' THEN 'done'
-                  WHEN 'cancelled' THEN 'cancelled'
+                  WHEN 'done' THEN 'done'
+                  WHEN 'closed' THEN 'cancelled'
                   ELSE 'in_progress'
               END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,
@@ -1240,7 +1251,7 @@ func (q *Queries) ListIssueWorkflowConsistency(ctx context.Context) ([]ListIssue
 }
 
 const listIssueWorkflowStatuses = `-- name: ListIssueWorkflowStatuses :many
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1::uuid
   AND workflow_id = $2::uuid
@@ -1271,6 +1282,7 @@ func (q *Queries) ListIssueWorkflowStatuses(ctx context.Context, arg ListIssueWo
 			&i.Name,
 			&i.Description,
 			&i.Color,
+			&i.Icon,
 			&i.Position,
 			&i.Phase,
 			&i.Outcome,
@@ -1292,7 +1304,7 @@ func (q *Queries) ListIssueWorkflowStatuses(ctx context.Context, arg ListIssueWo
 }
 
 const lockActiveIssueWorkflowStatus = `-- name: LockActiveIssueWorkflowStatus :one
-SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+SELECT id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 FROM issue_workflow_status
 WHERE workspace_id = $1
   AND workflow_id = $2
@@ -1318,6 +1330,7 @@ func (q *Queries) LockActiveIssueWorkflowStatus(ctx context.Context, arg LockAct
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -1738,7 +1751,7 @@ func (q *Queries) SupersedeIssueAutomationExecutions(ctx context.Context, arg Su
 
 const syncDefaultIssueWorkflowStatuses = `-- name: SyncDefaultIssueWorkflowStatuses :exec
 INSERT INTO issue_workflow_status (
-    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color,
+    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color, icon,
     position, phase, outcome, archived_at, created_at, updated_at
 )
 SELECT
@@ -1749,32 +1762,25 @@ SELECT
     s.name,
     s.description,
     s.color,
+    s.icon,
     (ROW_NUMBER() OVER (
         PARTITION BY s.workspace_id
         ORDER BY
-            CASE s.category
-                WHEN 'backlog' THEN 0
-                WHEN 'todo' THEN 1
-                WHEN 'in_progress' THEN 2
-                WHEN 'in_review' THEN 3
-                WHEN 'done' THEN 4
-                WHEN 'blocked' THEN 5
-                WHEN 'cancelled' THEN 6
-                ELSE 7
-            END,
+            CASE s.category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
             s.position,
+            CASE WHEN s.is_system THEN 0 ELSE 1 END,
+            CASE s.key
+                WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1
+                WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3
+                WHEN 'blocked' THEN 4 WHEN 'done' THEN 5
+                WHEN 'cancelled' THEN 6 ELSE 7
+            END,
             s.key
     ) - 1)::double precision,
-    CASE s.category
-        WHEN 'backlog' THEN 'backlog'
-        WHEN 'todo' THEN 'unstarted'
-        WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
-        ELSE 'started'
-    END,
+    s.category,
     CASE s.category
         WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'closed' THEN 'cancelled'
         ELSE NULL
     END,
     s.archived_at,
@@ -1788,6 +1794,7 @@ DO UPDATE SET
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     color = EXCLUDED.color,
+    icon = EXCLUDED.icon,
     position = EXCLUDED.position,
     phase = EXCLUDED.phase,
     outcome = EXCLUDED.outcome,
@@ -1870,10 +1877,9 @@ func (q *Queries) UpdateIssueAssigneeFromEntryPolicy(ctx context.Context, arg Up
 const updateIssueWorkflowStatus = `-- name: UpdateIssueWorkflowStatus :one
 UPDATE issue AS i
 SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'backlog' THEN 'backlog'
         WHEN 'unstarted' THEN 'todo'
-        WHEN 'completed' THEN 'done'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'done' THEN 'done'
+        WHEN 'closed' THEN 'cancelled'
         ELSE 'in_progress'
     END),
     workflow_status_id = s.id,
@@ -1937,10 +1943,9 @@ func (q *Queries) UpdateIssueWorkflowStatus(ctx context.Context, arg UpdateIssue
 const updateIssueWorkflowStatusAndAssignee = `-- name: UpdateIssueWorkflowStatusAndAssignee :one
 UPDATE issue AS i
 SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'backlog' THEN 'backlog'
         WHEN 'unstarted' THEN 'todo'
-        WHEN 'completed' THEN 'done'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'done' THEN 'done'
+        WHEN 'closed' THEN 'cancelled'
         ELSE 'in_progress'
     END),
     workflow_status_id = s.id,
@@ -2019,25 +2024,27 @@ UPDATE issue_workflow_status
 SET name = $1::text,
     description = $2::text,
     color = $3::text,
-    position = $4::double precision,
-    phase = $5::text,
-    outcome = $6::text,
-    entry_policy = $7::jsonb,
+    icon = $4::text,
+    position = $5::double precision,
+    phase = $6::text,
+    outcome = $7::text,
+    entry_policy = $8::jsonb,
     entry_policy_revision = entry_policy_revision + CASE
-        WHEN $8::boolean THEN 1 ELSE 0
+        WHEN $9::boolean THEN 1 ELSE 0
     END,
     updated_at = now()
-WHERE id = $9::uuid
-  AND workspace_id = $10::uuid
-  AND workflow_id = $11::uuid
+WHERE id = $10::uuid
+  AND workspace_id = $11::uuid
+  AND workflow_id = $12::uuid
   AND archived_at IS NULL
-RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 `
 
 type UpdateIssueWorkflowStatusDefinitionParams struct {
 	Name                    string      `json:"name"`
 	Description             string      `json:"description"`
 	Color                   string      `json:"color"`
+	Icon                    string      `json:"icon"`
 	Position                float64     `json:"position"`
 	Phase                   string      `json:"phase"`
 	Outcome                 pgtype.Text `json:"outcome"`
@@ -2053,6 +2060,7 @@ func (q *Queries) UpdateIssueWorkflowStatusDefinition(ctx context.Context, arg U
 		arg.Name,
 		arg.Description,
 		arg.Color,
+		arg.Icon,
 		arg.Position,
 		arg.Phase,
 		arg.Outcome,
@@ -2071,6 +2079,7 @@ func (q *Queries) UpdateIssueWorkflowStatusDefinition(ctx context.Context, arg U
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,
@@ -2089,25 +2098,27 @@ UPDATE issue_workflow_status
 SET name = $1::text,
     description = $2::text,
     color = $3::text,
-    position = $4::double precision,
-    phase = $5::text,
-    outcome = $6::text,
-    entry_policy = $7::jsonb,
+    icon = $4::text,
+    position = $5::double precision,
+    phase = $6::text,
+    outcome = $7::text,
+    entry_policy = $8::jsonb,
     entry_policy_revision = entry_policy_revision + CASE
-        WHEN $8::boolean THEN 1 ELSE 0
+        WHEN $9::boolean THEN 1 ELSE 0
     END,
     archived_at = NULL,
     updated_at = now()
-WHERE id = $9::uuid
-  AND workspace_id = $10::uuid
-  AND workflow_id = $11::uuid
-RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
+WHERE id = $10::uuid
+  AND workspace_id = $11::uuid
+  AND workflow_id = $12::uuid
+RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, color, icon, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at, spec_key
 `
 
 type UpdateIssueWorkflowStatusFromSpecParams struct {
 	Name                    string      `json:"name"`
 	Description             string      `json:"description"`
 	Color                   string      `json:"color"`
+	Icon                    string      `json:"icon"`
 	Position                float64     `json:"position"`
 	Phase                   string      `json:"phase"`
 	Outcome                 pgtype.Text `json:"outcome"`
@@ -2123,6 +2134,7 @@ func (q *Queries) UpdateIssueWorkflowStatusFromSpec(ctx context.Context, arg Upd
 		arg.Name,
 		arg.Description,
 		arg.Color,
+		arg.Icon,
 		arg.Position,
 		arg.Phase,
 		arg.Outcome,
@@ -2141,6 +2153,7 @@ func (q *Queries) UpdateIssueWorkflowStatusFromSpec(ctx context.Context, arg Upd
 		&i.Name,
 		&i.Description,
 		&i.Color,
+		&i.Icon,
 		&i.Position,
 		&i.Phase,
 		&i.Outcome,

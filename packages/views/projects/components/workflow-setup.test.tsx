@@ -56,7 +56,7 @@ function setup(copy = false) {
           spec_key: "draft",
           name: "Draft",
           position: 0,
-          phase: "backlog",
+          phase: "unstarted",
           color: "#6b7280",
           description: "",
           archived_at: null,

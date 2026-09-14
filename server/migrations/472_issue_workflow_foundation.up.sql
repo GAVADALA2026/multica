@@ -23,8 +23,9 @@ CREATE TABLE issue_workflow_status (
     name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 64),
     description TEXT NOT NULL DEFAULT '' CHECK (char_length(description) <= 256),
     color TEXT NOT NULL CHECK (color ~ '^#[0-9a-f]{6}$'),
+    icon TEXT NOT NULL DEFAULT '',
     position DOUBLE PRECISION NOT NULL DEFAULT 0,
-    phase TEXT NOT NULL CHECK (phase IN ('backlog', 'unstarted', 'started', 'completed', 'cancelled')),
+    phase TEXT NOT NULL CHECK (phase IN ('unstarted', 'started', 'done', 'closed')),
     outcome TEXT CHECK (outcome IS NULL OR outcome IN ('completed', 'cancelled')),
     entry_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     entry_policy_revision BIGINT NOT NULL DEFAULT 1 CHECK (entry_policy_revision > 0),
@@ -35,9 +36,9 @@ CREATE TABLE issue_workflow_status (
         CHECK (jsonb_typeof(entry_policy) = 'object'),
     CONSTRAINT issue_workflow_status_outcome_matches_phase
         CHECK (
-            (phase = 'completed' AND outcome = 'completed') OR
-            (phase = 'cancelled' AND outcome = 'cancelled') OR
-            (phase NOT IN ('completed', 'cancelled') AND outcome IS NULL)
+            (phase = 'done' AND outcome = 'completed') OR
+            (phase = 'closed' AND outcome = 'cancelled') OR
+            (phase NOT IN ('done', 'closed') AND outcome IS NULL)
         )
 );
 

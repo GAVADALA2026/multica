@@ -333,7 +333,7 @@ export function ManualCreatePanel({
   const workflowQuery = useQuery(effectiveIssueWorkflowOptions(wsId, projectId ?? null));
   const selectedNode = resolveCreateWorkflowStatus(workflowQuery.data, projectId ?? null, statusSelection);
   const workflowReady = workflowQuery.isSuccess && !!selectedNode;
-  const { categoryOf: draftStatusCategory } = useIssueStatuses(wsId);
+  const { categoryOf: draftStatusCategory, colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
@@ -656,6 +656,8 @@ export function ManualCreatePanel({
             <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
               <StatusIcon
                 status={issue.status}
+                icon={iconOf(issue.status)}
+                color={colorOf(issue.status)}
                 category={issueStatusCategory(issue) ?? undefined}
                 className="size-3.5 shrink-0"
               />
@@ -1238,6 +1240,8 @@ export function ManualCreatePanel({
                     <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
                       <StatusIcon
                         status={status}
+                        icon={iconOf(status)}
+                        color={colorOf(status)}
                         category={draftStatusCategory(status)}
                         className="h-3.5 w-3.5"
                       />

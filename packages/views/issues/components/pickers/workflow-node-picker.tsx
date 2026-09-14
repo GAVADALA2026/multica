@@ -1,8 +1,9 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
+
 import { useState } from "react";
 import type { IssueWorkflowStatusNode } from "@multica/core/types";
-import { workflowPhaseCategory } from "@multica/core/issue-workflows";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { StatusIcon } from "../status-icon";
 import { useT } from "../../../i18n";
@@ -50,9 +51,10 @@ export function WorkflowNodePicker({
         (current ? (
           <>
             <StatusIcon
-              status={current.legacy_status_key ?? "todo"}
-              category={workflowPhaseCategory(current.phase)}
+              status={current.legacy_status_key ?? current.id}
+              category={statusCategoryOfKey(current.phase)}
               color={current.color}
+              icon={current.icon}
               className="size-3.5 shrink-0"
             />
             <span className="truncate">{current.name}</span>
@@ -79,9 +81,10 @@ export function WorkflowNodePicker({
             }}
           >
             <StatusIcon
-              status={node.legacy_status_key ?? "todo"}
-              category={workflowPhaseCategory(node.phase)}
+              status={node.legacy_status_key ?? node.id}
+              category={statusCategoryOfKey(node.phase)}
               color={node.color}
+              icon={node.icon}
               className="size-3.5 shrink-0"
             />
             <span className="truncate">{node.name}</span>

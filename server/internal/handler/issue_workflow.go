@@ -38,6 +38,7 @@ type issueWorkflowStatusResponse struct {
 	Name                string                    `json:"name"`
 	Description         string                    `json:"description"`
 	Color               string                    `json:"color"`
+	Icon                string                    `json:"icon,omitempty"`
 	Position            float64                   `json:"position"`
 	Phase               string                    `json:"phase"`
 	Outcome             *string                   `json:"outcome"`
@@ -113,6 +114,7 @@ func workflowStatusToResponse(status db.IssueWorkflowStatus) issueWorkflowStatus
 		Name:                status.Name,
 		Description:         status.Description,
 		Color:               status.Color,
+		Icon:                status.Icon,
 		Position:            status.Position,
 		Phase:               status.Phase,
 		Outcome:             textToPtr(status.Outcome),

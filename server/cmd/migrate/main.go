@@ -299,20 +299,22 @@ var concurrentIndexCleanups = map[string]string{
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
 	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
 	"452_agent_task_pending_thread_unique":                      "idx_one_pending_task_per_issue_agent_thread",
-	"458_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
 	"459_chat_message_assistant_task_index":                     "idx_chat_message_assistant_task",
-	"461_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
-	"462_issue_workflow_status_pkey_index":                      "issue_workflow_status_pkey_uidx",
-	"463_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
-	"464_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
-	"466_issue_workflow_scope_index":                            "idx_issue_workflow_scope",
-	"467_issue_workflow_legacy_status_index":                    "idx_issue_workflow_status_legacy_key",
-	"468_issue_transition_revision_index":                       "idx_issue_transition_revision",
-	"469_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
-	"470_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
-	"471_issue_workflow_binding_index":                          "idx_issue_workflow_binding",
-	"472_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
-	"476_issue_workflow_spec_key_index":                         "idx_issue_workflow_status_spec_key",
+	"473_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
+	"474_issue_workflow_status_pkey_index":                      "issue_workflow_status_pkey_uidx",
+	"475_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
+	"476_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
+	"478_issue_workflow_scope_index":                            "idx_issue_workflow_scope",
+	"479_issue_workflow_legacy_status_index":                    "idx_issue_workflow_status_legacy_key",
+	"480_issue_transition_revision_index":                       "idx_issue_transition_revision",
+	"481_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
+	"482_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
+	"483_issue_workflow_binding_index":                          "idx_issue_workflow_binding",
+	"484_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
+	"488_issue_workflow_spec_key_index":                         "idx_issue_workflow_status_spec_key",
+	"460_agent_task_queue_autopilot_run_created_at_index":       "idx_agent_task_queue_autopilot_run_created_at",
+	"465_agent_task_queue_chat_with_session_index":              "idx_agent_task_queue_chat_with_session_created_at",
+	"466_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -340,6 +342,8 @@ var concurrentDownIndexCleanups = map[string]string{
 	"453_drop_pending_issue_agent_unique":                   "idx_one_pending_task_per_issue_agent_v2",
 	"454_drop_comment_content_bigm_index":                   "idx_comment_content_bigm",
 	"455_drop_comment_content_trgm_index":                   "idx_comment_content_trgm",
+	"463_drop_issue_description_bigm_index":                 "idx_issue_description_bigm",
+	"464_drop_issue_description_trgm_index":                 "idx_issue_description_trgm",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -413,6 +417,9 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 }
 
 var upMigrationConditions = map[string]migrationCondition{
+	// Current search no longer consumes an issue-description GIN. Fresh installs
+	// should not build the historical fallback only to retire it at migration 464.
+	"139_issue_description_trgm_index": skipMigration("issue description search indexes are retired by migration 464"),
 	// Current search no longer consumes a comment-content GIN. Fresh installs
 	// should not build the historical fallback only to retire it at migration 455.
 	"140_comment_content_trgm_index": skipMigration("comment content search indexes are retired by migration 455"),
@@ -430,9 +437,12 @@ var upMigrationConditions = map[string]migrationCondition{
 // Migrations 454 and 455 restore the mutually exclusive comment search index
 // selected before its retirement: pg_bigm deployments get the preferred bigram
 // index, while pg_bigm-less self-hosted deployments get the trigram fallback.
+// Migration 463 independently restores the optional issue-description bigram;
+// migration 464's portable trigram rollback is unconditional.
 var downMigrationConditions = map[string]migrationCondition{
-	"454_drop_comment_content_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
-	"455_drop_comment_content_trgm_index": whenOperatorClassUnavailable(pgBigmOperatorClass),
+	"454_drop_comment_content_bigm_index":   whenOperatorClassAvailable(pgBigmOperatorClass),
+	"455_drop_comment_content_trgm_index":   whenOperatorClassUnavailable(pgBigmOperatorClass),
+	"463_drop_issue_description_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
 }
 
 func hooksForDirection(direction string) map[string]preMigrationHook {

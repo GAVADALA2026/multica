@@ -1,6 +1,5 @@
-// Package issuepolicy translates lifecycle state into the explicit decisions
-// made by cross-cutting issue workflows. It is the compatibility boundary
-// between legacy status categories and the additive Lifecycle model.
+// Package issuepolicy resolves pinned workflow state and catalog behavior for
+// issue automation policies. Categories and concrete status behaviors stay distinct.
 package issuepolicy
 
 import (
@@ -19,12 +18,12 @@ const (
 )
 
 // State is the domain state consumers may reason about. Phase and Outcome are
-// lifecycle semantics. LegacyCategory remains only as the rollout adapter for
+// lifecycle semantics. Behavior remains only as the rollout adapter for
 // behaviors that deliberately distinguish in-progress, review, and blocked.
 type State struct {
-	Phase          string
-	Outcome        string
-	LegacyCategory string
+	Phase    string
+	Outcome  string
+	Behavior string
 }
 
 type Querier interface {
@@ -36,27 +35,27 @@ type Querier interface {
 // ResolveIssue reads the stable lifecycle node only when the release flag is
 // enabled. The adapter path remains authoritative while the flag is off, and
 // is also the rolling-deploy fallback when an older writer left a stale pin.
-func ResolveIssue(ctx context.Context, q Querier, issue db.Issue, lifecycleEnabled bool) State {
-	if lifecycleEnabled && issue.WorkflowID.Valid && issue.WorkflowStatusID.Valid {
+func ResolveIssue(ctx context.Context, q Querier, issue db.Issue, workflowEnabled bool) State {
+	if workflowEnabled && issue.WorkflowID.Valid && issue.WorkflowStatusID.Valid {
 		if node, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 			WorkspaceID: issue.WorkspaceID,
 			WorkflowID:  issue.WorkflowID,
 			ID:          issue.WorkflowStatusID,
-		}); err == nil && node.LegacyStatusKey.Valid && node.LegacyStatusKey.String == issue.Status {
+		}); err == nil && issueworkflow.LegacyProjection(node) == issue.Status {
 			return State{
-				Phase:          node.Phase,
-				Outcome:        text(node.Outcome),
-				LegacyCategory: issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status),
+				Phase:    node.Phase,
+				Outcome:  text(node.Outcome),
+				Behavior: issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status),
 			}
 		}
 	}
-	return FromLegacyCategory(issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status))
+	return catalogState(ctx, q, issue.WorkspaceID, issue.Status)
 }
 
 // ResolveStatus resolves an arbitrary status key against the issue's pinned
 // lifecycle. It is used for the from-side of transition policies.
-func ResolveStatus(ctx context.Context, q Querier, workspaceID, workflowID pgtype.UUID, status string, lifecycleEnabled bool) State {
-	if lifecycleEnabled && workflowID.Valid {
+func ResolveStatus(ctx context.Context, q Querier, workspaceID, workflowID pgtype.UUID, status string, workflowEnabled bool) State {
+	if workflowEnabled && workflowID.Valid {
 		if node, err := q.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
 			WorkspaceID: workspaceID,
 			WorkflowID:  workflowID,
@@ -66,21 +65,19 @@ func ResolveStatus(ctx context.Context, q Querier, workspaceID, workflowID pgtyp
 			},
 		}); err == nil {
 			return State{
-				Phase:          node.Phase,
-				Outcome:        text(node.Outcome),
-				LegacyCategory: issuestatus.Effective(ctx, q, workspaceID, status),
+				Phase:    node.Phase,
+				Outcome:  text(node.Outcome),
+				Behavior: issuestatus.Effective(ctx, q, workspaceID, status),
 			}
 		}
 	}
-	return FromLegacyCategory(issuestatus.Effective(ctx, q, workspaceID, status))
+	return catalogState(ctx, q, workspaceID, status)
 }
 
-func FromLegacyCategory(category string) State {
-	phase, outcome, err := issueworkflow.LegacyCategoryPhase(category)
-	if err != nil {
-		return State{LegacyCategory: category}
-	}
-	return State{Phase: phase, Outcome: text(outcome), LegacyCategory: category}
+func catalogState(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) State {
+	category := issuestatus.Category(ctx, q, workspaceID, status)
+	outcome, _ := issueworkflow.CategoryOutcome(category)
+	return State{Phase: category, Outcome: text(outcome), Behavior: issuestatus.Effective(ctx, q, workspaceID, status)}
 }
 
 func text(value pgtype.Text) string {
@@ -90,7 +87,7 @@ func text(value pgtype.Text) string {
 	return ""
 }
 
-func (s State) IsParked() bool { return s.Phase == issueworkflow.PhaseBacklog }
+func (s State) IsParked() bool { return s.Behavior == issuestatus.Backlog }
 
 func (s State) IsTerminal() bool { return s.Outcome == "completed" || s.Outcome == "cancelled" }
 
@@ -98,10 +95,16 @@ func (s State) AllowsRunTrigger() bool { return !s.IsParked() && !s.IsTerminal()
 
 // AgentOwnsActiveWork is the explicit failure-recovery policy. Review and
 // blocked share the started phase but intentionally remain human/external work.
-func (s State) AgentOwnsActiveWork() bool { return s.LegacyCategory == issuestatus.InProgress }
+func (s State) AgentOwnsActiveWork() bool { return s.Behavior == issuestatus.InProgress }
 
 func (s State) AutopilotResolution() string {
-	switch s.LegacyCategory {
+	if s.Outcome == "completed" {
+		return AutopilotComplete
+	}
+	if s.Outcome == "cancelled" {
+		return AutopilotFail
+	}
+	switch s.Behavior {
 	case issuestatus.Done, issuestatus.InReview:
 		return AutopilotComplete
 	case issuestatus.Cancelled, issuestatus.Blocked:
@@ -112,5 +115,5 @@ func (s State) AutopilotResolution() string {
 }
 
 func (s State) DismissesTaskFailure() bool {
-	return s.LegacyCategory == issuestatus.InReview || s.IsTerminal()
+	return s.Behavior == issuestatus.InReview || s.IsTerminal()
 }

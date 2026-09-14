@@ -273,11 +273,8 @@
     "name_placeholder": "Status name",
     "description_placeholder": "What this status means",
     "phase_label": "Status category",
-    "phase_backlog": "Backlog",
     "phase_unstarted": "Unstarted",
     "phase_started": "Started",
-    "phase_completed": "Completed",
-    "phase_cancelled": "Cancelled",
     "on_entry": "On entry",
     "assign_to": "Assign to",
     "run": "Run",
@@ -301,6 +298,8 @@
     "next_status_hint": "Used for the handoff action. Reordering statuses does not change this destination.",
     "advance_label": "Who confirms the next status",
     "policy_scope": "Changes apply on the next entry. Existing executions keep their original instructions and handoff destination.",
-    "color_label": "Color"
+    "color_label": "Color",
+    "phase_done": "Completed",
+    "phase_closed": "Closed"
   }
 }

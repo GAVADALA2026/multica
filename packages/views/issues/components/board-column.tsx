@@ -8,7 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatusCategory,
+  IssueStatus,
   Project,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -18,9 +18,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
+import { StatusIcon } from "./status-icon";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
@@ -75,14 +79,16 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  /** Workspace-wide boards use categories; project boards use Status Nodes. */
-  status?: IssueStatusCategory;
+  /** Status columns use concrete keys; project workflows use stable status IDs. */
+  status?: IssueStatus;
   /** Stable project workflow node. `null` is a legacy unbound fallback
    * bucket; `undefined` means this is not a workflow-status column. */
   workflowStatusId?: string | null;
   workflowId?: string;
   workflowStatusLegacyKey?: string;
   workflowStatusColor?: string;
+  workflowStatusIcon?: string;
+  workflowStatusPhase?: string;
   workflowStatusPosition?: number;
   workflowStatusArchived?: boolean;
   workflowStatusHistorical?: boolean;
@@ -128,8 +134,12 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
-  const cfg = status ? STATUS_CONFIG[status] : null;
-  const { setNodeRef, isOver } = useDroppable({ id: group.id });
+  const wsId = useWorkspaceId();
+  const { categoryOf, entryOf } = useIssueStatuses(wsId);
+  const archived = !!status && !!entryOf(status)?.archived_at;
+  const cfg = status ? STATUS_CONFIG[categoryOf(status)] : null;
+  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id });
+  const isOver = droppableIsOver && !archived;
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —
   // that would silently strip one of the view's own conditions.
@@ -237,7 +247,7 @@ export const BoardColumn = memo(function BoardColumn({
               )}
             </DeferredPopup>
           )}
-          {onCreateIssue &&
+          {onCreateIssue && !archived &&
             (group.workflowStatusId === undefined ||
               group.createData !== undefined) && (
               <DeferredTooltip
@@ -356,9 +366,12 @@ function BoardGroupHeading({
   if (group.workflowStatusId !== undefined) {
     return (
       <div className="flex min-w-0 items-center gap-2">
-        <span
-          className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-          style={group.workflowStatusColor ? { backgroundColor: group.workflowStatusColor } : undefined}
+        <StatusIcon
+          status={group.workflowStatusLegacyKey ?? group.id}
+          category={statusCategoryOfKey(group.workflowStatusPhase ?? "unstarted")}
+          color={group.workflowStatusColor}
+          icon={group.workflowStatusIcon}
+          className="size-3"
         />
         <span className="truncate text-body font-medium" title={group.title}>
           {group.title}

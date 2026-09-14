@@ -1,9 +1,11 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
+
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Issue, IssueWorkflowStatusNode } from "@multica/core/types";
-import { issueWorkflowOptions, issueAutomationExecutionsOptions, workflowHandoff, workflowPhaseCategory, activeWorkflowStatuses } from "@multica/core/issue-workflows";
+import { issueWorkflowOptions, issueAutomationExecutionsOptions, workflowHandoff, activeWorkflowStatuses } from "@multica/core/issue-workflows";
 import { useTransitionIssueStatusNode } from "@multica/core/issues/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -49,7 +51,7 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
   }, [activeStatuses, query]);
 
   if (!workflowId) return null;
-  const currentCategory = workflowPhaseCategory(current?.phase ?? "started");
+  const currentCategory = statusCategoryOfKey(current?.phase ?? "started");
 
   return (
     <>
@@ -68,9 +70,10 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
       trigger={trigger ?? (current ? (
         <>
           <StatusIcon
-            status={current.legacy_status_key ?? issue.status}
+            status={current.legacy_status_key ?? current.id}
             category={currentCategory}
             color={current.color}
+            icon={current.icon}
             className="h-3.5 w-3.5 shrink-0"
           />
           <span className="truncate">{current.name}</span>
@@ -78,7 +81,7 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
       ) : <span className="truncate">{issue.status_name || t(($) => $.workflow_selection.choose)}</span>)}
     >
       {options.map((status) => {
-        const category = workflowPhaseCategory(status.phase);
+        const category = statusCategoryOfKey(status.phase);
         return (
           <PickerItem
             key={status.id}
@@ -101,9 +104,10 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
             }}
           >
             <StatusIcon
-              status={status.legacy_status_key ?? issue.status}
+              status={status.legacy_status_key ?? status.id}
               category={category}
               color={status.color}
+              icon={status.icon}
               className="h-3.5 w-3.5"
             />
             <span className="min-w-0 flex-1 text-left"><span className="block truncate">{status.name}</span>

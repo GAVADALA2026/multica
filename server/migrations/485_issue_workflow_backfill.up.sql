@@ -15,7 +15,7 @@ WHERE l.workspace_id = w.id
   AND w.default_issue_workflow_id IS DISTINCT FROM l.id;
 
 INSERT INTO issue_workflow_status (
-    workspace_id, workflow_id, legacy_status_key, name, description, color,
+    workspace_id, workflow_id, legacy_status_key, name, description, color, icon,
     position, phase, outcome, archived_at, created_at, updated_at
 )
 SELECT
@@ -25,32 +25,25 @@ SELECT
     s.name,
     s.description,
     s.color,
+    s.icon,
     (ROW_NUMBER() OVER (
         PARTITION BY s.workspace_id
         ORDER BY
-            CASE s.category
-                WHEN 'backlog' THEN 0
-                WHEN 'todo' THEN 1
-                WHEN 'in_progress' THEN 2
-                WHEN 'in_review' THEN 3
-                WHEN 'done' THEN 4
-                WHEN 'blocked' THEN 5
-                WHEN 'cancelled' THEN 6
-                ELSE 7
-            END,
+            CASE s.category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
             s.position,
+            CASE WHEN s.is_system THEN 0 ELSE 1 END,
+            CASE s.key
+                WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1
+                WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3
+                WHEN 'blocked' THEN 4 WHEN 'done' THEN 5
+                WHEN 'cancelled' THEN 6 ELSE 7
+            END,
             s.key
     ) - 1)::double precision,
-    CASE s.category
-        WHEN 'backlog' THEN 'backlog'
-        WHEN 'todo' THEN 'unstarted'
-        WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
-        ELSE 'started'
-    END,
+    s.category,
     CASE s.category
         WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'closed' THEN 'cancelled'
         ELSE NULL
     END,
     s.archived_at,
@@ -64,6 +57,7 @@ DO UPDATE SET
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     color = EXCLUDED.color,
+    icon = EXCLUDED.icon,
     position = EXCLUDED.position,
     phase = EXCLUDED.phase,
     outcome = EXCLUDED.outcome,

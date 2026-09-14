@@ -1,5 +1,7 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
@@ -16,7 +18,6 @@ import {
   workflowHandoff,
   effectiveIssueWorkflowOptions,
   issueWorkflowOptions,
-  workflowPhaseCategory,
 } from "@multica/core/issue-workflows";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -134,7 +135,7 @@ function ChangeForm({
   const categoryMatches =
     !moving && !matches.length && updates.status
       ? nodes.filter(
-          (node) => workflowPhaseCategory(node.phase) === updates.status,
+          (node) => statusCategoryOfKey(node.phase) === updates.status,
         )
       : [];
   const inferred =

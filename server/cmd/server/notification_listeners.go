@@ -826,9 +826,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 			nil, "status_changed", "info", issue.Title, "", statusDetails)
 
-		state := issuepolicy.FromLegacyCategory(issuestatus.Effective(
-			ctx, queries, parseUUID(e.WorkspaceID), issue.Status,
-		))
+		state := issuepolicy.ResolveStatus(
+			ctx, queries, parseUUID(e.WorkspaceID), pgtype.UUID{}, issue.Status, false,
+		)
 		if state.DismissesTaskFailure() {
 			archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 		}

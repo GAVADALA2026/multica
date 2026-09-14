@@ -29,6 +29,8 @@ export function buildWorkflowStatusGroups(
       workflowId: status.workflow_id,
       workflowStatusLegacyKey: status.legacy_status_key ?? undefined,
       workflowStatusColor: status.color,
+      workflowStatusIcon: status.icon,
+      workflowStatusPhase: status.phase,
       workflowStatusPosition: status.position,
       createData: { workflow_status_id: status.id },
     });
@@ -46,6 +48,8 @@ export function buildWorkflowStatusGroups(
       workflowId: value.workflow_id,
       workflowStatusLegacyKey: value.status || undefined,
       workflowStatusColor: value.color,
+      workflowStatusIcon: value.icon,
+      workflowStatusPhase: value.phase,
       workflowStatusPosition: value.position,
       workflowStatusArchived: value.archived,
       workflowStatusHistorical: existing === undefined,

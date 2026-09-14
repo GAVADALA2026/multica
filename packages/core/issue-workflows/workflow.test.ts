@@ -30,6 +30,7 @@ describe("workflow drafts", () => {
   it("preserves stable keys, initial identity, and explicit nonsequential links on import", () => {
     const draft = createWorkflowDraft(["Ready", "Review", "Work", "Done"]);
     draft.statuses[0]!.policy.next_status_key = "status_3";
+    draft.statuses[0]!.icon = "three_quarters";
     const definition = {
       mode: "custom",
       workflow: { initial_status_id: "id_2" },
@@ -44,6 +45,7 @@ describe("workflow drafts", () => {
     } as unknown as IssueWorkflowResponse;
     const copied = workflowFromDefinition(definition);
     expect(copied.initialKey).toBe("status_3");
+    expect(workflowToSpec(copied, "New project").statuses[0]?.icon).toBe("three_quarters");
     expect(copied.statuses[0]?.policy.next_status_key).toBe("status_3");
     copied.statuses[0]!.policy.next_status_key = "status_4";
     expect(draft.statuses[0]?.policy.next_status_key).toBe("status_3");

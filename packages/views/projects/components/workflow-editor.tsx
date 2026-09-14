@@ -170,8 +170,8 @@ export function WorkflowEditor({
     statuses.splice(after + 1, 0, newStatus);
     if (
       previous &&
-      previous.phase !== "completed" &&
-      previous.phase !== "cancelled"
+      previous.phase !== "done" &&
+      previous.phase !== "closed"
     )
       statuses[after] = {
         ...previous,
@@ -182,20 +182,18 @@ export function WorkflowEditor({
   };
   const move = (from: number, to: number) =>
     onChange(moveWorkflowStatus(value, from, to));
-  const terminal = status?.phase === "completed" || status?.phase === "cancelled";
+  const terminal = status?.phase === "done" || status?.phase === "closed";
   const phases: IssueWorkflowPhase[] = [
-    "backlog",
     "unstarted",
     "started",
-    "completed",
-    "cancelled",
+    "done",
+    "closed",
   ];
   const phaseLabels = {
-    backlog: t(($) => $.workflow_rules.phase_backlog),
     unstarted: t(($) => $.workflow_rules.phase_unstarted),
     started: t(($) => $.workflow_rules.phase_started),
-    completed: t(($) => $.workflow_rules.phase_completed),
-    cancelled: t(($) => $.workflow_rules.phase_cancelled),
+    done: t(($) => $.workflow_rules.phase_done),
+    closed: t(($) => $.workflow_rules.phase_closed),
   };
   const assignee = status?.policy.assignee;
   const ownerValue =

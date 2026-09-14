@@ -46,6 +46,7 @@ statuses:
     name: Technical Spec
     color: "#8b5cf6"
     phase: unstarted
+    icon: three_quarters
     entry_policy:
       next_status_key: review
 `)
@@ -58,7 +59,7 @@ statuses:
 	}
 
 	resolved, err := resolveWorkflowFileSpec(context.Background(), &cli.APIClient{}, spec)
-	if err != nil || resolved.Statuses[0].EntryPolicy.NextStatusKey != "review" {
+	if err != nil || resolved.Statuses[0].EntryPolicy.NextStatusKey != "review" || resolved.Statuses[0].Icon != "three_quarters" {
 		t.Fatalf("handoff destination lost during CLI resolution: %#v, %v", resolved, err)
 	}
 

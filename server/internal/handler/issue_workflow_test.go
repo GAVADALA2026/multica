@@ -163,9 +163,11 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		}), "workflowId", customized.Workflow.ID, "statusId", inProgressID)).Want(http.StatusBadRequest)
 
 	// Reordering replaces the complete active order atomically.
-	statusIDs := make([]string, len(updated.Statuses))
-	for i := range updated.Statuses {
-		statusIDs[len(updated.Statuses)-1-i] = updated.Statuses[i].ID
+	statusIDs := make([]string, 0, len(updated.Statuses))
+	for i := len(updated.Statuses) - 1; i >= 0; i-- {
+		if updated.Statuses[i].ArchivedAt == nil {
+			statusIDs = append(statusIDs, updated.Statuses[i].ID)
+		}
 	}
 	var reordered issueWorkflowResponse
 	testutil.Call(t, testHandler.ReorderIssueWorkflowStatuses,
@@ -391,7 +393,7 @@ func TestProjectWorkflowSpecApplyIsDeclarativeAndWorkflowNative(t *testing.T) {
 
 	status := func(key, name, phase, color string) map[string]any {
 		return map[string]any{
-			"key": key, "name": name, "phase": phase, "color": color,
+			"key": key, "name": name, "phase": phase, "color": color, "icon": "three_quarters",
 			"entry_policy": map[string]any{
 				"assignee": map[string]any{"type": "keep"}, "executor": map[string]any{"type": "none"},
 				"advance": "human_confirms",
@@ -403,7 +405,7 @@ func TestProjectWorkflowSpecApplyIsDeclarativeAndWorkflowNative(t *testing.T) {
 		"statuses": []map[string]any{
 			status("technical_spec", "Technical Spec", "unstarted", "#8b5cf6"),
 			status("implementation", "Implementation", "started", "#2563eb"),
-			status("shipped", "Shipped", "completed", "#16a34a"),
+			status("shipped", "Shipped", "done", "#16a34a"),
 		},
 	}
 	var preview issueWorkflowApplyResponse
@@ -432,6 +434,9 @@ func TestProjectWorkflowSpecApplyIsDeclarativeAndWorkflowNative(t *testing.T) {
 	}
 	var initialID, implementationID string
 	for _, node := range applied.Statuses {
+		if node.Icon != "three_quarters" {
+			t.Fatalf("applied status lost icon: %#v", node)
+		}
 		if node.LegacyStatusKey != nil {
 			t.Fatalf("new spec node %q unexpectedly has legacy key %q", node.SpecKey, *node.LegacyStatusKey)
 		}
@@ -521,7 +526,7 @@ func TestCreateProjectWithWorkflowSpecCommitsOneMaterializedDefinition(t *testin
 		"api_version": 1, "name": "GTM SEO", "initial_status": "brief",
 		"statuses": []map[string]any{
 			{"key": "brief", "name": "Brief", "color": "#8b5cf6", "phase": "unstarted"},
-			{"key": "published", "name": "Published", "color": "#16a34a", "phase": "completed"},
+			{"key": "published", "name": "Published", "color": "#16a34a", "phase": "done"},
 		},
 	}
 	failureTitle := "Rolled back workflow project " + time.Now().Format("150405.000000000")

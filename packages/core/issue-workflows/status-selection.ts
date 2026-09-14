@@ -1,23 +1,8 @@
 import type {
   IssueWorkflowResponse,
   IssueWorkflowStatusNode,
-  IssueStatusCategory,
 } from "../types";
 
-export function workflowPhaseCategory(phase: string): IssueStatusCategory {
-  switch (phase) {
-    case "backlog":
-      return "backlog";
-    case "unstarted":
-      return "todo";
-    case "completed":
-      return "done";
-    case "cancelled":
-      return "cancelled";
-    default:
-      return "in_progress";
-  }
-}
 
 export function activeWorkflowStatuses(
   data?: IssueWorkflowResponse,

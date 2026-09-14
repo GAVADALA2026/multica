@@ -14,6 +14,7 @@ export interface WorkflowStatus {
   name: string;
   description: string;
   color: string;
+  icon?: string;
   phase: IssueWorkflowPhase;
   policy: IssueWorkflowEntryPolicy;
 }
@@ -36,7 +37,7 @@ function connectWorkflowStatuses(
     policy: {
       ...status.policy,
       next_status_key:
-        status.phase === "completed" || status.phase === "cancelled"
+        status.phase === "done" || status.phase === "closed"
           ? ""
           : (statuses[index + 1]?.key ?? ""),
     },
@@ -54,9 +55,9 @@ export function createWorkflowDraft(
       color: "#6b7280",
       phase:
         index === names.length - 1
-          ? "completed"
+          ? "done"
           : index === 0
-            ? "backlog"
+            ? "unstarted"
             : "started",
       policy: manualEntryPolicy(),
     }),
@@ -84,6 +85,7 @@ export function workflowFromDefinition(
       name: s.name,
       description: s.description,
       color: s.color,
+      icon: s.icon,
       phase: s.phase as IssueWorkflowPhase,
       policy: structuredClone(s.entry_policy),
     })),
@@ -162,7 +164,7 @@ export function workflowProblems(
     if (names.has(name)) problems.push({ key: s.key, problem: "duplicate" });
     names.add(name);
     if (
-      !["backlog", "unstarted", "started", "completed", "cancelled"].includes(
+      !["unstarted", "started", "done", "closed"].includes(
         s.phase,
       )
     )
@@ -197,6 +199,7 @@ export function workflowToSpec(
       name: s.name.trim(),
       description: s.description,
       color: s.color,
+      icon: s.icon,
       phase: s.phase,
       entry_policy: structuredClone(s.policy),
     })),

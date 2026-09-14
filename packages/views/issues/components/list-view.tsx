@@ -1,5 +1,8 @@
 "use client";
 
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
+
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
@@ -17,8 +20,10 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueWorkflowStatusNode, IssueStatusCategory, Project } from "@multica/core/types";
+import type { Issue, IssueWorkflowStatusNode, IssueStatus, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { StatusIcon } from "./status-icon";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
@@ -48,6 +53,8 @@ import { buildWorkflowStatusGroups } from "../utils/workflow-status-groups";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
+import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
+import { toast } from "sonner";
 
 // List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
 // trailing spacer and Virtuoso's defaultItemHeight keeps the shared
@@ -69,18 +76,19 @@ const EMPTY_PAGE: IssueStatusPageState = {
   retry: () => {},
 };
 
-function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
+function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
     status,
-    createData: { status },
+    createData: { status: status },
   }));
 }
 
 function ListViewImpl({
   issues,
   visibleStatuses,
+  hiddenStatuses = [],
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
   statusPagination,
@@ -91,7 +99,8 @@ function ListViewImpl({
   onCreateIssue,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatusCategory[];
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses?: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination?: IssueStatusPagination;
@@ -110,6 +119,8 @@ function ListViewImpl({
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
   const [collapsedWorkflowStatuses, setCollapsedWorkflowStatuses] = useState<string[]>([]);
+  const wsId = useWorkspaceId();
+  const catalog = useIssueStatuses(wsId);
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -216,6 +227,8 @@ function ListViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
+        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
 
@@ -228,7 +241,7 @@ function ListViewImpl({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, sortBy, recentlyMovedRef, setColumns],
+    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns],
   );
 
   const handleDragEnd = useCallback(
@@ -282,11 +295,20 @@ function ListViewImpl({
       }
 
       const map = issueMapRef.current;
+      if (finalGroup.status && map.get(activeId)?.status !== finalGroup.status && catalog.entryOf(finalGroup.status)?.archived_at) {
+        resetColumns();
+        return;
+      }
 
       if (sortBy !== "position") {
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the row into the target group *now*. Without this
@@ -340,7 +362,7 @@ function ListViewImpl({
         beginSettle(),
       );
     },
-    [groupedIssues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
+    [groupedIssues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, catalog, t],
   );
 
   // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
@@ -377,57 +399,66 @@ function ListViewImpl({
   );
 
   const content = (
-    <Accordion.Root
-      multiple
-      className="space-y-1"
-      value={expandedGroupIds}
-      onValueChange={(value: string[]) => {
-        if (isDraggingRef.current) return;
-        for (const group of groups) {
-          const wasExpanded = expandedGroupIds.includes(group.id);
-          const isExpanded = value.includes(group.id);
-          if (wasExpanded !== isExpanded) {
-            if (workflowStatuses === undefined && group.status) {
-              toggleListCollapsed(group.status);
-            } else {
-              setCollapsedWorkflowStatuses((current) =>
-                isExpanded
-                  ? current.filter((id) => id !== group.id)
-                  : current.includes(group.id)
-                    ? current
-                    : [...current, group.id],
-              );
+    <>
+      <Accordion.Root
+        multiple
+        className="space-y-1"
+        value={expandedGroupIds}
+        onValueChange={(value: string[]) => {
+          if (isDraggingRef.current) return;
+          for (const group of groups) {
+            const wasExpanded = expandedGroupIds.includes(group.id);
+            const isExpanded = value.includes(group.id);
+            if (wasExpanded !== isExpanded) {
+              if (workflowStatuses === undefined && group.status) {
+                toggleListCollapsed(group.status);
+              } else {
+                setCollapsedWorkflowStatuses((current) =>
+                  isExpanded
+                    ? current.filter((id) => id !== group.id)
+                    : current.includes(group.id)
+                      ? current
+                      : [...current, group.id],
+                );
+              }
             }
           }
-        }
-      }}
-    >
-      {groups.map((group) => {
-        const isExpanded = expandedGroupIds.includes(group.id);
-        const page = group.workflowStatusId !== undefined
-          ? groupBranches?.pagination[group.id]
-          : group.status
-            ? statusPagination?.[group.status]
-            : undefined;
-        return (
-          <StatusAccordionItem
-            key={group.id}
-            group={group}
-            issueIds={columns[group.id] ?? EMPTY_IDS}
-            issueMap={issueMapRef.current}
-            childProgressMap={childProgressMap}
-            projectMap={projectMap}
-            page={page ?? { ...EMPTY_PAGE, total: group.totalCount ?? 0 }}
-            projectId={projectId}
-            onCreateIssue={onCreateIssue}
-            dragEnabled={dragEnabled}
-            isExpanded={isExpanded}
-            sortLabel={sortLabel}
-            scrollParent={scrollEl}
-          />
-        );
-      })}
-    </Accordion.Root>
+        }}
+      >
+        {groups.map((group) => {
+          const isExpanded = expandedGroupIds.includes(group.id);
+          const page = group.workflowStatusId !== undefined
+            ? groupBranches?.pagination[group.id]
+            : group.status
+              ? statusPagination?.[group.status]
+              : undefined;
+          return (
+            <StatusAccordionItem
+              key={group.id}
+              group={group}
+              issueIds={columns[group.id] ?? EMPTY_IDS}
+              issueMap={issueMapRef.current}
+              childProgressMap={childProgressMap}
+              projectMap={projectMap}
+              page={page ?? { ...EMPTY_PAGE, total: group.totalCount ?? 0 }}
+              projectId={projectId}
+              onCreateIssue={onCreateIssue}
+              dragEnabled={dragEnabled}
+              isExpanded={isExpanded}
+              sortLabel={sortLabel}
+              scrollParent={scrollEl}
+            />
+          );
+        })}
+      </Accordion.Root>
+      {workflowStatuses === undefined && hiddenStatuses.length > 0 && (
+        <div className="mt-4 px-1 pb-4">
+          <HiddenColumnsPanel hiddenStatuses={hiddenStatuses} renderRow={(status) => (
+            <HiddenColumnRow key={status} status={status} total={statusPagination?.[status]?.total} />
+          )} />
+        </div>
+      )}
+    </>
   );
 
   if (!dragEnabled) {
@@ -508,10 +539,13 @@ function StatusAccordionItem({
   const allSelected = issues.length > 0 && selectedCount === issues.length;
   const someSelected = selectedCount > 0;
 
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+  const statusWsId = useWorkspaceId();
+  const statusCatalog = useIssueStatuses(statusWsId);
+  const { setNodeRef: setDroppableRef, isOver: droppableIsOver } = useDroppable({
     id: group.id,
     disabled: !dragEnabled,
   });
+  const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
   const disableSorting = !!sortLabel;
 
@@ -619,10 +653,13 @@ function StatusAccordionItem({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           {group.workflowStatusId !== undefined ? (
             <div className="flex min-w-0 items-center gap-2">
-              <span
-                className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-                style={group.workflowStatusColor ? { backgroundColor: group.workflowStatusColor } : undefined}
-              />
+              <StatusIcon
+          status={group.workflowStatusLegacyKey ?? group.id}
+          category={statusCategoryOfKey(group.workflowStatusPhase ?? "unstarted")}
+          color={group.workflowStatusColor}
+          icon={group.workflowStatusIcon}
+          className="size-3"
+        />
               <span className="truncate text-body font-medium" title={group.title}>
                 {group.title}
               </span>
@@ -634,7 +671,7 @@ function StatusAccordionItem({
             <StatusHeading status={group.status} count={page.total} />
           ) : null}
         </Accordion.Trigger>
-        {onCreateIssue &&
+        {onCreateIssue && !statusCatalog.entryOf(status)?.archived_at &&
           (group.workflowStatusId === undefined ||
             group.createData !== undefined) && (
             <div className="pr-2">

@@ -271,11 +271,8 @@
     "name_placeholder": "状态名称",
     "description_placeholder": "说明这个状态的含义",
     "phase_label": "状态类别",
-    "phase_backlog": "待办池",
     "phase_unstarted": "未开始",
     "phase_started": "进行中",
-    "phase_completed": "已完成",
-    "phase_cancelled": "已取消",
     "on_entry": "进入状态时",
     "assign_to": "分配给",
     "run": "运行",
@@ -299,6 +296,8 @@
     "next_status_hint": "用于交接操作，调整状态排序不会改变此目标。",
     "advance_label": "由谁确认下一状态",
     "policy_scope": "修改在下次进入状态时生效，已有执行保留原来的工作要求和交接目标。",
-    "color_label": "颜色"
+    "color_label": "颜色",
+    "phase_done": "已完成",
+    "phase_closed": "已关闭"
   }
 }

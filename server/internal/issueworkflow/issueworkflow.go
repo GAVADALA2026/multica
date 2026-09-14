@@ -10,35 +10,22 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
-const (
-	PhaseBacklog   = "backlog"
-	PhaseUnstarted = "unstarted"
-	PhaseStarted   = "started"
-	PhaseCompleted = "completed"
-	PhaseCancelled = "cancelled"
-)
-
-// LegacyCategoryPhase is the one-time compatibility mapping. It intentionally
-// collapses in_progress, in_review, and blocked into started; behavior that
-// distinguishes those categories belongs in an explicit policy consumer.
-func LegacyCategoryPhase(category string) (phase string, outcome pgtype.Text, err error) {
+// CategoryOutcome uses the catalog's four stored categories for workflow statuses.
+func CategoryOutcome(category string) (pgtype.Text, bool) {
 	switch category {
-	case "backlog":
-		return PhaseBacklog, pgtype.Text{}, nil
-	case "todo":
-		return PhaseUnstarted, pgtype.Text{}, nil
-	case "in_progress", "in_review", "blocked":
-		return PhaseStarted, pgtype.Text{}, nil
-	case "done":
-		return PhaseCompleted, pgtype.Text{String: "completed", Valid: true}, nil
-	case "cancelled":
-		return PhaseCancelled, pgtype.Text{String: "cancelled", Valid: true}, nil
+	case issuestatus.CategoryUnstarted, issuestatus.CategoryStarted:
+		return pgtype.Text{}, true
+	case issuestatus.CategoryDone:
+		return pgtype.Text{String: "completed", Valid: true}, true
+	case issuestatus.CategoryClosed:
+		return pgtype.Text{String: "cancelled", Valid: true}, true
 	default:
-		return "", pgtype.Text{}, fmt.Errorf("unknown legacy issue status category %q", category)
+		return pgtype.Text{}, false
 	}
 }
 
@@ -49,13 +36,11 @@ func LegacyProjection(status db.IssueWorkflowStatus) string {
 		return status.LegacyStatusKey.String
 	}
 	switch status.Phase {
-	case PhaseBacklog:
-		return "backlog"
-	case PhaseUnstarted:
+	case issuestatus.CategoryUnstarted:
 		return "todo"
-	case PhaseCompleted:
+	case issuestatus.CategoryDone:
 		return "done"
-	case PhaseCancelled:
+	case issuestatus.CategoryClosed:
 		return "cancelled"
 	default:
 		return "in_progress"

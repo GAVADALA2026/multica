@@ -50,7 +50,7 @@ function setup(mixed: boolean) {
         name: "Published",
         legacy_status_key: "done",
         spec_key: "done",
-        phase: "completed",
+        phase: "done",
         outcome: "completed",
         color: "#123456",
         position: 0,

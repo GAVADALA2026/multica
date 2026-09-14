@@ -37,7 +37,7 @@ func TestIssueCreationUsesSelectedProjectStatusNodes(t *testing.T) {
 			"mode": "custom", "spec": map[string]any{
 				"api_version": 1, "name": "Editorial", "initial_status": "brief",
 				"statuses": []map[string]any{
-					{"key": "brief", "name": "Brief", "phase": "backlog", "color": "#123456"},
+					{"key": "brief", "name": "Brief", "phase": "unstarted", "color": "#123456"},
 					{"key": "review", "name": "Editorial review", "phase": "started", "color": "#654321"},
 				},
 			},

@@ -10,6 +10,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient status reorder", () => {
+  it("opts into built-in ordering and tolerates malformed responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ statuses: "invalid" }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const result = await client.reorderIssueStatuses("started", ["review", "qa", "progress"], true);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      category: "started", ids: ["review", "qa", "progress"], include_system: true,
+    });
+    expect(result.statuses).toEqual([]);
+  });
+});
+
 describe("ApiClient agent conversation-starter compatibility", () => {
   const prompt = {
     label: "Review a PR",
@@ -2801,7 +2816,7 @@ describe("ApiClient workflow apply boundary", () => {
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient("https://api.example.test");
     const request = { mode: "custom" as const, expected_revision: 7, allow_archive: false,
-      spec: { api_version: 1 as const, name: "Launch", initial_status: "ready", statuses: [{ key: "ready", name: "Ready", description: "", color: "#6b7280", phase: "backlog" as const,
+      spec: { api_version: 1 as const, name: "Launch", initial_status: "ready", statuses: [{ key: "ready", name: "Ready", description: "", color: "#6b7280", phase: "unstarted" as const,
         entry_policy: { assignee: { type: "keep" as const }, executor: { type: "none" as const }, instructions: "", advance: "human_confirms" as const } }] } };
     await expect(client.applyProjectWorkflow("project", request)).rejects.toThrow(/Invalid workflow response/);
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.test/api/projects/project/issue-workflow", expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }));

@@ -13,7 +13,7 @@ WHERE id = $1
 
 -- name: SyncDefaultIssueWorkflowStatuses :exec
 INSERT INTO issue_workflow_status (
-    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color,
+    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color, icon,
     position, phase, outcome, archived_at, created_at, updated_at
 )
 SELECT
@@ -24,32 +24,25 @@ SELECT
     s.name,
     s.description,
     s.color,
+    s.icon,
     (ROW_NUMBER() OVER (
         PARTITION BY s.workspace_id
         ORDER BY
-            CASE s.category
-                WHEN 'backlog' THEN 0
-                WHEN 'todo' THEN 1
-                WHEN 'in_progress' THEN 2
-                WHEN 'in_review' THEN 3
-                WHEN 'done' THEN 4
-                WHEN 'blocked' THEN 5
-                WHEN 'cancelled' THEN 6
-                ELSE 7
-            END,
+            CASE s.category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
             s.position,
+            CASE WHEN s.is_system THEN 0 ELSE 1 END,
+            CASE s.key
+                WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1
+                WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3
+                WHEN 'blocked' THEN 4 WHEN 'done' THEN 5
+                WHEN 'cancelled' THEN 6 ELSE 7
+            END,
             s.key
     ) - 1)::double precision,
-    CASE s.category
-        WHEN 'backlog' THEN 'backlog'
-        WHEN 'todo' THEN 'unstarted'
-        WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
-        ELSE 'started'
-    END,
+    s.category,
     CASE s.category
         WHEN 'done' THEN 'completed'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'closed' THEN 'cancelled'
         ELSE NULL
     END,
     s.archived_at,
@@ -63,6 +56,7 @@ DO UPDATE SET
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     color = EXCLUDED.color,
+    icon = EXCLUDED.icon,
     position = EXCLUDED.position,
     phase = EXCLUDED.phase,
     outcome = EXCLUDED.outcome,
@@ -122,7 +116,7 @@ RETURNING *;
 
 -- name: CloneIssueWorkflowStatuses :execrows
 INSERT INTO issue_workflow_status (
-    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color,
+    workspace_id, workflow_id, legacy_status_key, spec_key, name, description, color, icon,
     position, phase, outcome, entry_policy, entry_policy_revision, archived_at,
     created_at, updated_at
 )
@@ -134,6 +128,7 @@ SELECT
     source.name,
     source.description,
     source.color,
+    source.icon,
     source.position,
     source.phase,
     source.outcome,
@@ -235,7 +230,7 @@ WHERE workspace_id = $1
 -- name: CreateIssueWorkflowStatus :one
 INSERT INTO issue_workflow_status (
     id, workspace_id, workflow_id, legacy_status_key, spec_key, name,
-    description, color, position, phase, outcome, entry_policy,
+    description, color, icon, position, phase, outcome, entry_policy,
     entry_policy_revision, archived_at
 ) VALUES (
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
@@ -246,6 +241,7 @@ INSERT INTO issue_workflow_status (
     sqlc.arg('name')::text,
     sqlc.arg('description')::text,
     sqlc.arg('color')::text,
+    sqlc.arg('icon')::text,
     sqlc.arg('position')::double precision,
     sqlc.arg('phase')::text,
     sqlc.narg('outcome')::text,
@@ -260,6 +256,7 @@ UPDATE issue_workflow_status
 SET name = sqlc.arg('name')::text,
     description = sqlc.arg('description')::text,
     color = sqlc.arg('color')::text,
+    icon = sqlc.arg('icon')::text,
     position = sqlc.arg('position')::double precision,
     phase = sqlc.arg('phase')::text,
     outcome = sqlc.narg('outcome')::text,
@@ -289,6 +286,7 @@ UPDATE issue_workflow_status
 SET name = sqlc.arg('name')::text,
     description = sqlc.arg('description')::text,
     color = sqlc.arg('color')::text,
+    icon = sqlc.arg('icon')::text,
     position = sqlc.arg('position')::double precision,
     phase = sqlc.arg('phase')::text,
     outcome = sqlc.narg('outcome')::text,
@@ -370,10 +368,9 @@ RETURNING *;
 -- name: UpdateIssueWorkflowStatus :one
 UPDATE issue AS i
 SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'backlog' THEN 'backlog'
         WHEN 'unstarted' THEN 'todo'
-        WHEN 'completed' THEN 'done'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'done' THEN 'done'
+        WHEN 'closed' THEN 'cancelled'
         ELSE 'in_progress'
     END),
     workflow_status_id = s.id,
@@ -394,10 +391,9 @@ RETURNING i.*;
 -- assignee, so nullable values here mean an explicitly unassigned issue.
 UPDATE issue AS i
 SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'backlog' THEN 'backlog'
         WHEN 'unstarted' THEN 'todo'
-        WHEN 'completed' THEN 'done'
-        WHEN 'cancelled' THEN 'cancelled'
+        WHEN 'done' THEN 'done'
+        WHEN 'closed' THEN 'cancelled'
         ELSE 'in_progress'
     END),
     workflow_status_id = s.id,
@@ -544,10 +540,9 @@ SELECT
         WHERE i.workspace_id = w.id
           AND i.workflow_status_id IS NOT NULL
           AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
-                  WHEN 'backlog' THEN 'backlog'
                   WHEN 'unstarted' THEN 'todo'
-                  WHEN 'completed' THEN 'done'
-                  WHEN 'cancelled' THEN 'cancelled'
+                  WHEN 'done' THEN 'done'
+                  WHEN 'closed' THEN 'cancelled'
                   ELSE 'in_progress'
               END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,
@@ -590,10 +585,9 @@ SELECT
         WHERE i.workspace_id = w.id
           AND i.workflow_status_id IS NOT NULL
           AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
-                  WHEN 'backlog' THEN 'backlog'
                   WHEN 'unstarted' THEN 'todo'
-                  WHEN 'completed' THEN 'done'
-                  WHEN 'cancelled' THEN 'cancelled'
+                  WHEN 'done' THEN 'done'
+                  WHEN 'closed' THEN 'cancelled'
                   ELSE 'in_progress'
               END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,

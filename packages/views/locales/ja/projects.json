@@ -271,11 +271,8 @@
     "name_placeholder": "状態名",
     "description_placeholder": "この状態の意味",
     "phase_label": "ステータスのカテゴリ",
-    "phase_backlog": "バックログ",
     "phase_unstarted": "未着手",
     "phase_started": "進行中",
-    "phase_completed": "完了",
-    "phase_cancelled": "キャンセル済み",
     "on_entry": "状態に入ったとき",
     "assign_to": "担当者",
     "run": "実行",
@@ -299,6 +296,8 @@
     "next_status_hint": "引き継ぎ操作の移動先です。並べ替えても変更されません。",
     "advance_label": "次のステータスの確認者",
     "policy_scope": "変更は次回の開始時に適用されます。既存の実行は元の指示と移動先を維持します。",
-    "color_label": "色"
+    "color_label": "色",
+    "phase_done": "完了",
+    "phase_closed": "クローズ"
   }
 }

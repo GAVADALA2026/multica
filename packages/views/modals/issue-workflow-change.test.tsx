@@ -54,7 +54,7 @@ function flow(id: string): IssueWorkflowResponse {
       description: "",
       color: "#123456",
       position: index,
-      phase: index ? "completed" : "unstarted",
+      phase: index ? "done" : "unstarted",
       outcome: index ? "completed" : null,
       archived_at: null,
       entry_policy: {

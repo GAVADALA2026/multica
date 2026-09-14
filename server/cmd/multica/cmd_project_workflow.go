@@ -35,6 +35,7 @@ type workflowFileStatus struct {
 	Name        string                  `json:"name" yaml:"name"`
 	Description string                  `json:"description,omitempty" yaml:"description,omitempty"`
 	Color       string                  `json:"color" yaml:"color"`
+	Icon        string                  `json:"icon,omitempty" yaml:"icon,omitempty"`
 	Phase       string                  `json:"phase" yaml:"phase"`
 	EntryPolicy workflowFileEntryPolicy `json:"entry_policy,omitempty" yaml:"entry_policy,omitempty"`
 }
@@ -58,6 +59,7 @@ type workflowAPIStatus struct {
 	Name        string                    `json:"name"`
 	Description string                    `json:"description"`
 	Color       string                    `json:"color"`
+	Icon        string                    `json:"icon,omitempty"`
 	Phase       string                    `json:"phase"`
 	EntryPolicy issueworkflow.EntryPolicy `json:"entry_policy"`
 }
@@ -75,6 +77,7 @@ type workflowAPIResponse struct {
 		Name        string                    `json:"name"`
 		Description string                    `json:"description"`
 		Color       string                    `json:"color"`
+		Icon        string                    `json:"icon,omitempty"`
 		Phase       string                    `json:"phase"`
 		ArchivedAt  *string                   `json:"archived_at"`
 		EntryPolicy issueworkflow.EntryPolicy `json:"entry_policy"`
@@ -212,7 +215,7 @@ func resolveWorkflowFileSpec(ctx context.Context, client *cli.APIClient, file wo
 		}
 		result.Statuses = append(result.Statuses, workflowAPIStatus{
 			Key: status.Key, Name: status.Name, Description: status.Description,
-			Color: status.Color, Phase: status.Phase,
+			Color: status.Color, Icon: status.Icon, Phase: status.Phase,
 			EntryPolicy: issueworkflow.EntryPolicy{Assignee: assignee, Executor: executor, Instructions: status.EntryPolicy.Instructions, Advance: status.EntryPolicy.Advance, NextStatusKey: status.EntryPolicy.NextStatusKey},
 		})
 	}
@@ -229,7 +232,7 @@ func workflowResponseToFile(response workflowAPIResponse, includeArchived bool) 
 			file.InitialStatus = status.SpecKey
 		}
 		file.Statuses = append(file.Statuses, workflowFileStatus{
-			Key: status.SpecKey, Name: status.Name, Description: status.Description, Color: status.Color, Phase: status.Phase,
+			Key: status.SpecKey, Name: status.Name, Description: status.Description, Color: status.Color, Icon: status.Icon, Phase: status.Phase,
 			EntryPolicy: workflowFileEntryPolicy{
 				Assignee:     workflowFilePrincipal{Type: status.EntryPolicy.Assignee.Type, Ref: status.EntryPolicy.Assignee.ID},
 				Executor:     workflowFilePrincipal{Type: status.EntryPolicy.Executor.Type, Ref: status.EntryPolicy.Executor.ID},

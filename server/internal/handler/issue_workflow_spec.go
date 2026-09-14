@@ -31,6 +31,7 @@ type issueWorkflowStatusSpecRequest struct {
 	Name        string                    `json:"name"`
 	Description string                    `json:"description"`
 	Color       string                    `json:"color"`
+	Icon        string                    `json:"icon,omitempty"`
 	Phase       string                    `json:"phase"`
 	EntryPolicy issueworkflow.EntryPolicy `json:"entry_policy"`
 }
@@ -116,10 +117,14 @@ func (h *Handler) normalizeWorkflowSpec(w http.ResponseWriter, r *http.Request, 
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("statuses[%d].color: %s", i, err))
 			return normalizedWorkflowSpec{}, false
 		}
+		if !validIssueStatusIcon(input.Icon) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("statuses[%d].icon is invalid", i))
+			return normalizedWorkflowSpec{}, false
+		}
 		input.Color = strings.ToLower(color)
-		outcome, ok := workflowOutcome(input.Phase)
+		outcome, ok := issueworkflow.CategoryOutcome(input.Phase)
 		if !ok {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("statuses[%d].phase must be backlog, unstarted, started, completed, or cancelled", i))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("statuses[%d].phase must be unstarted, started, done, or closed", i))
 			return normalizedWorkflowSpec{}, false
 		}
 		policyJSON, policy, err := issueworkflow.EncodeEntryPolicy(input.EntryPolicy)
@@ -158,7 +163,7 @@ func workflowStatusSpecChanged(current db.IssueWorkflowStatus, desired normalize
 	}
 	policyChanged := currentPolicy != desired.policyValue
 	changed := current.Name != desired.Name || current.Description != desired.Description ||
-		strings.ToLower(current.Color) != desired.Color || current.Position != desired.position ||
+		strings.ToLower(current.Color) != desired.Color || current.Icon != desired.Icon || current.Position != desired.position ||
 		current.Phase != desired.Phase || current.Outcome != desired.outcome || policyChanged || current.ArchivedAt.Valid
 	return changed, policyChanged, nil
 }
@@ -222,7 +227,7 @@ func applyWorkflowSpec(ctx context.Context, qtx *db.Queries, workspaceID, projec
 			current, err = qtx.CreateIssueWorkflowStatus(ctx, db.CreateIssueWorkflowStatusParams{
 				ID: dbid.NewV7(), WorkspaceID: workspaceID, WorkflowID: workflow.ID,
 				SpecKey: desired.Key, Name: desired.Name, Description: desired.Description,
-				Color: desired.Color, Position: desired.position, Phase: desired.Phase,
+				Color: desired.Color, Icon: desired.Icon, Position: desired.position, Phase: desired.Phase,
 				Outcome: desired.outcome, EntryPolicy: desired.policyJSON,
 			})
 			if err != nil {
@@ -240,7 +245,7 @@ func applyWorkflowSpec(ctx context.Context, qtx *db.Queries, workspaceID, projec
 		wasArchived := current.ArchivedAt.Valid
 		if changed {
 			current, err = qtx.UpdateIssueWorkflowStatusFromSpec(ctx, db.UpdateIssueWorkflowStatusFromSpecParams{
-				Name: desired.Name, Description: desired.Description, Color: desired.Color,
+				Name: desired.Name, Description: desired.Description, Color: desired.Color, Icon: desired.Icon,
 				Position: desired.position, Phase: desired.Phase, Outcome: desired.outcome,
 				EntryPolicy: desired.policyJSON, BumpEntryPolicyRevision: policyChanged,
 				StatusID: current.ID, WorkspaceID: workspaceID, WorkflowID: workflow.ID,

@@ -1,5 +1,7 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
+
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -29,7 +31,7 @@ import {
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { issueWorkflowOptions, activeWorkflowStatuses, workflowPhaseCategory } from "@multica/core/issue-workflows";
+import { issueWorkflowOptions, activeWorkflowStatuses } from "@multica/core/issue-workflows";
 import { useStatusOptions } from "../utils/status-options";
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
@@ -111,9 +113,9 @@ export function IssueActionsMenuItems({
   const legacyOptions = useStatusOptions(wsId);
   const workflowQuery = useQuery(issueWorkflowOptions(wsId, issue.workflow_id ?? ""));
   const statusOptions = issue.workflow_id ? activeWorkflowStatuses(workflowQuery.data).map((node) => ({
-    key: node.id, label: node.name, color: node.color, category: workflowPhaseCategory(node.phase),
-  })) : legacyOptions;
-  const { categoryOf, colorOf } = useIssueStatuses(wsId);
+    key: node.id, status: node.legacy_status_key ?? node.id, label: node.name, color: node.color, category: statusCategoryOfKey(node.phase), icon: node.icon ?? null,
+  })) : legacyOptions.map((option) => ({ ...option, status: option.key }));
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const {
     isPinned,
     updateField,
@@ -183,6 +185,7 @@ export function IssueActionsMenuItems({
             status={issue.status}
             category={categoryOf(issue.status)}
             color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
             className="h-3.5 w-3.5"
           />
           {t(($) => $.actions.status)}
@@ -201,9 +204,10 @@ export function IssueActionsMenuItems({
               onClick={() => updateField(issue.workflow_id ? { workflow_status_id: option.key } : { status: option.key })}
             >
               <StatusIcon
-                status={option.key}
+                status={option.status}
                 category={option.category}
                 color={option.color}
+                icon={option.icon}
                 className="h-3.5 w-3.5"
               />
               {option.label}
@@ -225,7 +229,7 @@ export function IssueActionsMenuItems({
           {PRIORITY_DISPLAY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                 {t(($) => $.priority[p])}

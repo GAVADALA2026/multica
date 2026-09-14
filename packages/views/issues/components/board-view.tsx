@@ -1,5 +1,7 @@
 "use client";
 
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,7 +20,7 @@ import type {
   Issue,
   IssueAssigneeType,
   IssueWorkflowStatusNode,
-  IssueStatusCategory,
+  IssueStatus,
   Project,
   IssueProperty,
 } from "@multica/core/types";
@@ -65,7 +67,7 @@ import { buildWorkflowStatusGroups } from "../utils/workflow-status-groups";
 
 function isStatusGroup(
   group: BoardColumnGroup,
-): group is BoardColumnGroup & { status: IssueStatusCategory } {
+): group is BoardColumnGroup & { status: IssueStatus } {
   return group.status !== undefined;
 }
 
@@ -133,7 +135,7 @@ function withNoProjectColumn(
 
 function buildGroups(
   issues: Issue[],
-  visibleStatuses: IssueStatusCategory[],
+  visibleStatuses: IssueStatus[],
   grouping: IssueGrouping,
   {
     getActorName,
@@ -149,7 +151,7 @@ function buildGroups(
       id: statusGroupId(status),
       title: status,
       status,
-      createData: { status },
+      createData: { status: status },
     }));
   }
 
@@ -258,8 +260,8 @@ function BoardViewImpl({
   workflowStatuses,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatusCategory[];
-  hiddenStatuses: IssueStatusCategory[];
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
@@ -274,6 +276,7 @@ function BoardViewImpl({
   const storeGrouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
   const boardWsId = useWorkspaceId();
+  const catalog = useIssueStatuses(boardWsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(boardWsId));
   const groupingPropertyId = propertyIdFromViewKey(storeGrouping);
   const groupingProperty = groupingPropertyId
@@ -546,6 +549,8 @@ function BoardViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
+        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
 
@@ -558,7 +563,7 @@ function BoardViewImpl({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, sortBy, recentlyMovedRef, setColumns],
+    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns],
   );
 
   const handleDragEnd = useCallback(
@@ -613,12 +618,21 @@ function BoardViewImpl({
       }
 
       const map = issueMapRef.current;
+      if (finalGroup.status && map.get(activeId)?.status !== finalGroup.status && catalog.entryOf(finalGroup.status)?.archived_at) {
+        resetColumns();
+        return;
+      }
 
       if (sortBy !== "position") {
         // Cross-column: only update group (status/assignee), keep original position.
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the card into the target column *now*. Without
@@ -677,7 +691,7 @@ function BoardViewImpl({
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, catalog, t],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
@@ -858,7 +872,7 @@ function BoardHiddenColumnsPanel({
   hiddenStatuses,
   statusPagination,
 }: {
-  hiddenStatuses: IssueStatusCategory[];
+  hiddenStatuses: IssueStatus[];
   statusPagination?: IssueStatusPagination;
 }) {
   return (

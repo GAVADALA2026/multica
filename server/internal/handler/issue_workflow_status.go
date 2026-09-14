@@ -23,6 +23,7 @@ type updateIssueWorkflowStatusRequest struct {
 	Name             *string                    `json:"name"`
 	Description      *string                    `json:"description"`
 	Color            *string                    `json:"color"`
+	Icon             *string                    `json:"icon"`
 	Phase            *string                    `json:"phase"`
 	EntryPolicy      *issueworkflow.EntryPolicy `json:"entry_policy"`
 }
@@ -30,19 +31,6 @@ type updateIssueWorkflowStatusRequest struct {
 type reorderIssueWorkflowStatusesRequest struct {
 	ExpectedRevision int64    `json:"expected_revision"`
 	StatusIDs        []string `json:"status_ids"`
-}
-
-func workflowOutcome(phase string) (pgtype.Text, bool) {
-	switch phase {
-	case issueworkflow.PhaseBacklog, issueworkflow.PhaseUnstarted, issueworkflow.PhaseStarted:
-		return pgtype.Text{}, true
-	case issueworkflow.PhaseCompleted:
-		return pgtype.Text{String: "completed", Valid: true}, true
-	case issueworkflow.PhaseCancelled:
-		return pgtype.Text{String: "cancelled", Valid: true}, true
-	default:
-		return pgtype.Text{}, false
-	}
 }
 
 func workflowProjectID(workflow db.IssueWorkflow) pgtype.UUID {
@@ -242,14 +230,22 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 		}
 		color = strings.ToLower(color)
 	}
+	icon := current.Icon
+	if req.Icon != nil {
+		icon = *req.Icon
+		if !validIssueStatusIcon(icon) {
+			writeError(w, http.StatusBadRequest, "icon is invalid")
+			return
+		}
+	}
 	position := current.Position
 	phase := current.Phase
 	if req.Phase != nil {
 		phase = strings.TrimSpace(*req.Phase)
 	}
-	outcome, validPhase := workflowOutcome(phase)
+	outcome, validPhase := issueworkflow.CategoryOutcome(phase)
 	if !validPhase {
-		writeError(w, http.StatusBadRequest, "phase must be backlog, unstarted, started, completed, or cancelled")
+		writeError(w, http.StatusBadRequest, "phase must be unstarted, started, done, or closed")
 		return
 	}
 
@@ -266,7 +262,7 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 			entryPolicy = requestedPolicy
 		}
 	}
-	changed := name != current.Name || description != current.Description || color != current.Color || position != current.Position || phase != current.Phase || policyChanged
+	changed := name != current.Name || description != current.Description || color != current.Color || icon != current.Icon || position != current.Position || phase != current.Phase || policyChanged
 	if !changed {
 		response, listErr := workflowResponseForRequest(r, qtx, workspaceID, workflow)
 		if listErr != nil {
@@ -278,7 +274,7 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	if _, err = qtx.UpdateIssueWorkflowStatusDefinition(r.Context(), db.UpdateIssueWorkflowStatusDefinitionParams{
-		Name: name, Description: description, Color: color, Position: position,
+		Name: name, Description: description, Color: color, Icon: icon, Position: position,
 		Phase: phase, Outcome: outcome, EntryPolicy: entryPolicy,
 		BumpEntryPolicyRevision: policyChanged, StatusID: statusID,
 		WorkspaceID: workspaceID, WorkflowID: workflowID,

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -3400,6 +3401,7 @@ func sampleIssueResponse() handler.IssueResponse {
 	assigneeID := "user-1"
 	parentID := "parent-1"
 	projectID := "proj-1"
+	workflowID, workflowStatusID, transitionID := "workflow-1", "status-1", "transition-1"
 	stage := int32(1)
 	startDate := "2024-01-01"
 	dueDate := "2024-01-02"
@@ -3414,7 +3416,7 @@ func sampleIssueResponse() handler.IssueResponse {
 		Title:          "Test issue",
 		Description:    &desc,
 		Status:         "in_progress",
-		StatusCategory: "active",
+		StatusCategory: "started",
 		StatusName:     "In Progress",
 		Priority:       "high",
 		AssigneeType:   &assigneeType,
@@ -3425,6 +3427,7 @@ func sampleIssueResponse() handler.IssueResponse {
 		ProjectID:      &projectID,
 		Position:       1,
 		Stage:          &stage,
+		WorkflowID:     &workflowID, WorkflowStatusID: &workflowStatusID, TransitionID: &transitionID,
 		StartDate:      &startDate,
 		DueDate:        &dueDate,
 		CreatedAt:      "2024-01-01T00:00:00Z",
@@ -4863,5 +4866,66 @@ func TestRunIssueCreateResolvesWorkflowStatusFromParentProject(t *testing.T) {
 	}
 	if _, exists := body["status"]; exists {
 		t.Fatal("sent legacy status alongside node identity")
+	}
+}
+
+// #8296: the CLI deletes through the keep-replies route, which only servers
+// that keep a deleted comment's replies expose. An older server does not route
+// it, and the CLI refuses rather than falling back to a delete that would
+// remove the replies too.
+func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name    string
+		respond func(http.ResponseWriter)
+		wantErr string
+	}{
+		{
+			name:    "server keeps replies",
+			respond: func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
+		},
+		{
+			name:    "older server without the route",
+			respond: func(w http.ResponseWriter) { http.Error(w, "404 page not found", http.StatusNotFound) },
+			wantErr: "would delete the comment's replies too",
+		},
+		{
+			name: "comment not found",
+			respond: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": "comment not found"})
+			},
+			wantErr: "comment not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("method = %s, want DELETE", r.Method)
+				}
+				paths = append(paths, r.URL.Path)
+				tt.respond(w)
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			err := runIssueCommentDelete(newIssueCommentResolutionTestCmd("delete"), []string{commentID})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+			}
+			if want := []string{"/api/comments/" + commentID + "/keep-replies"}; !slices.Equal(paths, want) {
+				t.Fatalf("requests = %v, want only %v", paths, want)
+			}
+		})
 	}
 }

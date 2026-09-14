@@ -53,7 +53,7 @@ it("edits the complete definition locally and saves once with its original revis
         name: "Code Review",
         description: "",
         color: "#6552cb",
-        phase: "completed",
+        phase: "done",
         position: 1,
         entry_policy: policy,
       },

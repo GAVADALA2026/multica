@@ -137,8 +137,13 @@ statuses:
   - key: shipped
     name: Shipped
     color: "#16a34a"
-    phase: completed
+    phase: done
 ```
+
+`phase` uses the same four categories as workspace statuses: `unstarted`,
+`started`, `done`, and `closed`. `done` represents completion and `closed`
+represents cancellation. An optional `icon` controls appearance independently
+of category and is preserved when copying or exporting a workflow.
 
 `entry_policy.next_status_key` optionally names the explicit handoff destination
 within this workflow. It must name another active status. Renaming or reordering
