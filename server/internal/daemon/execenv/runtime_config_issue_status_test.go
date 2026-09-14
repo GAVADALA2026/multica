@@ -61,7 +61,7 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 			t.Errorf("catalog brief missing %q\n---\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "custom statuses not listed") {
+	if strings.Contains(out, "custom statuses not listed") || strings.Contains(out, "Custom statuses omitted") {
 		t.Errorf("no truncation disclosure may appear when nothing was omitted")
 	}
 }
@@ -165,7 +165,7 @@ func TestBriefStatusCatalogUnknownCategoriesDisclosed(t *testing.T) {
 		}
 		out := buildMetaSkillContent("claude", TaskContextForEnv{IssueStatuses: entries, IssueStatusesOmitted: 4})
 		for _, want := range []string{
-			"  - 2 custom statuses not listed because this daemon does not recognize their categories; upgrade the daemon to display them.\n",
+			"  - Custom statuses omitted due to unrecognized categories: 2.\n",
 			"  - …and 4 more custom statuses not listed; an invalid status errors with the full valid list.\n",
 		} {
 			if !strings.Contains(out, want) {

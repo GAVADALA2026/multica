@@ -351,7 +351,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 	// Count only otherwise renderable entries, without echoing untrusted
 	// category values or conflating these omissions with the server's cap.
 	if unknownCategories > 0 {
-		fmt.Fprintf(b, "  - %d custom statuses not listed because this daemon does not recognize their categories; upgrade the daemon to display them.\n", unknownCategories)
+		fmt.Fprintf(b, "  - Custom statuses omitted due to unrecognized categories: %d.\n", unknownCategories)
 	}
 	if ctx.IssueStatusesOmitted > 0 {
 		fmt.Fprintf(b, "  - …and %d more custom statuses not listed; an invalid status errors with the full valid list.\n", ctx.IssueStatusesOmitted)
