@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { productLocale, type LabLocale } from "./locale";
+import { useTranslation } from "react-i18next";
+import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAuthStore, registerAuthStore } from "@multica/core/auth";
 import { createChatStore, registerChatStore } from "@multica/core/chat";
@@ -30,7 +32,8 @@ import {
   workspace,
 } from "./product-fixtures";
 
-const api = createFixtureApi();
+let fixtureLocale: LabLocale = "en";
+const api = createFixtureApi(() => fixtureLocale);
 setApiInstance(api);
 const storage = memoryStorage();
 const auth = createAuthStore({ api, storage });
@@ -39,9 +42,16 @@ registerAuthStore(auth);
 registerChatStore(createChatStore({ storage }));
 setCurrentWorkspace(workspace.slug, workspace.id);
 getIssueSurfaceViewStore("workspace:all").setState({ viewMode: "list" });
-const resources = { "zh-Hans": RESOURCES["zh-Hans"] };
+const resources = { en: RESOURCES.en, "zh-Hans": RESOURCES["zh-Hans"] };
 
-export function ProductPreview({ scene }: { scene: "list" | "detail" }) {
+export function ProductPreview({
+  scene,
+  locale,
+}: {
+  scene: "list" | "detail";
+  locale: LabLocale;
+}) {
+  const { t } = useTranslation("uiLab");
   const [client] = useState(() => {
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -56,13 +66,19 @@ export function ProductPreview({ scene }: { scene: "list" | "detail" }) {
     queryClient.setQueryData(workspaceKeys.list(), [workspace]);
     return queryClient;
   });
+  useEffect(() => {
+    fixtureLocale = locale;
+    auth.setState({ user: { ...user, language: productLocale(locale) } });
+    // Discard in-flight results from the previous language before refetching.
+    void client.cancelQueries().then(() => client.invalidateQueries());
+  }, [client, locale]);
   const [path, setPath] = useState(
     scene === "detail" ? `/ui-lab/issues/${issues[0]!.id}` : "/ui-lab/issues",
   );
   const navigation = useMemo<NavigationAdapter>(() => {
     const navigate = (next: string) => {
       if (/^\/ui-lab\/issues(?:\/[^/]+)?$/.test(next)) setPath(next);
-      else toast.info("当前预览提供任务列表和详情，其他页面尚未配置样例数据。");
+      else toast.info(t(($) => $.lab.preview.unavailable));
     };
     return {
       pathname: path,
@@ -73,7 +89,7 @@ export function ProductPreview({ scene }: { scene: "list" | "detail" }) {
       back: () => setPath("/ui-lab/issues"),
       getShareableUrl: (value) => `${location.origin}${value}`,
     };
-  }, [path]);
+  }, [path, t]);
   const issueId = path.split("/")[3];
   return (
     <QueryClientProvider client={client}>
@@ -82,7 +98,7 @@ export function ProductPreview({ scene }: { scene: "list" | "detail" }) {
         authStore={auth}
         storage={storage}
       >
-        <I18nProvider locale="zh-Hans" resources={resources}>
+        <I18nProvider locale={productLocale(locale)} resources={resources}>
           <WorkspaceSlugProvider slug={workspace.slug}>
             <NavigationProvider value={navigation}>
               <TooltipProvider>

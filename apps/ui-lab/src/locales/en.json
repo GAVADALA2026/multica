@@ -1,0 +1,317 @@
+{
+  "lab": {
+    "preview": {
+      "source": "Source",
+      "preview": "Preview",
+      "originalFrame": "Original preview",
+      "editedFrame": "Edited preview",
+      "unchanged": "No changes",
+      "back": "Back to edits",
+      "original": "View original",
+      "compare": "Compare",
+      "unavailable": "This preview includes the issue list and detail pages.",
+      "changeCount_other": "{{count}} changes",
+      "changeCount_one": "{{count}} change"
+    },
+    "theme": {
+      "light": "Light",
+      "dark": "Dark",
+      "label": "Preview theme",
+      "lightLabel": "Light theme",
+      "darkLabel": "Dark theme"
+    },
+    "notice": {
+      "saved": "Design saved",
+      "copied": "CSS copied",
+      "copyFailed": "Select the code to copy it, or download CSS.",
+      "exported": "CSS exported",
+      "storageFailed": "Cannot save drafts. Export CSS to keep your changes.",
+      "dismiss": "Dismiss notification",
+      "loaded": "Loaded: {{name}}"
+    },
+    "nav": {
+      "toggle": "Toggle navigation",
+      "internal": "Workbench",
+      "scenes": "Components & scenes",
+      "previewScenes": "Preview scenes",
+      "saved": "Saved designs",
+      "empty": "No saved designs",
+      "workbench": "Workbench"
+    },
+    "actions": {
+      "undo": "Undo",
+      "redo": "Redo",
+      "save": "Save design",
+      "export": "Export changes",
+      "deleteDesign": "Delete design {{name}}"
+    },
+    "save": {
+      "title": "Save design",
+      "description": "Saved in this browser. Up to 20 designs.",
+      "name": "Design name",
+      "placeholder": "e.g. Compact issue list"
+    },
+    "export": {
+      "title": "Export changes",
+      "description": "Merge into the matching blocks in packages/ui/styles/tokens.css. Export does not update source files.",
+      "copy": "Copy CSS",
+      "download": "Download CSS"
+    },
+    "scenes": {
+      "components": "Components",
+      "button": "Button",
+      "list": "Issue list",
+      "detail": "Issue detail"
+    },
+    "language": {
+      "label": "Language"
+    }
+  },
+  "button": {
+    "variants": {
+      "primary": "Primary",
+      "secondary": "Secondary",
+      "soft": "Soft fill",
+      "ghost": "Ghost",
+      "brand": "Brand",
+      "brandSoft": "Soft brand",
+      "destructive": "Destructive",
+      "link": "Link"
+    },
+    "actions": {
+      "create": "Create issue",
+      "continue": "Continue",
+      "submit": "Submit issue",
+      "more": "More actions",
+      "dialog": "Open dialog",
+      "save": "Save changes",
+      "saveExample": "Save example",
+      "saveNext": "Save and create another issue",
+      "compactAdd": "Add in compact layout",
+      "quick": "Quick action",
+      "addSize": "Add issue {{size}}"
+    },
+    "page": {
+      "title": "Button",
+      "variantCount": "8 variants",
+      "sizeCount": "8 sizes",
+      "contents": "Button sections",
+      "playground": "Playground",
+      "variants": "Variants & states",
+      "context": "In context",
+      "try": "Try a button",
+      "sizes": "Sizes & icons"
+    },
+    "controls": {
+      "label": "Label",
+      "content": "Content",
+      "leading": "Leading icon",
+      "trailing": "Trailing icon",
+      "textOnly": "Text only",
+      "iconOnly": "Icon only",
+      "state": "State",
+      "icon": "Icon",
+      "text": "Text"
+    },
+    "states": {
+      "default": "Default",
+      "disabled": "Disabled",
+      "loading": "Loading",
+      "invalid": "Invalid",
+      "interactive": "Default / interactive",
+      "processing": "Processing",
+      "submitting": "Submitting...",
+      "submitted": "Submitted",
+      "complete": "Example submitted",
+      "clicked_other": "Example triggered {{count}} times",
+      "clicked_one": "Example triggered {{count}} time"
+    },
+    "geometry": {
+      "height": "Height",
+      "padding": "Padding"
+    },
+    "context": {
+      "submit": "Submit & feedback",
+      "triggers": "Overlay triggers",
+      "popover": "Popover content",
+      "saveDescription": "Save your changes.",
+      "length": "Label length",
+      "compact": "Compact layouts"
+    }
+  },
+  "inspector": {
+    "sections": {
+      "size": "Size",
+      "appearance": "Appearance",
+      "type": "Typography",
+      "adjustSize": "Adjust size",
+      "colors": "Colors",
+      "moreColors": "More colors",
+      "density": "List density"
+    },
+    "changes": {
+      "modified": "Modified",
+      "reset": "Reset all changes",
+      "resetTitle": "Reset all changes (can be undone)",
+      "resetButton": "Reset button properties",
+      "resetButtonTitle": "Reset all button sizes",
+      "unchanged": "No changes",
+      "empty": "All properties match the source",
+      "export": "Export CSS",
+      "restore": "Restore original value"
+    },
+    "panel": {
+      "label": "Design properties",
+      "tabs": "Property panel",
+      "design": "Design",
+      "changes": "Changes",
+      "system": "Design system"
+    },
+    "scope": {
+      "component": "Component",
+      "global": "Global",
+      "shared": "Shared",
+      "theme": "Global · {{theme}}"
+    },
+    "actions": {
+      "edit": "Edit {{label}}",
+      "size": "Size {{size}}",
+      "restore": "Restore {{key}} ({{scope}})",
+      "scrub": "Drag to adjust {{label}}",
+      "scrubHint": "{{token}}\nDrag to adjust. Shift for larger steps. Click to enter a value.",
+      "reset": "Reset {{label}}",
+      "invalid": "Enter a number between {{min}} and {{max}}."
+    }
+  },
+  "tokens": {
+    "labels": {
+      "gap": "Icon gap",
+      "brand": "Brand",
+      "primary": "Primary fill",
+      "primaryText": "Primary text",
+      "secondary": "Secondary fill",
+      "secondaryText": "Secondary text",
+      "destructive": "Destructive",
+      "ring": "Focus ring",
+      "shell": "App shell",
+      "page": "Page background",
+      "surface": "Surface",
+      "raised": "Overlay background",
+      "hover": "Hover background",
+      "selected": "Selected background",
+      "foreground": "Text",
+      "muted": "Muted text",
+      "height": "Button height",
+      "padding": "Horizontal padding",
+      "rowHeight": "Issue row height",
+      "radius": "Corner radius",
+      "caption": "Caption",
+      "label": "Label",
+      "body": "Body",
+      "lineHeight": "Body line height",
+      "title": "Heading"
+    }
+  },
+  "color": {
+    "feedback": {
+      "invalid": "Enter a 3- or 6-digit HEX value.",
+      "copied": "Color copied",
+      "copyFailed": "Select the value to copy it manually.",
+      "gamut": "Outside sRGB. HEX is approximate."
+    },
+    "roles": {
+      "searchLabel": "Search color roles",
+      "searchPlaceholder": "Search colors or variables...",
+      "title": "Color roles",
+      "empty": "No matching colors.",
+      "current": "Color role: {{label}}"
+    },
+    "controls": {
+      "picker": "Color picker",
+      "hex": "HEX color",
+      "copy": "Copy HEX color",
+      "restoreTitle": "Restore the original color",
+      "restore": "Restore original color",
+      "original": "Original",
+      "current": "Current",
+      "reset": "Reset color",
+      "presets": "Presets",
+      "advanced": "Advanced",
+      "close": "Close color editor",
+      "use": "Use color {{color}}",
+      "editor": "{{label}} color editor"
+    },
+    "channels": {
+      "lightness": "Lightness",
+      "chroma": "Chroma",
+      "hue": "Hue"
+    }
+  },
+  "gallery": {
+    "surfaces": {
+      "shell": "Shell",
+      "page": "Page",
+      "surface": "Surface",
+      "raised": "Overlay",
+      "hover": "Hover",
+      "selected": "Selected"
+    },
+    "dialog": {
+      "open": "Open dialog",
+      "title": "New issue",
+      "description": "Enter an issue title.",
+      "label": "Dialog issue title",
+      "placeholder": "Enter issue title..."
+    },
+    "sections": {
+      "title": "Components",
+      "surfaces": "Surfaces",
+      "forms": "Forms",
+      "status": "Status & badges",
+      "typography": "Typography",
+      "elevation": "Elevation & radius",
+      "feedback": "Loading & empty states"
+    },
+    "actions": {
+      "new": "New",
+      "outline": "Outline",
+      "delete": "Delete",
+      "disabled": "Disabled"
+    },
+    "form": {
+      "title": "Example issue title",
+      "placeholder": "Name your issue...",
+      "notify": "Notify assignee",
+      "autopilot": "Autopilot",
+      "disabled": "Disabled input",
+      "readonly": "Read only",
+      "attention": "Needs attention"
+    },
+    "type": {
+      "heading": "Small details. Better experiences.",
+      "body": "Build with intention. Bring agents and teams together.",
+      "label": "Issue properties · Assignee · Project",
+      "caption": "Secondary text should be easy to read · 2 minutes ago",
+      "cardTitle": "Improve the product experience",
+      "cardDescription": "Inner and outer corner radii",
+      "empty": "You're all caught up"
+    }
+  },
+  "fixtures": {
+    "issues": {
+      "titles": [
+        "Unify visual hierarchy across issue lists and details",
+        "Improve keyboard navigation in the command menu",
+        "Improve feedback and status display for agent runs",
+        "Check mixed-language text and truncation of very long issue titles in narrow windows",
+        "Establish consistent corner radii for menus and dialogs",
+        "Refine selection and hover states in dark mode",
+        "Keep empty states clear and lightweight"
+      ],
+      "description": "## Goal\n\nHelp the team find the most important information. Clear headings, comfortable body text, and quiet secondary details.\n\n## Acceptance criteria\n\n- [x] Share semantic colors and corner radii\n- [ ] Handle mixed-language text and long titles naturally\n- [ ] Keep selection visible on hover\n\nBuild with intention. Bring agents and teams together."
+    },
+    "comments": {
+      "first": "Check list density, then compare typography in the detail page."
+    }
+  }
+}

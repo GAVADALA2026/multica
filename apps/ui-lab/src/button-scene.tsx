@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   ArrowRight,
@@ -32,24 +33,6 @@ import {
 
 type Variant = NonNullable<ComponentProps<typeof Button>["variant"]>;
 type Size = NonNullable<ComponentProps<typeof Button>["size"]>;
-const variants = {
-  default: { label: "主要操作" },
-  outline: { label: "次要操作" },
-  secondary: { label: "柔和填充" },
-  ghost: { label: "轻量操作" },
-  brand: { label: "品牌强调" },
-  brandSubtle: {
-    label: "品牌浅色",
-  },
-  destructive: {
-    label: "危险操作",
-  },
-  link: { label: "链接样式" },
-} satisfies Record<Variant, { label: string }>;
-const entries = Object.entries(variants) as [
-  Variant,
-  (typeof variants)[Variant],
-][];
 const iconSizes = {
   xs: "icon-xs",
   sm: "icon-sm",
@@ -64,8 +47,27 @@ export function ButtonScene({
   scale: ButtonScale;
   draft: Draft;
 }) {
+  const { t } = useTranslation("uiLab");
+  const variants = {
+    default: { label: t(($) => $.button.variants.primary) },
+    outline: { label: t(($) => $.button.variants.secondary) },
+    secondary: { label: t(($) => $.button.variants.soft) },
+    ghost: { label: t(($) => $.button.variants.ghost) },
+    brand: { label: t(($) => $.button.variants.brand) },
+    brandSubtle: {
+      label: t(($) => $.button.variants.brandSoft),
+    },
+    destructive: {
+      label: t(($) => $.button.variants.destructive),
+    },
+    link: { label: t(($) => $.button.variants.link) },
+  } satisfies Record<Variant, { label: string }>;
+  const entries = Object.entries(variants) as [
+    Variant,
+    (typeof variants)[Variant],
+  ][];
   const [variant, setVariant] = useState<Variant>("default");
-  const [label, setLabel] = useState("创建任务");
+  const [label, setLabel] = useState<string | null>(null);
   const [state, setState] = useState("normal");
   const [icon, setIcon] = useState("start");
   const [clicks, setClicks] = useState(0);
@@ -74,25 +76,26 @@ export function ButtonScene({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const loading = state === "loading";
-  const buttonLabel = label.trim() || "创建任务";
+  const buttonLabel = label?.trim() || t(($) => $.button.actions.create);
   const size = (key: string) =>
     `${sizeValue(tokenValue(draft, "shared", key))}px`;
   return (
     <div className="button-scene">
       <header className="button-intro">
-        <h1>
-          Button <span>按钮</span>
-        </h1>
+        <h1>{t(($) => $.button.page.title)}</h1>
         <div className="button-meta">
-          <span>8 种外观</span>
-          <span>8 种尺寸</span>
+          <span>{t(($) => $.button.page.variantCount)}</span>
+          <span>{t(($) => $.button.page.sizeCount)}</span>
         </div>
       </header>
-      <nav className="button-section-nav" aria-label="按钮页面目录">
-        <a href="#button-playground">试用</a>
-        <a href="#button-variants">外观与状态</a>
-        <a href="#button-sizes">尺寸</a>
-        <a href="#button-context">使用场景</a>
+      <nav
+        className="button-section-nav"
+        aria-label={t(($) => $.button.page.contents)}
+      >
+        <a href="#button-playground">{t(($) => $.button.page.playground)}</a>
+        <a href="#button-variants">{t(($) => $.button.page.variants)}</a>
+        <a href="#button-sizes">{t(($) => $.inspector.sections.size)}</a>
+        <a href="#button-context">{t(($) => $.button.page.context)}</a>
       </nav>
 
       <section
@@ -102,24 +105,24 @@ export function ButtonScene({
       >
         <div className="button-section-heading">
           <div>
-            <h2 id="playground-title">试用按钮</h2>
+            <h2 id="playground-title">{t(($) => $.button.page.try)}</h2>
           </div>
           <code>{scale}</code>
         </div>
         <div className="button-playground-controls">
           <label>
-            按钮文字
+            {t(($) => $.button.controls.label)}
             <Input
-              aria-label="按钮文字"
-              value={label}
+              aria-label={t(($) => $.button.controls.label)}
+              value={label ?? t(($) => $.button.actions.create)}
               maxLength={100}
               onChange={(event) => setLabel(event.target.value)}
             />
           </label>
           <label>
-            外观
+            {t(($) => $.inspector.sections.appearance)}
             <select
-              aria-label="外观"
+              aria-label={t(($) => $.inspector.sections.appearance)}
               value={variant}
               onChange={(event) => setVariant(event.target.value as Variant)}
             >
@@ -131,29 +134,45 @@ export function ButtonScene({
             </select>
           </label>
           <label>
-            内容
+            {t(($) => $.button.controls.content)}
             <select
-              aria-label="内容"
+              aria-label={t(($) => $.button.controls.content)}
               value={icon}
               onChange={(event) => setIcon(event.target.value)}
             >
-              <option value="start">前置图标</option>
-              <option value="end">后置图标</option>
-              <option value="none">仅文字</option>
-              <option value="only">仅图标</option>
+              <option value="start">
+                {t(($) => $.button.controls.leading)}
+              </option>
+              <option value="end">
+                {t(($) => $.button.controls.trailing)}
+              </option>
+              <option value="none">
+                {t(($) => $.button.controls.textOnly)}
+              </option>
+              <option value="only">
+                {t(($) => $.button.controls.iconOnly)}
+              </option>
             </select>
           </label>
           <label>
-            状态
+            {t(($) => $.button.controls.state)}
             <select
-              aria-label="状态"
+              aria-label={t(($) => $.button.controls.state)}
               value={state}
               onChange={(event) => setState(event.target.value)}
             >
-              <option value="normal">默认</option>
-              <option value="disabled">禁用</option>
-              <option value="loading">加载中</option>
-              <option value="invalid">无效输入</option>
+              <option value="normal">
+                {t(($) => $.button.states.default)}
+              </option>
+              <option value="disabled">
+                {t(($) => $.button.states.disabled)}
+              </option>
+              <option value="loading">
+                {t(($) => $.button.states.loading)}
+              </option>
+              <option value="invalid">
+                {t(($) => $.button.states.invalid)}
+              </option>
             </select>
           </label>
         </div>
@@ -178,12 +197,22 @@ export function ButtonScene({
               <ArrowRight data-icon="inline-end" />
             )}
           </Button>
-          <p role="status">{clicks ? `已触发 ${clicks} 次示例操作` : ""}</p>
+          <p role="status">
+            {clicks ? t(($) => $.button.states.clicked, { count: clicks }) : ""}
+          </p>
         </div>
         <div className="button-stage-footer">
-          <span>高度 {size(`--button-height-${scale}`)}</span>
-          <span>内边距 {size(`--button-padding-${scale}`)}</span>
-          <span>图文间距 {size(`--button-gap-${scale}`)}</span>
+          <span>
+            {t(($) => $.button.geometry.height)}{" "}
+            {size(`--button-height-${scale}`)}
+          </span>
+          <span>
+            {t(($) => $.button.geometry.padding)}{" "}
+            {size(`--button-padding-${scale}`)}
+          </span>
+          <span>
+            {t(($) => $.tokens.labels.gap)} {size(`--button-gap-${scale}`)}
+          </span>
         </div>
       </section>
 
@@ -194,7 +223,7 @@ export function ButtonScene({
       >
         <div className="button-section-heading">
           <div>
-            <h2 id="variants-title">外观与状态</h2>
+            <h2 id="variants-title">{t(($) => $.button.page.variants)}</h2>
           </div>
           <code>{scale}</code>
         </div>
@@ -202,10 +231,10 @@ export function ButtonScene({
           <table className="button-matrix">
             <thead>
               <tr>
-                <th scope="col">外观</th>
-                <th scope="col">默认 / 可交互</th>
-                <th scope="col">禁用</th>
-                <th scope="col">加载中</th>
+                <th scope="col">{t(($) => $.inspector.sections.appearance)}</th>
+                <th scope="col">{t(($) => $.button.states.interactive)}</th>
+                <th scope="col">{t(($) => $.button.states.disabled)}</th>
+                <th scope="col">{t(($) => $.button.states.loading)}</th>
               </tr>
             </thead>
             <tbody>
@@ -236,7 +265,7 @@ export function ButtonScene({
                       aria-busy="true"
                     >
                       <Loader2 className="animate-spin" />
-                      处理中
+                      {t(($) => $.button.states.processing)}
                     </Button>
                   </td>
                 </tr>
@@ -253,18 +282,18 @@ export function ButtonScene({
       >
         <div className="button-section-heading">
           <div>
-            <h2 id="sizes-title">尺寸与图标</h2>
+            <h2 id="sizes-title">{t(($) => $.button.page.sizes)}</h2>
           </div>
         </div>
         <div className="button-table-scroll">
           <table className="button-matrix button-size-matrix">
             <thead>
               <tr>
-                <th scope="col">尺寸</th>
-                <th scope="col">文字</th>
-                <th scope="col">前置图标</th>
-                <th scope="col">后置图标</th>
-                <th scope="col">图标</th>
+                <th scope="col">{t(($) => $.inspector.sections.size)}</th>
+                <th scope="col">{t(($) => $.button.controls.text)}</th>
+                <th scope="col">{t(($) => $.button.controls.leading)}</th>
+                <th scope="col">{t(($) => $.button.controls.trailing)}</th>
+                <th scope="col">{t(($) => $.button.controls.icon)}</th>
               </tr>
             </thead>
             <tbody>
@@ -276,18 +305,18 @@ export function ButtonScene({
                   </th>
                   <td>
                     <Button size={item} variant={variant}>
-                      创建任务
+                      {t(($) => $.button.actions.create)}
                     </Button>
                   </td>
                   <td>
                     <Button size={item} variant={variant}>
                       <Plus data-icon="inline-start" />
-                      创建任务
+                      {t(($) => $.button.actions.create)}
                     </Button>
                   </td>
                   <td>
                     <Button size={item} variant={variant}>
-                      继续
+                      {t(($) => $.button.actions.continue)}
                       <ArrowRight data-icon="inline-end" />
                     </Button>
                   </td>
@@ -295,7 +324,9 @@ export function ButtonScene({
                     <Button
                       size={iconSizes[item]}
                       variant={variant}
-                      aria-label={`添加任务 ${iconSizes[item]}`}
+                      aria-label={t(($) => $.button.actions.addSize, {
+                        size: iconSizes[item],
+                      })}
                     >
                       <Plus />
                     </Button>
@@ -314,12 +345,12 @@ export function ButtonScene({
       >
         <div className="button-section-heading">
           <div>
-            <h2 id="context-title">使用场景</h2>
+            <h2 id="context-title">{t(($) => $.button.page.context)}</h2>
           </div>
         </div>
         <div className="button-context-grid">
           <div className="button-context-card">
-            <h3>提交与反馈</h3>
+            <h3>{t(($) => $.button.context.submit)}</h3>
             <div className="button-example-actions">
               <Button
                 size={scale}
@@ -341,70 +372,80 @@ export function ButtonScene({
                 ) : (
                   <Send />
                 )}
-                {sending ? "提交中..." : sent ? "已提交" : "提交任务"}
+                {sending
+                  ? t(($) => $.button.states.submitting)
+                  : sent
+                    ? t(($) => $.button.states.submitted)
+                    : t(($) => $.button.actions.submit)}
               </Button>
               <span
                 className="text-caption text-muted-foreground"
                 role="status"
               >
-                {sent ? "示例提交完成" : ""}
+                {sent ? t(($) => $.button.states.complete) : ""}
               </span>
             </div>
           </div>
           <div className="button-context-card">
-            <h3>弹层触发器</h3>
+            <h3>{t(($) => $.button.context.triggers)}</h3>
             <div className="button-example-actions">
               <Popover>
                 <PopoverTrigger
                   render={<Button variant="outline" size={scale} />}
                 >
-                  更多操作
+                  {t(($) => $.button.actions.more)}
                   <ChevronDown data-icon="inline-end" />
                 </PopoverTrigger>
                 <PopoverContent>
-                  <p className="text-body">弹层内容</p>
+                  <p className="text-body">
+                    {t(($) => $.button.context.popover)}
+                  </p>
                 </PopoverContent>
               </Popover>
               <Dialog>
                 <DialogTrigger
                   render={<Button variant="secondary" size={scale} />}
                 >
-                  打开对话框
+                  {t(($) => $.button.actions.dialog)}
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>保存修改</DialogTitle>
-                    <DialogDescription>保存当前修改。</DialogDescription>
+                    <DialogTitle>{t(($) => $.button.actions.save)}</DialogTitle>
+                    <DialogDescription>
+                      {t(($) => $.button.context.saveDescription)}
+                    </DialogDescription>
                   </DialogHeader>
                   <Button size={scale} onClick={() => setClicks((n) => n + 1)}>
-                    保存示例
+                    {t(($) => $.button.actions.saveExample)}
                   </Button>
                 </DialogContent>
               </Dialog>
             </div>
           </div>
           <div className="button-context-card">
-            <h3>文字长度</h3>
+            <h3>{t(($) => $.button.context.length)}</h3>
             <div className="button-example-actions">
               <Button variant="outline" size={scale}>
-                Save changes
+                {t(($) => $.button.actions.save)}
               </Button>
-              <Button size={scale}>保存并继续创建下一项任务</Button>
+              <Button size={scale}>
+                {t(($) => $.button.actions.saveNext)}
+              </Button>
             </div>
           </div>
           <div className="button-context-card">
-            <h3>紧凑空间</h3>
+            <h3>{t(($) => $.button.context.compact)}</h3>
             <div className="button-example-actions">
               <Button
                 variant="ghost"
                 size="icon"
                 className="size-6"
-                aria-label="紧凑添加"
+                aria-label={t(($) => $.button.actions.compactAdd)}
               >
                 <Plus className="size-3" />
               </Button>
               <Button variant="outline" size={scale} className="h-7 px-2">
-                快捷操作
+                {t(($) => $.button.actions.quick)}
               </Button>
             </div>
           </div>

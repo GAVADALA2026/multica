@@ -1,3 +1,4 @@
+import { isLabLocale, type LabLocale } from "./locale";
 import {
   isDraft,
   buttonScales,
@@ -8,19 +9,19 @@ import {
 export const scenes = [
   {
     id: "components",
-    label: "组件总览",
+    label: "components",
   },
   {
     id: "button",
-    label: "Button 按钮",
+    label: "button",
   },
   {
     id: "list",
-    label: "任务列表",
+    label: "list",
   },
   {
     id: "detail",
-    label: "任务详情",
+    label: "detail",
   },
 ] as const;
 export type Scene = (typeof scenes)[number]["id"];
@@ -30,6 +31,7 @@ export type PreviewSettings = {
   theme: Theme;
   scene: Scene;
   buttonScale: ButtonScale;
+  locale: LabLocale;
 };
 export function isPreviewSettings(value: unknown): value is PreviewSettings {
   if (!value || typeof value !== "object") return false;
@@ -39,6 +41,7 @@ export function isPreviewSettings(value: unknown): value is PreviewSettings {
     (data.theme === "light" || data.theme === "dark") &&
     scenes.some((scene) => scene.id === data.scene) &&
     buttonScales.some((scale) => scale === data.buttonScale) &&
+    isLabLocale(data.locale) &&
     isDraft(data.draft)
   );
 }

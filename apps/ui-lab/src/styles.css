@@ -106,6 +106,12 @@ body {
   gap: 8px;
   margin-left: auto;
 }
+.language-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .header-separator {
   width: 1px;
   height: 18px;
@@ -529,7 +535,12 @@ body {
     z-index: 10;
   }
   .header-actions {
-    gap: 3px;
+    gap: 2px;
+  }
+  .lab-brand strong,
+  .lab-brand .brand-divider,
+  .lab-brand > span:last-child {
+    display: none;
   }
   .header-actions button > span {
     display: none;

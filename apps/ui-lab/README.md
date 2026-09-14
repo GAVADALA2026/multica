@@ -11,6 +11,10 @@ Vite starts at http://127.0.0.1:4310 (or the next available port). No backend,
 workspace, login, or environment file is required. This does not start Electron
 or the public web application.
 
+The interface defaults to English. Use EN / 中文 in the header to switch the
+workbench and all previews together. The browser remembers your language; switching
+languages preserves design overrides, saved schemes, and local sample edits.
+
 ## Workflow
 
 1. Choose Button, the component gallery, an issue list, or an issue detail fixture.

@@ -1,3 +1,6 @@
+import { LabI18nProvider } from "./lab-i18n";
+import { loadLocale, LOCALE_STORAGE_KEY, type LabLocale } from "./locale";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   ArrowDownToLine,
@@ -61,6 +64,8 @@ function PreviewFrame({
   buttonScale: ButtonScale;
   original?: boolean;
 }) {
+  const { t, i18n } = useTranslation("uiLab");
+  const locale: LabLocale = i18n.language === "zh-Hans" ? "zh" : "en";
   const ref = useRef<HTMLIFrameElement>(null);
   const send = useCallback(() => {
     ref.current?.contentWindow?.postMessage(
@@ -70,10 +75,11 @@ function PreviewFrame({
         theme,
         scene,
         buttonScale,
+        locale,
       } satisfies PreviewSettings,
       location.origin,
     );
-  }, [draft, theme, scene, buttonScale]);
+  }, [draft, theme, scene, buttonScale, locale]);
   useEffect(() => {
     const onReady = (event: MessageEvent<{ type?: string }>) => {
       if (
@@ -91,13 +97,25 @@ function PreviewFrame({
     <section className="preview-frame">
       <div className="frame-toolbar">
         <span className={`frame-dot ${original ? "" : "is-live"}`} />
-        <span>{original ? "当前代码" : "预览"}</span>
-        <span className="ml-auto">{theme === "light" ? "浅色" : "深色"}</span>
+        <span>
+          {original
+            ? t(($) => $.lab.preview.source)
+            : t(($) => $.lab.preview.preview)}
+        </span>
+        <span className="ml-auto">
+          {theme === "light"
+            ? t(($) => $.lab.theme.light)
+            : t(($) => $.lab.theme.dark)}
+        </span>
       </div>
       <iframe
         ref={ref}
         src="?preview"
-        title={original ? "原版界面" : "调整后的界面"}
+        title={
+          original
+            ? t(($) => $.lab.preview.originalFrame)
+            : t(($) => $.lab.preview.editedFrame)
+        }
         onLoad={send}
       />
     </section>
@@ -106,6 +124,22 @@ function PreviewFrame({
 const originalDraft = emptyDraft();
 
 export function App() {
+  const [locale, setLocale] = useState(loadLocale);
+  return (
+    <LabI18nProvider locale={locale}>
+      <Workbench locale={locale} onLocaleChange={setLocale} />
+    </LabI18nProvider>
+  );
+}
+
+function Workbench({
+  locale,
+  onLocaleChange,
+}: {
+  locale: LabLocale;
+  onLocaleChange: (locale: LabLocale) => void;
+}) {
+  const { t } = useTranslation("uiLab");
   const [session] = useState(loadSession);
   const [history, dispatch] = useReducer(editHistory, {
     past: [],
@@ -128,7 +162,10 @@ export function App() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [name, setName] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{
+    key: "saved" | "copied" | "copyFailed" | "exported" | "loaded";
+    name?: string;
+  } | null>(null);
   const [storageError, setStorageError] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const count = changeCount(draft);
@@ -148,14 +185,15 @@ export function App() {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, encodeSession({ draft, designs }));
+      localStorage.setItem(LOCALE_STORAGE_KEY, locale);
       setStorageError(false);
     } catch {
       setStorageError(true);
     }
-  }, [draft, designs]);
+  }, [draft, designs, locale]);
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 4000);
+    const timer = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [notice]);
   const edit = (next: Draft) => {
@@ -179,14 +217,14 @@ export function App() {
     );
     setName("");
     setSaveOpen(false);
-    setNotice("方案已保存到此浏览器");
+    setNotice({ key: "saved" });
   };
   const copyCss = async () => {
     try {
       await navigator.clipboard.writeText(css);
-      setNotice("CSS 已复制");
+      setNotice({ key: "copied" });
     } catch {
-      setNotice("无法访问剪贴板，请选择代码手动复制，或下载 CSS");
+      setNotice({ key: "copyFailed" });
     }
   };
   const downloadCss = () => {
@@ -198,7 +236,7 @@ export function App() {
     anchor.download = "multica-ui-tokens.css";
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice("CSS 已导出");
+    setNotice({ key: "exported" });
   };
   return (
     <div className="lab-shell">
@@ -207,12 +245,12 @@ export function App() {
           className="mobile-nav-toggle"
           size="icon"
           variant="ghost"
-          aria-label="切换场景导航"
+          aria-label={t(($) => $.lab.nav.toggle)}
           onClick={() => setNavOpen(!navOpen)}
         >
           <PanelLeft />
         </Button>
-        <a className="lab-brand" href="./">
+        <a className="lab-brand" href="./" aria-label="Multica UI Lab">
           <span className="logo-mark">
             <MulticaIcon className="size-4" noSpin />
           </span>
@@ -220,13 +258,31 @@ export function App() {
           <span className="brand-divider" />
           <span>UI Lab</span>
         </a>
-        <span className="internal-label">内部工作台</span>
+        <span className="internal-label">{t(($) => $.lab.nav.internal)}</span>
         <div className="header-actions">
+          <div
+            className="language-toggle"
+            role="group"
+            aria-label={t(($) => $.lab.language.label)}
+          >
+            {(["en", "zh"] as const).map((value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={locale === value ? "secondary" : "ghost"}
+                aria-pressed={locale === value}
+                lang={value === "zh" ? "zh-Hans" : "en"}
+                onClick={() => onLocaleChange(value)}
+              >
+                {value === "en" ? "EN" : "中文"}
+              </Button>
+            ))}
+          </div>
           <Button
             variant="ghost"
             size="icon"
-            aria-label="撤销"
-            title="撤销"
+            aria-label={t(($) => $.lab.actions.undo)}
+            title={t(($) => $.lab.actions.undo)}
             disabled={!history.past.length}
             onClick={() => dispatch({ type: "undo" })}
           >
@@ -235,29 +291,37 @@ export function App() {
           <Button
             variant="ghost"
             size="icon"
-            aria-label="重做"
-            title="重做"
+            aria-label={t(($) => $.lab.actions.redo)}
+            title={t(($) => $.lab.actions.redo)}
             disabled={!history.future.length}
             onClick={() => dispatch({ type: "redo" })}
           >
             <Redo2 />
           </Button>
           <span className="header-separator" />
-          <Button variant="outline" onClick={() => setSaveOpen(true)}>
+          <Button
+            variant="outline"
+            aria-label={t(($) => $.lab.actions.save)}
+            onClick={() => setSaveOpen(true)}
+          >
             <Save />
-            <span>保存方案</span>
+            <span>{t(($) => $.lab.actions.save)}</span>
           </Button>
-          <Button onClick={() => setExportOpen(true)}>
+          <Button
+            aria-label={t(($) => $.lab.actions.export)}
+            onClick={() => setExportOpen(true)}
+          >
             <Code2 />
-            <span>导出修改</span>
+            <span>{t(($) => $.lab.actions.export)}</span>
           </Button>
         </div>
       </header>
       <aside className={`lab-nav ${navOpen ? "nav-open" : ""}`}>
         <div className="nav-heading">
-          组件与场景<span>{String(scenes.length).padStart(2, "0")}</span>
+          {t(($) => $.lab.nav.scenes)}
+          <span>{String(scenes.length).padStart(2, "0")}</span>
         </div>
-        <nav aria-label="预览场景">
+        <nav aria-label={t(($) => $.lab.nav.previewScenes)}>
           {scenes.map((item, index) => {
             const Icon = [LayoutGrid, MousePointer2, ListTodo, PanelLeft][
               index
@@ -272,14 +336,15 @@ export function App() {
                 }}
               >
                 <Icon />
-                <span>{item.label}</span>
+                <span>{t(($) => $.lab.scenes[item.label])}</span>
                 {scene === item.id && <ChevronRight className="ml-auto" />}
               </button>
             );
           })}
         </nav>
         <div className="nav-heading saved-heading">
-          已存方案<span>{String(designs.length).padStart(2, "0")}</span>
+          {t(($) => $.lab.nav.saved)}
+          <span>{String(designs.length).padStart(2, "0")}</span>
         </div>
         <div className="saved-designs">
           {designs.length ? (
@@ -289,7 +354,7 @@ export function App() {
                   title={design.name}
                   onClick={() => {
                     edit(design.draft);
-                    setNotice(`已载入：${design.name}`);
+                    setNotice({ key: "loaded", name: design.name });
                   }}
                 >
                   <span
@@ -303,7 +368,9 @@ export function App() {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={`删除方案 ${design.name}`}
+                  aria-label={t(($) => $.lab.actions.deleteDesign, {
+                    name: design.name,
+                  })}
                   onClick={() =>
                     setDesigns(designs.filter((item) => item.id !== design.id))
                   }
@@ -313,7 +380,7 @@ export function App() {
               </div>
             ))
           ) : (
-            <p className="nav-empty">暂无方案</p>
+            <p className="nav-empty">{t(($) => $.lab.nav.empty)}</p>
           )}
         </div>
       </aside>
@@ -321,15 +388,19 @@ export function App() {
         <div className="workspace-heading">
           <div>
             <div className="workspace-breadcrumb">
-              工作台 <ChevronRight /> {currentScene.label}
+              {t(($) => $.lab.nav.workbench)}
+              <ChevronRight /> {t(($) => $.lab.scenes[currentScene.label])}
             </div>
-            <h1>{currentScene.label}</h1>
+            <h1>{t(($) => $.lab.scenes[currentScene.label])}</h1>
           </div>
-          <div className="theme-toggle" aria-label="预览主题">
+          <div
+            className="theme-toggle"
+            aria-label={t(($) => $.lab.theme.label)}
+          >
             <Button
               variant={theme === "light" ? "secondary" : "ghost"}
               size="icon"
-              aria-label="浅色主题"
+              aria-label={t(($) => $.lab.theme.lightLabel)}
               aria-pressed={theme === "light"}
               onClick={() => {
                 setColorPreview(null);
@@ -341,7 +412,7 @@ export function App() {
             <Button
               variant={theme === "dark" ? "secondary" : "ghost"}
               size="icon"
-              aria-label="深色主题"
+              aria-label={t(($) => $.lab.theme.darkLabel)}
               aria-pressed={theme === "dark"}
               onClick={() => {
                 setColorPreview(null);
@@ -355,7 +426,9 @@ export function App() {
         <div className="canvas-toolbar">
           <span className="canvas-caption">
             <span className="status-dot" />
-            {count ? `${count} 项修改` : "与当前代码一致"}
+            {count
+              ? t(($) => $.lab.preview.changeCount, { count })
+              : t(($) => $.lab.preview.unchanged)}
           </span>
           <div className="ml-auto flex gap-1">
             <Button
@@ -365,7 +438,9 @@ export function App() {
               disabled={compare}
               onClick={() => setOriginal(!original)}
             >
-              {original ? "返回修改版" : "查看原版"}
+              {original
+                ? t(($) => $.lab.preview.back)
+                : t(($) => $.lab.preview.original)}
             </Button>
             <Button
               variant={compare ? "secondary" : "ghost"}
@@ -377,7 +452,7 @@ export function App() {
               }}
             >
               <Columns2 />
-              并排对比
+              {t(($) => $.lab.preview.compare)}
             </Button>
           </div>
         </div>
@@ -426,14 +501,19 @@ export function App() {
       />
       {storageError && (
         <div className="storage-warning" role="alert">
-          浏览器无法保存草稿，请导出 CSS 以保留修改。
+          {t(($) => $.lab.notice.storageFailed)}
         </div>
       )}
       {notice && (
         <div className="lab-notice" role="status">
           <Check className="size-4" />
-          <span>{notice}</span>
-          <button aria-label="关闭提示" onClick={() => setNotice("")}>
+          <span>
+            {t(($) => $.lab.notice[notice.key], { name: notice.name })}
+          </span>
+          <button
+            aria-label={t(($) => $.lab.notice.dismiss)}
+            onClick={() => setNotice(null)}
+          >
             <X className="size-3" />
           </button>
         </div>
@@ -441,9 +521,9 @@ export function App() {
       <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>保存设计方案</DialogTitle>
+            <DialogTitle>{t(($) => $.lab.save.title)}</DialogTitle>
             <DialogDescription>
-              保存在当前浏览器，最多 20 份。
+              {t(($) => $.lab.save.description)}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -453,13 +533,13 @@ export function App() {
             }}
           >
             <label htmlFor="design-name" className="mb-2 block text-label">
-              方案名称
+              {t(($) => $.lab.save.name)}
             </label>
             <Input
               id="design-name"
               maxLength={60}
               value={name}
-              placeholder="例如：更紧凑的任务视图"
+              placeholder={t(($) => $.lab.save.placeholder)}
               onChange={(event) => setName(event.target.value)}
               autoFocus
             />
@@ -468,7 +548,7 @@ export function App() {
               className="mt-4 w-full"
               disabled={!name.trim()}
             >
-              保存方案
+              {t(($) => $.lab.actions.save)}
             </Button>
           </form>
         </DialogContent>
@@ -476,10 +556,9 @@ export function App() {
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>导出设计修改</DialogTitle>
+            <DialogTitle>{t(($) => $.lab.export.title)}</DialogTitle>
             <DialogDescription>
-              合并到 packages/ui/styles/tokens.css
-              的对应代码块。导出不会写回源码。
+              {t(($) => $.lab.export.description)}
             </DialogDescription>
           </DialogHeader>
           <pre className="export-code" tabIndex={0}>
@@ -488,11 +567,11 @@ export function App() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={copyCss}>
               <Copy />
-              复制 CSS
+              {t(($) => $.lab.export.copy)}
             </Button>
             <Button onClick={downloadCss}>
               <ArrowDownToLine />
-              下载 CSS
+              {t(($) => $.lab.export.download)}
             </Button>
           </div>
         </DialogContent>

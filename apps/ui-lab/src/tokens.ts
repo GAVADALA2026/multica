@@ -7,21 +7,21 @@ export type Draft = Record<Scope, TokenValues>;
 export const emptyDraft = (): Draft => ({ light: {}, dark: {}, shared: {} });
 
 export const colorTokens = [
-  ["--brand", "品牌色"],
-  ["--primary", "主要操作背景"],
-  ["--primary-foreground", "主要操作文字"],
-  ["--secondary", "次要操作背景"],
-  ["--secondary-foreground", "次要操作文字"],
-  ["--destructive", "危险操作颜色"],
-  ["--ring", "聚焦轮廓"],
-  ["--app-shell", "外层框架"],
-  ["--page-canvas", "页面背景"],
-  ["--surface", "内容表面"],
-  ["--surface-raised", "浮层背景"],
-  ["--surface-hover", "悬停背景"],
-  ["--surface-selected", "选中背景"],
-  ["--foreground", "正文颜色"],
-  ["--muted-foreground", "次要文字"],
+  ["--brand", "brand"],
+  ["--primary", "primary"],
+  ["--primary-foreground", "primaryText"],
+  ["--secondary", "secondary"],
+  ["--secondary-foreground", "secondaryText"],
+  ["--destructive", "destructive"],
+  ["--ring", "ring"],
+  ["--app-shell", "shell"],
+  ["--page-canvas", "page"],
+  ["--surface", "surface"],
+  ["--surface-raised", "raised"],
+  ["--surface-hover", "hover"],
+  ["--surface-selected", "selected"],
+  ["--foreground", "foreground"],
+  ["--muted-foreground", "muted"],
 ] as const;
 export const buttonScales = ["xs", "sm", "default", "lg"] as const;
 export type ButtonScale = (typeof buttonScales)[number];
@@ -30,7 +30,7 @@ export const buttonTokens = buttonScales.flatMap(
     [
       {
         key: `--button-height-${scale}`,
-        label: "按钮高度",
+        label: "height",
         min: 20,
         max: 48,
         step: 1,
@@ -40,7 +40,7 @@ export const buttonTokens = buttonScales.flatMap(
       },
       {
         key: `--button-padding-${scale}`,
-        label: "水平内边距",
+        label: "padding",
         min: 4,
         max: 24,
         step: 1,
@@ -50,7 +50,7 @@ export const buttonTokens = buttonScales.flatMap(
       },
       {
         key: `--button-gap-${scale}`,
-        label: "图文间距",
+        label: "gap",
         min: 0,
         max: 16,
         step: 1,
@@ -64,7 +64,7 @@ export const sizeTokens = [
   ...buttonTokens,
   {
     key: "--issue-row-height",
-    label: "任务行高",
+    label: "rowHeight",
     min: 32,
     max: 48,
     step: 2,
@@ -73,7 +73,7 @@ export const sizeTokens = [
   },
   {
     key: "--radius",
-    label: "基础圆角",
+    label: "radius",
     min: 0,
     max: 16,
     step: 1,
@@ -82,7 +82,7 @@ export const sizeTokens = [
   },
   {
     key: "--text-caption",
-    label: "辅助文字",
+    label: "caption",
     min: 10,
     max: 16,
     step: 1,
@@ -91,7 +91,7 @@ export const sizeTokens = [
   },
   {
     key: "--text-label",
-    label: "信息标签",
+    label: "label",
     min: 11,
     max: 17,
     step: 1,
@@ -100,7 +100,7 @@ export const sizeTokens = [
   },
   {
     key: "--text-body",
-    label: "正文",
+    label: "body",
     min: 12,
     max: 18,
     step: 1,
@@ -109,7 +109,7 @@ export const sizeTokens = [
   },
   {
     key: "--text-body--line-height",
-    label: "正文行高",
+    label: "lineHeight",
     min: 18,
     max: 30,
     step: 1,
@@ -118,7 +118,7 @@ export const sizeTokens = [
   },
   {
     key: "--text-title-lg",
-    label: "标题",
+    label: "title",
     min: 18,
     max: 28,
     step: 1,
@@ -267,7 +267,9 @@ export function isDraft(value: unknown): value is Draft {
 
 export type History = { past: Draft[]; present: Draft; future: Draft[] };
 export type EditAction =
-  { type: "edit"; draft: Draft } | { type: "undo" } | { type: "redo" };
+  | { type: "edit"; draft: Draft }
+  | { type: "undo" }
+  | { type: "redo" };
 export function editHistory(state: History, action: EditAction): History {
   if (action.type === "edit") {
     if (JSON.stringify(state.present) === JSON.stringify(action.draft))

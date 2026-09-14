@@ -137,6 +137,7 @@ describe("design editing and persistence", () => {
   it("validates frame settings before applying CSS", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      locale: "en",
       theme: "dark",
       scene: "list",
       buttonScale: "default",
@@ -198,6 +199,7 @@ describe("Button geometry export", () => {
   it("accepts only supported button preview sizes", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      locale: "en",
       theme: "light",
       scene: "button",
       buttonScale: "sm",

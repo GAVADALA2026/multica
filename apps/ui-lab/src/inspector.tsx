@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
@@ -95,6 +96,7 @@ export function Inspector({
   onColorCancel: () => void;
   onExport: () => void;
 }) {
+  const { t } = useTranslation("uiLab");
   const [tab, setTab] = useState("design");
   const [openColor, setOpenColor] = useState<string | null>(null);
   const count = changeCount(draft);
@@ -108,7 +110,7 @@ export function Inspector({
   const number = (token: (typeof sizeTokens)[number]) => (
     <NumberField
       key={token.key}
-      label={token.label}
+      label={t(($) => $.tokens.labels[token.label])}
       min={token.min}
       max={token.max}
       step={token.step}
@@ -137,7 +139,8 @@ export function Inspector({
     scene === "button"
       ? ["--primary", "--primary-foreground", "--brand", "--destructive"]
       : ["--page-canvas", "--surface", "--foreground", "--brand"];
-  const colorRow = ([key, label]: (typeof colorTokens)[number]) => {
+  const colorRow = ([key, labelKey]: (typeof colorTokens)[number]) => {
+    const label = t(($) => $.tokens.labels[labelKey]);
     const value = color === key ? currentColor : tokenValue(draft, theme, key);
     return (
       <Popover
@@ -154,7 +157,7 @@ export function Inspector({
             <button
               type="button"
               className="property-color-row"
-              aria-label={`编辑${label}`}
+              aria-label={t(($) => $.inspector.actions.edit, { label })}
             />
           }
         >
@@ -171,7 +174,7 @@ export function Inspector({
               <span
                 className="property-modified"
                 aria-hidden="true"
-                title="已修改"
+                title={t(($) => $.inspector.changes.modified)}
               />
             )}
           </span>
@@ -181,15 +184,19 @@ export function Inspector({
           align="start"
           sideOffset={12}
           className="property-color-popup"
-          aria-label={`${label}颜色编辑器`}
+          aria-label={t(($) => $.color.controls.editor, { label })}
         >
           <div className="property-popup-heading">
             <strong>{label}</strong>
-            <span>{theme === "light" ? "浅色" : "深色"}</span>
+            <span>
+              {theme === "light"
+                ? t(($) => $.lab.theme.light)
+                : t(($) => $.lab.theme.dark)}
+            </span>
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="关闭颜色编辑器"
+              aria-label={t(($) => $.color.controls.close)}
               onClick={() => {
                 setOpenColor(null);
                 onColorCancel();
@@ -225,7 +232,10 @@ export function Inspector({
     Object.entries(values).map(([key, value]) => ({ scope, key, value })),
   );
   return (
-    <aside className="lab-inspector property-inspector" aria-label="设计参数">
+    <aside
+      className="lab-inspector property-inspector"
+      aria-label={t(($) => $.inspector.panel.label)}
+    >
       <Tabs
         value={tab}
         onValueChange={(value) => {
@@ -236,17 +246,23 @@ export function Inspector({
         className="property-tabs"
       >
         <div className="property-tabs-header">
-          <TabsList variant="line" aria-label="属性面板">
-            <TabsTrigger value="design">设计</TabsTrigger>
+          <TabsList
+            variant="line"
+            aria-label={t(($) => $.inspector.panel.tabs)}
+          >
+            <TabsTrigger value="design">
+              {t(($) => $.inspector.panel.design)}
+            </TabsTrigger>
             <TabsTrigger value="changes">
-              修改{count > 0 && <span className="property-count">{count}</span>}
+              {t(($) => $.inspector.panel.changes)}
+              {count > 0 && <span className="property-count">{count}</span>}
             </TabsTrigger>
           </TabsList>
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="重置全部修改"
-            title="重置全部修改（可撤销）"
+            aria-label={t(($) => $.inspector.changes.reset)}
+            title={t(($) => $.inspector.changes.resetTitle)}
             disabled={!count}
             onClick={() => onEdit({ light: {}, dark: {}, shared: {} })}
           >
@@ -257,19 +273,23 @@ export function Inspector({
           <div className="property-object">
             <div>
               <Component className="size-4" />
-              <strong>{scene === "button" ? "Button" : "设计系统"}</strong>
+              <strong>
+                {scene === "button"
+                  ? "Button"
+                  : t(($) => $.inspector.panel.system)}
+              </strong>
             </div>
           </div>
           {scene === "button" && (
             <PropertySection
-              title="尺寸"
-              scope="组件"
+              title={t(($) => $.inspector.sections.size)}
+              scope={t(($) => $.inspector.scope.component)}
               actions={
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="重置按钮参数"
-                  title="重置全部按钮尺寸"
+                  aria-label={t(($) => $.inspector.changes.resetButton)}
+                  title={t(($) => $.inspector.changes.resetButtonTitle)}
                   disabled={
                     !buttonTokens.some((token) => draft.shared[token.key])
                   }
@@ -291,13 +311,15 @@ export function Inspector({
               <div
                 className="property-segments"
                 role="group"
-                aria-label="调整尺寸"
+                aria-label={t(($) => $.inspector.sections.adjustSize)}
               >
                 {buttonScales.map((scale) => (
                   <button
                     key={scale}
                     type="button"
-                    aria-label={`尺寸 ${scale}`}
+                    aria-label={t(($) => $.inspector.actions.size, {
+                      size: scale,
+                    })}
                     aria-pressed={buttonScale === scale}
                     onClick={() => onScaleChange(scale)}
                   >
@@ -316,7 +338,10 @@ export function Inspector({
               </div>
             </PropertySection>
           )}
-          <PropertySection title="外观" scope="全局">
+          <PropertySection
+            title={t(($) => $.inspector.sections.appearance)}
+            scope={t(($) => $.inspector.scope.global)}
+          >
             <div className="property-grid">
               {sizeTokens
                 .filter((token) => token.group === "radius")
@@ -333,8 +358,10 @@ export function Inspector({
             </div>
           </PropertySection>
           <PropertySection
-            title="颜色"
-            scope={`全局 · ${theme === "light" ? "浅色" : "深色"}`}
+            title={t(($) => $.inspector.sections.colors)}
+            scope={t(($) => $.inspector.scope.theme, {
+              theme: t(($) => $.lab.theme[theme]),
+            })}
           >
             <div className="property-colors">
               {colorTokens
@@ -343,7 +370,7 @@ export function Inspector({
             </div>
             <details className="property-more-colors">
               <summary>
-                更多颜色
+                {t(($) => $.inspector.sections.moreColors)}
                 <ChevronDown className="size-3" />
               </summary>
               <div className="property-colors">
@@ -353,13 +380,19 @@ export function Inspector({
               </div>
             </details>
           </PropertySection>
-          <PropertySection title="文字" scope="全局">
+          <PropertySection
+            title={t(($) => $.inspector.sections.type)}
+            scope={t(($) => $.inspector.scope.global)}
+          >
             <div className="property-grid">
               {sizeTokens.filter((token) => token.group === "type").map(number)}
             </div>
           </PropertySection>
           {scene !== "button" && (
-            <PropertySection title="列表密度" scope="全局">
+            <PropertySection
+              title={t(($) => $.inspector.sections.density)}
+              scope={t(($) => $.inspector.scope.global)}
+            >
               <div className="property-grid">
                 {sizeTokens
                   .filter((token) => token.group === "density")
@@ -370,43 +403,56 @@ export function Inspector({
         </TabsContent>
         <TabsContent value="changes" className="property-tab-panel">
           <div className="property-changes-intro">
-            <strong>{count ? `${count} 项修改` : "与原版一致"}</strong>
+            <strong>
+              {count
+                ? t(($) => $.lab.preview.changeCount, { count })
+                : t(($) => $.inspector.changes.unchanged)}
+            </strong>
           </div>
-          {changes.map(({ scope, key, value }) => (
-            <div className="property-change" key={`${scope}:${key}`}>
-              <header>
-                <strong>
-                  {sizeTokens.find((token) => token.key === key)?.label ??
-                    colorTokens.find(([token]) => token === key)?.[1] ??
-                    key}
-                </strong>
-                <span>
-                  {scope === "shared"
-                    ? "共享"
-                    : scope === "light"
-                      ? "浅色"
-                      : "深色"}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`恢复 ${key} ${scope}`}
-                  onClick={() => reset(scope, key)}
-                >
-                  <RotateCcw />
-                </Button>
-              </header>
-              <code>{key}</code>
-              <div className="property-change-values">
-                <del>{baseline[scope][key]}</del>
-                <span>{value}</span>
+          {changes.map(({ scope, key, value }) => {
+            const label =
+              sizeTokens.find((token) => token.key === key)?.label ??
+              colorTokens.find(([token]) => token === key)?.[1];
+            return (
+              <div className="property-change" key={`${scope}:${key}`}>
+                <header>
+                  <strong>
+                    {label ? t(($) => $.tokens.labels[label]) : key}
+                  </strong>
+                  <span>
+                    {scope === "shared"
+                      ? t(($) => $.inspector.scope.shared)
+                      : scope === "light"
+                        ? t(($) => $.lab.theme.light)
+                        : t(($) => $.lab.theme.dark)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t(($) => $.inspector.actions.restore, {
+                      key,
+                      scope:
+                        scope === "shared"
+                          ? t(($) => $.inspector.scope.shared)
+                          : t(($) => $.lab.theme[scope]),
+                    })}
+                    onClick={() => reset(scope, key)}
+                  >
+                    <RotateCcw />
+                  </Button>
+                </header>
+                <code>{key}</code>
+                <div className="property-change-values">
+                  <del>{baseline[scope][key]}</del>
+                  <span>{value}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {!count && (
             <div className="property-empty">
               <Check className="size-6" />
-              <span>所有参数均使用当前代码的值</span>
+              <span>{t(($) => $.inspector.changes.empty)}</span>
             </div>
           )}
         </TabsContent>
@@ -414,7 +460,8 @@ export function Inspector({
       <div className="property-export">
         <Button variant="outline" onClick={onExport}>
           <ArrowDownToLine />
-          导出 CSS<span>{count || ""}</span>
+          {t(($) => $.inspector.changes.export)}
+          <span>{count || ""}</span>
         </Button>
       </div>
     </aside>

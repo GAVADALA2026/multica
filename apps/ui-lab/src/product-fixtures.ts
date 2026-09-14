@@ -1,3 +1,6 @@
+import en from "./locales/en.json";
+import zh from "./locales/zh.json";
+import { productLocale, type LabLocale } from "./locale";
 import type {
   Issue,
   User,
@@ -32,7 +35,7 @@ export const user: User = {
   onboarded_at: time,
   onboarding_questionnaire: {},
   starter_content_state: "imported",
-  language: "zh-Hans",
+  language: "en",
   profile_description: "",
   timezone: "Asia/Shanghai",
   created_at: time,
@@ -50,23 +53,14 @@ export const members: MemberWithUser[] = [
     avatar_url: null,
   },
 ];
-const titles = [
-  "统一任务列表与详情页的视觉层次",
-  "Improve keyboard navigation in the command menu",
-  "优化智能体运行中的反馈与状态展示",
-  "检查中英文混排，以及很长的任务标题在窄窗口中的截断表现",
-  "为菜单和弹窗建立一致的圆角规则",
-  "完善深色模式下的选中与悬停状态",
-  "让空状态保持清晰、轻量",
-];
+const titles = en.fixtures.issues.titles;
 export const issues: Issue[] = titles.map((title, index) => ({
   id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   workspace_id: workspace.id,
   number: 241 + index,
   identifier: `MUL-${241 + index}`,
   title,
-  description:
-    "## 目标\n\n让团队更容易找到当前最重要的信息。标题清晰、正文舒适，次要信息保持安静。\n\n## 验收标准\n\n- [x] 共享同一套语义颜色与圆角\n- [ ] 中英文混排与长标题表现自然\n- [ ] 选中状态在悬停时依然清晰\n\nBuild with intention. 让智能体和团队一起工作。",
+  description: en.fixtures.issues.description,
   status: index < 3 ? "in_progress" : index < 6 ? "todo" : "done",
   priority: index % 2 ? "medium" : "high",
   assignee_type: "member",
@@ -102,7 +96,31 @@ export const memoryStorage = (): StorageAdapter => {
 
 // Only data is substituted. Views, hooks, stores and mutations are the production modules.
 // There is deliberately no fallback to ApiClient's network implementation.
-export function createFixtureApi() {
+export function createFixtureApi(getLocale: () => LabLocale = () => "en") {
+  const messages = () => (getLocale() === "zh" ? zh.fixtures : en.fixtures);
+  // Translate untouched fixtures at the data boundary; preserve user edits.
+  const localizeIssue = (issue: Issue): Issue => {
+    const index = issues.findIndex((original) => original.id === issue.id);
+    const original = issues[index];
+    return {
+      ...issue,
+      title:
+        original && issue.title === original.title
+          ? messages().issues.titles[index]!
+          : issue.title,
+      description:
+        original && issue.description === original.description
+          ? messages().issues.description
+          : issue.description,
+    };
+  };
+  const localizeComment = (comment: Comment): Comment => ({
+    ...comment,
+    content:
+      comment.id === "30000000-0000-4000-8000-000000000001"
+        ? messages().comments.first
+        : comment.content,
+  });
   let rows = structuredClone(issues);
   const comments: Comment[] = [
     {
@@ -110,7 +128,7 @@ export function createFixtureApi() {
       issue_id: issues[0]!.id,
       author_type: "member",
       author_id: user.id,
-      content: "先检查列表的密度，再比较详情页中的文字层级。",
+      content: en.fixtures.comments.first,
       type: "comment",
       parent_id: null,
       reactions: [],
@@ -132,7 +150,7 @@ export function createFixtureApi() {
         (!filters.priorities?.length ||
           filters.priorities.includes(issue.priority)) &&
         (!query.search ||
-          `${issue.identifier} ${issue.title}`
+          `${issue.identifier} ${localizeIssue(issue).title}`
             .toLowerCase()
             .includes(query.search.toLowerCase())) &&
         (!filters.working_issue_ids ||
@@ -144,7 +162,7 @@ export function createFixtureApi() {
     });
   const handlers: Partial<ApiClient> = {
     getBaseUrl: () => "/ui-lab-fixtures",
-    getMe: async () => user,
+    getMe: async () => ({ ...user, language: productLocale(getLocale()) }),
     listWorkspaces: async () => [workspace],
     getWorkspace: async () => workspace,
     listMembers: async () => members,
@@ -162,10 +180,12 @@ export function createFixtureApi() {
             params.priorities.includes(issue.priority)),
       );
       return {
-        issues: filtered.slice(
-          params?.offset ?? 0,
-          (params?.offset ?? 0) + (params?.limit ?? 100),
-        ),
+        issues: filtered
+          .slice(
+            params?.offset ?? 0,
+            (params?.offset ?? 0) + (params?.limit ?? 100),
+          )
+          .map(localizeIssue),
         total: filtered.length,
       };
     },
@@ -181,7 +201,10 @@ export function createFixtureApi() {
         parent_id: request.parent_id,
         total: matched.length,
         branch_total: branch.length,
-        rows: branch.map((issue) => ({ issue, direct_child_count: 0 })),
+        rows: branch.map((issue) => ({
+          issue: localizeIssue(issue),
+          direct_child_count: 0,
+        })),
         next_cursor: null,
       };
     },
@@ -217,7 +240,7 @@ export function createFixtureApi() {
     getIssue: async (id) => {
       const issue = rows.find((row) => row.id === id || row.identifier === id);
       if (!issue) throw new Error(`Unknown fixture issue: ${id}`);
-      return structuredClone(issue);
+      return structuredClone(localizeIssue(issue));
     },
     updateIssue: async (id, updates) => {
       const current = rows.find((row) => row.id === id);
@@ -228,18 +251,20 @@ export function createFixtureApi() {
         revision: (current.revision ?? 0) + 1,
       };
       rows = rows.map((row) => (row.id === id ? next : row));
-      return structuredClone(next);
+      return structuredClone(localizeIssue(next));
     },
     listChildIssues: async () => ({ issues: [] }),
     listChildrenByParents: async () => ({ issues: [] }),
     getChildIssueProgress: async () => ({ progress: [] }),
     listComments: async (id) =>
-      comments.filter((comment) => comment.issue_id === id),
+      comments
+        .filter((comment) => comment.issue_id === id)
+        .map(localizeComment),
     listTimeline: async (id) =>
       comments
         .filter((comment) => comment.issue_id === id)
         .map((comment) => ({
-          ...comment,
+          ...localizeComment(comment),
           type: "comment",
           actor_type: comment.author_type,
           actor_id: comment.author_id,
@@ -322,7 +347,7 @@ export function createFixtureApi() {
       if (handler !== undefined) return handler;
       if (property === "then") return undefined;
       return () => {
-        const message = `UI Lab 未提供此操作的样例数据：${property}`;
+        const message = `UI Lab has no fixture for this operation: ${property}`;
         console.warn(message);
         return Promise.reject(new Error(message));
       };

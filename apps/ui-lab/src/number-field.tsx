@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useId, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 
@@ -30,6 +31,7 @@ export function NumberField({
   onCancel: () => void;
   onReset: () => void;
 }) {
+  const { t } = useTranslation("uiLab");
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const drag = useRef<{
@@ -71,7 +73,7 @@ export function NumberField({
           <span
             className="property-modified"
             aria-hidden="true"
-            title="已修改"
+            title={t(($) => $.inspector.changes.modified)}
           />
         )}
       </label>
@@ -79,8 +81,8 @@ export function NumberField({
         <button
           type="button"
           className="property-scrub"
-          aria-label={`拖动调整${label}`}
-          title={`${token}\n左右拖动调整，Shift 加速；点击输入数值。`}
+          aria-label={t(($) => $.inspector.actions.scrub, { label })}
+          title={t(($) => $.inspector.actions.scrubHint, { token })}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
@@ -189,8 +191,8 @@ export function NumberField({
           <button
             type="button"
             className="property-reset"
-            aria-label={`重置${label}`}
-            title="恢复原版值"
+            aria-label={t(($) => $.inspector.actions.reset, { label })}
+            title={t(($) => $.inspector.changes.restore)}
             onClick={onReset}
           >
             <RotateCcw className="size-3" />
@@ -199,7 +201,7 @@ export function NumberField({
       </div>
       {invalid && (
         <span className="property-error" id={`${id}-error`}>
-          请输入 {min}–{max} 之间的数值。
+          {t(($) => $.inspector.actions.invalid, { min, max })}
         </span>
       )}
     </div>

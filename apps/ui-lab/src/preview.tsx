@@ -1,3 +1,5 @@
+import { LabI18nProvider } from "./lab-i18n";
+import { useTranslation } from "react-i18next";
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, Check, Inbox, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -50,13 +52,14 @@ function Person({ name = "JZ" }: { name?: string }) {
   );
 }
 function SurfaceSwatches() {
+  const { t } = useTranslation("uiLab");
   const surfaces = [
-    ["--app-shell", "框架"],
-    ["--page-canvas", "页面"],
-    ["--surface", "表面"],
-    ["--surface-raised", "浮层"],
-    ["--surface-hover", "悬停"],
-    ["--surface-selected", "选中"],
+    ["--app-shell", t(($) => $.gallery.surfaces.shell)],
+    ["--page-canvas", t(($) => $.gallery.surfaces.page)],
+    ["--surface", t(($) => $.gallery.surfaces.surface)],
+    ["--surface-raised", t(($) => $.gallery.surfaces.raised)],
+    ["--surface-hover", t(($) => $.gallery.surfaces.hover)],
+    ["--surface-selected", t(($) => $.gallery.surfaces.selected)],
   ];
   return (
     <div className="surface-swatches">
@@ -70,64 +73,87 @@ function SurfaceSwatches() {
   );
 }
 function ExampleDialog() {
+  const { t } = useTranslation("uiLab");
   return (
     <Dialog>
       <DialogTrigger render={<Button variant="outline" />}>
-        打开弹窗 <ArrowUpRight />
+        {t(($) => $.gallery.dialog.open)}
+        <ArrowUpRight />
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新建任务</DialogTitle>
-          <DialogDescription>填写任务标题。</DialogDescription>
+          <DialogTitle>{t(($) => $.gallery.dialog.title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.gallery.dialog.description)}
+          </DialogDescription>
         </DialogHeader>
-        <Input aria-label="弹窗任务标题" placeholder="输入任务标题..." />
+        <Input
+          aria-label={t(($) => $.gallery.dialog.label)}
+          placeholder={t(($) => $.gallery.dialog.placeholder)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 function ComponentsScene() {
+  const { t } = useTranslation("uiLab");
   return (
     <div className="component-scene">
       <div className="scene-intro">
-        <h1>基础组件</h1>
+        <h1>{t(($) => $.gallery.sections.title)}</h1>
       </div>
       <div className="specimen-grid">
-        <Specimen title="表面与层次" caption="SURFACES" wide>
+        <Specimen
+          title={t(($) => $.gallery.sections.surfaces)}
+          caption="SURFACES"
+          wide
+        >
           <SurfaceSwatches />
         </Specimen>
-        <Specimen title="按钮" caption="BUTTON">
+        <Specimen title={t(($) => $.button.page.title)} caption="BUTTON">
           <div className="flex flex-wrap gap-3">
-            <Button>创建任务</Button>
+            <Button>{t(($) => $.button.actions.create)}</Button>
             <Button variant="brand">
               <Plus />
-              新建
+              {t(($) => $.gallery.actions.new)}
             </Button>
-            <Button variant="secondary">次要操作</Button>
-            <Button variant="outline">边框按钮</Button>
-            <Button variant="ghost">轻量操作</Button>
-            <Button variant="destructive">删除</Button>
-            <Button disabled>不可用</Button>
+            <Button variant="secondary">
+              {t(($) => $.button.variants.secondary)}
+            </Button>
+            <Button variant="outline">
+              {t(($) => $.gallery.actions.outline)}
+            </Button>
+            <Button variant="ghost">{t(($) => $.button.variants.ghost)}</Button>
+            <Button variant="destructive">
+              {t(($) => $.gallery.actions.delete)}
+            </Button>
+            <Button disabled>{t(($) => $.gallery.actions.disabled)}</Button>
           </div>
         </Specimen>
-        <Specimen title="输入与选择" caption="FORM">
+        <Specimen title={t(($) => $.gallery.sections.forms)} caption="FORM">
           <div className="grid gap-4">
             <Input
-              aria-label="组件任务标题"
-              placeholder="为任务起一个名字..."
+              aria-label={t(($) => $.gallery.form.title)}
+              placeholder={t(($) => $.gallery.form.placeholder)}
             />
             <div className="flex items-center justify-between gap-4">
               <label className="flex items-center gap-2 text-body">
                 <Checkbox defaultChecked />
-                通知负责人
+                {t(($) => $.gallery.form.notify)}
               </label>
               <label className="flex items-center gap-2 text-body">
-                自动化 <Switch defaultChecked />
+                {t(($) => $.gallery.form.autopilot)}
+                <Switch defaultChecked />
               </label>
             </div>
-            <Input aria-label="禁用输入框" disabled placeholder="只读状态" />
+            <Input
+              aria-label={t(($) => $.gallery.form.disabled)}
+              disabled
+              placeholder={t(($) => $.gallery.form.readonly)}
+            />
           </div>
         </Specimen>
-        <Specimen title="状态与标签" caption="STATUS">
+        <Specimen title={t(($) => $.gallery.sections.status)} caption="STATUS">
           <div className="flex flex-wrap gap-x-5 gap-y-4">
             {[
               "backlog",
@@ -150,36 +176,49 @@ function ComponentsScene() {
             <Badge>Design</Badge>
             <Badge variant="secondary">Frontend</Badge>
             <Badge variant="outline">v0.4.0</Badge>
-            <Badge variant="destructive">需关注</Badge>
+            <Badge variant="destructive">
+              {t(($) => $.gallery.form.attention)}
+            </Badge>
           </div>
         </Specimen>
-        <Specimen title="文字层级" caption="TYPOGRAPHY">
+        <Specimen
+          title={t(($) => $.gallery.sections.typography)}
+          caption="TYPOGRAPHY"
+        >
           <div className="grid gap-2">
-            <h3 className="text-title-lg font-semibold">小细节，构成好体验</h3>
-            <p className="text-body">
-              Build with intention. 让智能体和团队一起工作。
-            </p>
-            <p className="text-label">任务属性 · 负责人 · 项目</p>
+            <h3 className="text-title-lg font-semibold">
+              {t(($) => $.gallery.type.heading)}
+            </h3>
+            <p className="text-body">{t(($) => $.gallery.type.body)}</p>
+            <p className="text-label">{t(($) => $.gallery.type.label)}</p>
             <p className="text-caption text-muted-foreground">
-              次要信息也应该清楚可读 · 2 分钟前
+              {t(($) => $.gallery.type.caption)}
             </p>
           </div>
         </Specimen>
-        <Specimen title="浮层与圆角" caption="ELEVATION">
+        <Specimen
+          title={t(($) => $.gallery.sections.elevation)}
+          caption="ELEVATION"
+        >
           <div className="rounded-xl border border-surface-border bg-surface p-4 shadow-[var(--surface-shadow)]">
             <div className="mb-4 flex items-center gap-3">
               <Person />
               <div>
-                <p className="text-body font-medium">产品体验优化</p>
+                <p className="text-body font-medium">
+                  {t(($) => $.gallery.type.cardTitle)}
+                </p>
                 <p className="text-caption text-muted-foreground">
-                  内外层圆角的关系
+                  {t(($) => $.gallery.type.cardDescription)}
                 </p>
               </div>
             </div>
             <ExampleDialog />
           </div>
         </Specimen>
-        <Specimen title="加载与空状态" caption="FEEDBACK">
+        <Specimen
+          title={t(($) => $.gallery.sections.feedback)}
+          caption="FEEDBACK"
+        >
           <div className="flex items-center gap-3">
             <Skeleton className="size-8 rounded-full" />
             <div className="flex-1 space-y-2">
@@ -189,7 +228,7 @@ function ComponentsScene() {
           </div>
           <div className="mt-5 flex items-center gap-3 text-muted-foreground">
             <Inbox className="size-5" />
-            <span className="text-body">所有通知都已处理</span>
+            <span className="text-body">{t(($) => $.gallery.type.empty)}</span>
             <Check className="ml-auto size-4 text-success" />
           </div>
         </Specimen>
@@ -204,6 +243,7 @@ export function Preview() {
     theme: "light",
     scene: "components",
     buttonScale: "default",
+    locale: "en",
   });
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>) => {
@@ -231,17 +271,23 @@ export function Preview() {
     window.scrollTo(0, 0);
   }, [settings.scene]);
   return (
-    <div className="preview-root">
-      <style>{previewCss(settings.draft)}</style>
-      {settings.scene === "components" ? (
-        <ComponentsScene />
-      ) : settings.scene === "button" ? (
-        <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
-      ) : settings.scene === "list" ? (
-        <ProductPreview key="list" scene="list" />
-      ) : (
-        <ProductPreview key="detail" scene="detail" />
-      )}
-    </div>
+    <LabI18nProvider locale={settings.locale}>
+      <div className="preview-root">
+        <style>{previewCss(settings.draft)}</style>
+        {settings.scene === "components" ? (
+          <ComponentsScene />
+        ) : settings.scene === "button" ? (
+          <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
+        ) : settings.scene === "list" ? (
+          <ProductPreview key="list" scene="list" locale={settings.locale} />
+        ) : (
+          <ProductPreview
+            key="detail"
+            scene="detail"
+            locale={settings.locale}
+          />
+        )}
+      </div>
+    </LabI18nProvider>
   );
 }

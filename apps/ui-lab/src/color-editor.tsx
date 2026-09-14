@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useId, useState } from "react";
 import { HexColorPicker } from "react-colorful";
 import { Check, ChevronDown, Copy, RotateCcw, Search } from "lucide-react";
@@ -44,31 +45,36 @@ export function ColorEditor({
   onPreview: (color: string) => void;
   onCommit: (color: string) => void;
 }) {
+  const { t } = useTranslation("uiLab");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hexInput, setHexInput] = useState(colorToHex(value));
-  const [error, setError] = useState("");
-  const [copyState, setCopyState] = useState("");
+  const [error, setError] = useState(false);
+  const [copyState, setCopyState] = useState<"copied" | "copyFailed" | null>(
+    null,
+  );
   const errorId = useId();
   const hex = colorToHex(value);
   const channels = parseColor(value);
-  const label = colorTokens.find(([key]) => key === token)![1];
+  const label = t(
+    ($) => $.tokens.labels[colorTokens.find(([key]) => key === token)![1]],
+  );
   useEffect(() => {
     setHexInput(hex);
-    setError("");
+    setError(false);
   }, [hex]);
   useEffect(() => {
     if (!copyState) return;
-    const timeout = setTimeout(() => setCopyState(""), 2000);
+    const timeout = setTimeout(() => setCopyState(null), 2000);
     return () => clearTimeout(timeout);
   }, [copyState]);
   const commitHex = () => {
     const next = hexToOklch(hexInput);
     if (!next) {
-      setError("请输入 3 位或 6 位 HEX 色值。");
+      setError(true);
       return;
     }
-    setError("");
+    setError(false);
     setHexInput(colorToHex(next));
     // Focusing/blurring an approximate HEX display must not rewrite a wide-gamut token.
     if (colorToHex(next) !== hex) onCommit(next);
@@ -88,7 +94,7 @@ export function ColorEditor({
               <Button
                 variant="outline"
                 className="color-role-trigger"
-                aria-label={`颜色角色：${label}`}
+                aria-label={t(($) => $.color.roles.current, { label })}
               />
             }
           >
@@ -103,16 +109,21 @@ export function ColorEditor({
             <div className="color-role-search">
               <Search className="size-3.5" />
               <Input
-                aria-label="搜索颜色角色"
-                placeholder="搜索颜色或变量..."
+                aria-label={t(($) => $.color.roles.searchLabel)}
+                placeholder={t(($) => $.color.roles.searchPlaceholder)}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
-            <div className="color-role-list" aria-label="颜色角色">
+            <div
+              className="color-role-list"
+              aria-label={t(($) => $.color.roles.title)}
+            >
               {colorTokens
                 .filter(([key, name]) =>
-                  `${key} ${name}`.toLowerCase().includes(query.toLowerCase()),
+                  `${key} ${t(($) => $.tokens.labels[name])}`
+                    .toLowerCase()
+                    .includes(query.toLowerCase()),
                 )
                 .map(([key, name]) => (
                   <Button
@@ -131,15 +142,21 @@ export function ColorEditor({
                       style={{ background: values[key] }}
                     />
                     <span className="color-role-label">
-                      <strong>{name}</strong>
+                      <strong>{t(($) => $.tokens.labels[name])}</strong>
                       <code>{key}</code>
                     </span>
                     {key === token && <Check className="size-3.5" />}
                   </Button>
                 ))}
               {!colorTokens.some(([key, name]) =>
-                `${key} ${name}`.toLowerCase().includes(query.toLowerCase()),
-              ) && <p className="color-role-empty">没有找到匹配的颜色。</p>}
+                `${key} ${t(($) => $.tokens.labels[name])}`
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              ) && (
+                <p className="color-role-empty">
+                  {t(($) => $.color.roles.empty)}
+                </p>
+              )}
             </div>
           </PopoverContent>
         </Popover>
@@ -149,14 +166,14 @@ export function ColorEditor({
           color={hex}
           onChange={(next) => onPreview(hexToOklch(next)!)}
           onChangeEnd={(next) => onCommit(hexToOklch(next)!)}
-          aria-label="颜色色板"
+          aria-label={t(($) => $.color.controls.picker)}
         />
       </div>
       <div className="color-hex-row">
         <label className="color-hex-field">
           <span>HEX</span>
           <Input
-            aria-label="HEX 色值"
+            aria-label={t(($) => $.color.controls.hex)}
             value={hexInput}
             maxLength={7}
             spellCheck={false}
@@ -164,7 +181,7 @@ export function ColorEditor({
             aria-describedby={error ? errorId : undefined}
             onChange={(event) => {
               setHexInput(event.target.value);
-              setError("");
+              setError(false);
             }}
             onBlur={commitHex}
             onKeyDown={(event) => {
@@ -174,7 +191,7 @@ export function ColorEditor({
               }
               if (event.key === "Escape") {
                 setHexInput(hex);
-                setError("");
+                setError(false);
               }
             }}
           />
@@ -182,53 +199,53 @@ export function ColorEditor({
         <Button
           variant="outline"
           size="icon"
-          aria-label="复制 HEX 色值"
-          title="复制 HEX 色值"
+          aria-label={t(($) => $.color.controls.copy)}
+          title={t(($) => $.color.controls.copy)}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(hex);
-              setCopyState("已复制色值");
+              setCopyState("copied");
             } catch {
-              setCopyState("无法复制，请选择色值后手动复制。");
+              setCopyState("copyFailed");
             }
           }}
         >
-          {copyState === "已复制色值" ? <Check /> : <Copy />}
+          {copyState === "copied" ? <Check /> : <Copy />}
         </Button>
       </div>
       {error && (
         <p className="color-field-error" role="alert" id={errorId}>
-          {error}
+          {t(($) => $.color.feedback.invalid)}
         </p>
       )}
       {copyState && (
         <p className="color-feedback" role="status">
-          {copyState}
+          {t(($) => $.color.feedback[copyState])}
         </p>
       )}
       {!isSrgb(value) && (
-        <p className="color-feedback">超出 sRGB，HEX 为近似值。</p>
+        <p className="color-feedback">{t(($) => $.color.feedback.gamut)}</p>
       )}
       <div className="color-comparison">
         <button
           type="button"
           onClick={() => onCommit(original)}
-          title="恢复此颜色的原版值"
-          aria-label="恢复原版颜色"
+          title={t(($) => $.color.controls.restoreTitle)}
+          aria-label={t(($) => $.color.controls.restore)}
           disabled={!modified}
         >
           <span style={{ background: original }} />
-          <small>原版</small>
+          <small>{t(($) => $.color.controls.original)}</small>
         </button>
         <div>
           <span style={{ background: value }} />
-          <small>当前</small>
+          <small>{t(($) => $.color.controls.current)}</small>
         </div>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="重置此颜色"
-          title="重置此颜色"
+          aria-label={t(($) => $.color.controls.reset)}
+          title={t(($) => $.color.controls.reset)}
           disabled={!modified}
           onClick={() => onCommit(original)}
         >
@@ -236,14 +253,15 @@ export function ColorEditor({
         </Button>
       </div>
       <div className="color-presets-heading">
-        快捷色 <span>sRGB</span>
+        {t(($) => $.color.controls.presets)}
+        <span>sRGB</span>
       </div>
       <div className="color-presets">
         {presets.map((preset) => (
           <button
             type="button"
             key={preset}
-            aria-label={`使用颜色 ${preset}`}
+            aria-label={t(($) => $.color.controls.use, { color: preset })}
             title={preset}
             aria-pressed={hex === preset}
             style={{ background: preset }}
@@ -253,15 +271,16 @@ export function ColorEditor({
       </div>
       <details className="color-advanced">
         <summary>
-          精确调整 <span>OKLCH</span>
+          {t(($) => $.color.controls.advanced)}
+          <span>OKLCH</span>
           <ChevronDown className="size-3" />
         </summary>
         <div className="color-channels">
           {(
             [
-              ["明度", 0, 1, 0.005],
-              ["色度", 1, 0.4, 0.005],
-              ["色相", 2, 360, 1],
+              [t(($) => $.color.channels.lightness), 0, 1, 0.005],
+              [t(($) => $.color.channels.chroma), 1, 0.4, 0.005],
+              [t(($) => $.color.channels.hue), 2, 360, 1],
             ] as const
           ).map(([name, index, max, step]) => (
             <label key={name}>
