@@ -732,7 +732,6 @@ function BillingTabContent() {
     return (
       <SettingsTab
         title={t(($) => $.workspace.title)}
-        description={t(($) => $.workspace.description)}
       >
         <SettingsCard>
           <div
@@ -752,7 +751,6 @@ function BillingTabContent() {
     return (
       <SettingsTab
         title={t(($) => $.workspace.title)}
-        description={t(($) => $.workspace.description)}
       >
         <Alert variant="destructive">
           <AlertCircle />
@@ -845,7 +843,6 @@ function BillingTabContent() {
   return (
     <SettingsTab
       title={t(($) => $.workspace.title)}
-      description={t(($) => $.workspace.description)}
     >
       {returnResult === "cancel" ? (
         <Alert>
@@ -861,9 +858,6 @@ function BillingTabContent() {
         <Alert>
           <CheckCircle2 />
           <AlertTitle>{t(($) => $.workspace.return.portal_title)}</AlertTitle>
-          <AlertDescription>
-            {t(($) => $.workspace.return.portal_description)}
-          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -991,9 +985,6 @@ function BillingTabContent() {
           <AlertTitle>
             {t(($) => $.workspace.subscription_notice.canceled_title)}
           </AlertTitle>
-          <AlertDescription>
-            {t(($) => $.workspace.subscription_notice.canceled_description)}
-          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -1009,7 +1000,6 @@ function BillingTabContent() {
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.workspace.current.plan)}
-            description={t(($) => $.workspace.current.plan_description)}
           >
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <Badge variant={planBadgeVariant(entitlements.plan)}>
@@ -1033,9 +1023,6 @@ function BillingTabContent() {
           {summaryQuery.data?.billingInterval ? (
             <SettingsRow
               label={t(($) => $.workspace.current.billing_interval)}
-              description={t(
-                ($) => $.workspace.current.billing_interval_description,
-              )}
             >
               <span>
                 {summaryQuery.data.billingInterval === "month"
@@ -1047,7 +1034,6 @@ function BillingTabContent() {
           {summaryPeriodEnd ? (
             <SettingsRow
               label={t(($) => $.workspace.current.period_end)}
-              description={t(($) => $.workspace.current.period_end_description)}
             >
               <span className="tabular-nums">{summaryPeriodEnd}</span>
             </SettingsRow>
@@ -1166,7 +1152,7 @@ function BillingTabContent() {
               description={
                 portalUnavailable
                   ? t(($) => $.workspace.management.portal_unavailable)
-                  : t(($) => $.workspace.management.portal_description)
+                  : undefined
               }
             >
               {!portalUnavailable ? (
@@ -1190,18 +1176,15 @@ function BillingTabContent() {
 
       <SettingsSection
         title={t(($) => $.workspace.limits.title)}
-        description={t(($) => $.workspace.limits.description)}
       >
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.workspace.limits.issues)}
-            description={t(($) => $.workspace.limits.issues_description)}
           >
             <span className="tabular-nums">{issueLimitValue}</span>
           </SettingsRow>
           <SettingsRow
             label={t(($) => $.workspace.limits.autopilots)}
-            description={t(($) => $.workspace.limits.autopilots_description)}
           >
             {quotaUsage.kind === "unlimited" ? (
               <span className="tabular-nums">
@@ -1386,7 +1369,6 @@ function BillingTabContent() {
           <SettingsCard>
             <SettingsRow
               label={t(($) => $.workspace.seats.human_members)}
-              description={t(($) => $.workspace.seats.human_members_description)}
             >
               <span className="tabular-nums">
                 {t(($) => $.workspace.seats.seat_count, {
@@ -1396,7 +1378,6 @@ function BillingTabContent() {
             </SettingsRow>
             <SettingsRow
               label={t(($) => $.workspace.seats.billed)}
-              description={t(($) => $.workspace.seats.billed_description)}
             >
               {summaryQuery.isPending ? (
                 <Skeleton
@@ -1456,8 +1437,16 @@ function BillingTabContent() {
               )}
             </SettingsRow>
             <SettingsRow
-              label={t(($) => $.workspace.seats.available)}
-              description={t(($) => $.workspace.seats.available_description)}
+              label={
+                <details>
+                  <summary className="cursor-pointer rounded py-2 focus-visible:outline-2 focus-visible:outline-ring">
+                    {t(($) => $.workspace.seats.available)}
+                  </summary>
+                  <p className="mt-1 text-caption font-normal text-muted-foreground">
+                    {t(($) => $.workspace.seats.available_description)}
+                  </p>
+                </details>
+              }
             >
               {summaryQuery.isPending ? (
                 <Skeleton

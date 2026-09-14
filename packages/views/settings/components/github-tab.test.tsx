@@ -144,9 +144,9 @@ function resetFixtures() {
 describe("GitHubTab", () => {
   beforeEach(resetFixtures);
 
-  it("folds the non-dev hint into the master switch description (no separate callout)", () => {
+  it("offers the master switch without a separate turn-off callout", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByText(/Not a development team\? Just turn it off here\./)).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /enable github features/i })).toBeEnabled();
     // The old standalone callout (title + dedicated "Turn GitHub off" button) is gone.
     expect(screen.queryByRole("button", { name: /^Turn GitHub off$/ })).toBeNull();
   });

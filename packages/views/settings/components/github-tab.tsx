@@ -131,7 +131,6 @@ export function GitHubTab() {
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.github)}
-      description={t(($) => $.github.page_description)}
     >
       <section className="space-y-3">
         <Card>

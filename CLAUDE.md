@@ -192,6 +192,9 @@ Root-level reminders:
 
 ## UI Rules
 
+- Descriptions are optional and omitted by default. Do not restate titles, labels, values, statuses, or button actions. Add help only for a non-obvious choice, constraint, consequence, or next step; state each fact once beside the relevant control.
+- Keep permissions, cost, destructive consequences, execution prerequisites, and error recovery visible when relevant. Put advanced usage and diagnostics in accessible, explicit help. Preserve labels and accessible names; do not move redundant prose wholesale into `sr-only` text.
+- Review copy with its surrounding controls and all supported translations, including mobile's independent copy. Follow the UI copy rules in the existing conventions pages; a description prop is not a requirement to write a paragraph.
 - Prefer shadcn/Base UI components over custom implementations. Add them with `pnpm ui:add <component>` from the repo root.
 - The Pro `@reui` registry is configured in `packages/ui/components.json`; add items with `pnpm ui:add @reui/<name>` and answer `n` to every overwrite prompt so local component customizations survive. It reads `REUI_LICENSE_KEY` from the environment — agents get it from their Multica agent environment, humans export it in their own shell. Never write the key into a repo file.
 - ReUI ships source, not a dependency: route the vendored output to our layout (new primitives to `packages/ui/components/ui/`, compositions to `packages/views/<domain>/`) and rewrite it to our conventions before committing.

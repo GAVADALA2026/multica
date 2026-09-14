@@ -198,8 +198,6 @@ export type LandingDict = {
     pageDescription: string;
     eyebrow: string;
     title: string;
-    subtitle: string;
-    notice: { badge: string; body: string };
     fields: {
       firstName: string;
       lastName: string;
@@ -210,7 +208,6 @@ export type LandingDict = {
       countryRegion: string;
       useCase: string;
       goals: string;
-      goalsHint: string;
       selectPlaceholder: string;
       submit: string;
       submitting: string;

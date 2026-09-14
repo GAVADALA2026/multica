@@ -1273,7 +1273,7 @@ describe("BillingTab", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Cancellation is scheduled")).toBeInTheDocument();
     expect(
-      screen.getByText(/subscription is scheduled to cancel on Mar 1, 2030/),
+      screen.getByText(/subscription will cancel on Mar 1, 2030/),
     ).toBeInTheDocument();
   });
 
@@ -1298,7 +1298,7 @@ describe("BillingTab", () => {
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
+        "Update your payment method in billing management.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/keep Pro access/)).not.toBeInTheDocument();
@@ -1323,13 +1323,13 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(
-      screen.getByText(/subscription is scheduled to cancel on Apr 1, 2030/),
+      screen.getByText(/subscription will cancel on Apr 1, 2030/),
     ).toBeInTheDocument();
     expect(screen.getByText(/4 seats from Apr 1, 2030/)).toBeInTheDocument();
     expect(screen.getByText("Apr 1, 2030")).toBeInTheDocument();
     expect(screen.queryByText("Mar 1, 2030")).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/subscription is scheduled to cancel on Mar 1, 2030/),
+      screen.queryByText(/subscription will cancel on Mar 1, 2030/),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Pro remains available/)).not.toBeInTheDocument();
   });
@@ -1458,7 +1458,7 @@ describe("BillingTab", () => {
     expect(screen.getByText("Payment needs attention")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
+        "Update your payment method in billing management.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/keep Pro access/)).not.toBeInTheDocument();
