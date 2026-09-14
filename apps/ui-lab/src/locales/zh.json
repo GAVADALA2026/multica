@@ -502,5 +502,46 @@
       "create": "新建任务",
       "cancel": "取消"
     }
+  },
+  "colorUsage": {
+    "sections": "颜色分区",
+    "palette": "色板",
+    "title": "用途与对比度",
+    "mapping": "用途映射",
+    "preview": "交互状态",
+    "hint": "悬停、按住鼠标或用 Tab 聚焦。点击上方 token 可编辑。",
+    "roles": {
+      "action": "主要操作",
+      "brand": "激活的筛选 / 开关",
+      "tabs": "标签页 · 文字 / 指示线",
+      "input": "输入框 · 文字 / 边框",
+      "focus": "键盘焦点",
+      "error": "输入错误"
+    },
+    "states": {
+      "default": "默认",
+      "hover": "悬停",
+      "pressed": "按下",
+      "focus": "聚焦",
+      "selected": "选中",
+      "invalid": "错误",
+      "disabled": "禁用"
+    },
+    "unmeasured": "未测量",
+    "pass": "通过",
+    "fail": "未通过",
+    "exempt": "豁免 · 已禁用",
+    "text": "文字",
+    "focusBorder": "焦点边框",
+    "mainAction": "主要操作",
+    "activeFilter": "分配给我",
+    "overview": "概览",
+    "activity": "动态",
+    "overviewContent": "任务详情",
+    "activityContent": "最近更新",
+    "taskName": "任务名称",
+    "rules": "规则与测量说明",
+    "scope": "文字目标为 4.5:1；焦点边框与内外相邻背景的目标均为 3:1。基于过渡结束后的实际 sRGB 颜色计算，并合成透明度。禁用控件豁免，背景图片和整体透明度不测量。占位文字、标签页指示线和焦点环几何形态需单独检查；此处不代表完整的无障碍审查。",
+    "policy": "主要操作保持中性色，品牌色标识激活的控件。标签页使用正文色和次要文字色；输入错误使用 destructive，焦点使用 ring。导出前检查明暗主题。修改 token 会影响所有使用它的组件。"
   }
 }

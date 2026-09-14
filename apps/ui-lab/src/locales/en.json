@@ -502,5 +502,46 @@
       "create": "Create issue",
       "cancel": "Cancel"
     }
+  },
+  "colorUsage": {
+    "sections": "Color sections",
+    "palette": "Palette",
+    "title": "Usage & contrast",
+    "mapping": "Token mapping",
+    "preview": "Live states",
+    "hint": "Hover, hold to press, or use Tab to focus. Select a token above to edit it.",
+    "roles": {
+      "action": "Main action",
+      "brand": "Active filter / toggle",
+      "tabs": "Tabs · label / indicator",
+      "input": "Input · text / border",
+      "focus": "Keyboard focus",
+      "error": "Invalid input"
+    },
+    "states": {
+      "default": "Default",
+      "hover": "Hover",
+      "pressed": "Pressed",
+      "focus": "Focus",
+      "selected": "Selected",
+      "invalid": "Invalid",
+      "disabled": "Disabled"
+    },
+    "unmeasured": "Not measured",
+    "pass": "Pass",
+    "fail": "Fail",
+    "exempt": "Exempt · disabled",
+    "text": "Text",
+    "focusBorder": "Focus border",
+    "mainAction": "Main action",
+    "activeFilter": "Assigned to me",
+    "overview": "Overview",
+    "activity": "Activity",
+    "overviewContent": "Task details",
+    "activityContent": "Recent updates",
+    "taskName": "Task name",
+    "rules": "Rules & measurement",
+    "scope": "Text target: 4.5:1. Focus border target: 3:1 against both adjacent surfaces. Uses rendered sRGB colors, composited transparency and settled transitions. Disabled controls are exempt. Images and group opacity are not measured. Placeholder text, tab indicators and focus-ring geometry require separate review; this is not a full accessibility audit.",
+    "policy": "Keep main actions neutral; brand identifies active controls. Tabs use foreground and muted text. Input errors use destructive, and focus uses ring. Check both themes before exporting. Token edits affect every consumer of that token."
   }
 }

@@ -190,3 +190,19 @@ HEX is a gamut-mapped RGB display; the separate opacity control preserves
 transparency, while OKLCH retains the source color. Percentage and decimal
 alpha are equivalent when restoring defaults. Specialty tokens such as scrollbar
 and find highlights are not part of this initial catalog.
+
+The **Usage & contrast** tab maps the current main action, active filter, line
+Tabs, Input, focus and error roles to editable tokens. It mounts production
+Button, Tabs and Input; hover/press/focus come from real browser interactions,
+with local disabled/error toggles. Click a mapping token to edit it. The controls
+keep their current production styles instead of simulating states with Lab CSS.
+
+Contrast is measured from computed styles after transitions, recalculated on
+interaction, token edits and theme changes. The checker composites nested alpha
+backgrounds and foregrounds in sRGB and compares unrounded WCAG ratios. Text is
+checked at 4.5:1; focused borders at 3:1 against both adjacent surfaces, respecting
+background clipping. Disabled controls are exempt. Unsupported backgrounds or
+group opacity show “Not measured”, not a pass. This covers these sample color
+pairs only: placeholders, tab indicators, focus-ring geometry and complete WCAG
+compliance still need separate review. Current source colors may fail; the
+checker reports failures without silently changing production tokens.
