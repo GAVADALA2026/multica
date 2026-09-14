@@ -123,6 +123,20 @@
 
 :root {
     color-scheme: light;
+    /* Button geometry. Text and icon-only buttons share the height ladder.
+       Keep the defaults aligned with the existing compact product controls. */
+    --button-height-xs: 1.5rem;
+    --button-height-sm: 1.75rem;
+    --button-height-default: 2rem;
+    --button-height-lg: 2.25rem;
+    --button-padding-xs: 0.5rem;
+    --button-padding-sm: 0.625rem;
+    --button-padding-default: 0.625rem;
+    --button-padding-lg: 0.625rem;
+    --button-gap-xs: 0.25rem;
+    --button-gap-sm: 0.25rem;
+    --button-gap-default: 0.375rem;
+    --button-gap-lg: 0.375rem;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
        for bounded content groups; raised surfaces are ephemeral overlays. */
@@ -201,6 +215,7 @@
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
     --radius: 0.5rem;
+    --issue-row-height: 36px;
     --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);

@@ -1,0 +1,122 @@
+# Multica UI Lab
+
+An internal, independently running design workbench for Multica Web and Desktop.
+
+```sh
+pnpm install
+pnpm dev:ui-lab
+```
+
+Vite starts at http://127.0.0.1:4310 (or the next available port). No backend,
+workspace, login, or environment file is required. This does not start Electron
+or the public web application.
+
+## Workflow
+
+1. Choose Button, the component gallery, an issue list, or an issue detail fixture.
+2. Adjust a semantic color in the light or dark theme. Typography, radius and
+   issue row height apply to both themes. Changes are isolated to the preview.
+3. Switch to the original or compare both versions side by side. On small
+   workbench windows the comparison scrolls horizontally instead of shrinking
+   the previews to unreadable sizes.
+4. Undo/redo edits, reset to the source defaults, or save a named scheme.
+5. Export or copy CSS and merge the declarations into the matching `@theme`,
+   `:root`, and `.dark` blocks in `packages/ui/styles/tokens.css`. The Lab never
+   writes to source files. The CSS is a patch to merge, not a replacement file.
+
+The current draft and up to 20 named schemes are stored in this browser's
+localStorage, scoped to the dev server origin. Saved schemes contain absolute
+overrides; reopening them against newer code applies them over the new defaults.
+Defaults are read directly from the shared CSS, never from a second theme file.
+This first version does not sync schemes or import files. Export CSS before
+clearing browser data or changing ports. All sample edits stay inside the frame.
+
+## Preview fidelity
+
+- The gallery imports production primitives directly from `@multica/ui`. Its
+  cards only arrange specimens; they do not override control styles. CSS resets
+  remain in the base layer so they cannot override Tailwind component utilities.
+- Business previews mount the production `IssuesPage`, `IssueDetail`, and
+  `AppSidebar` from `@multica/views`. They include the real ListRow, toolbars,
+  property pickers, rich-text editor, comment cards and responsive sidebar.
+  There are no recreated list/detail/sidebar templates or page-specific CSS.
+- `product-preview.tsx` supplies the platform providers used by these views:
+  navigation, workspace identity, React Query, auth/chat stores, i18n, tooltips,
+  sidebar and a disconnected realtime context. Preview assets load lazily; a
+  ready handshake applies the latest design after the frame finishes mounting.
+- `product-fixtures.ts` replaces only API results with typed, deterministic data.
+  Each frame owns its fixture client. Issue edits and comments stay in memory;
+  refreshing restores them. Unsupported operations reject explicitly and never
+  fall through to the network. Navigation is limited to issue list/detail.
+  This is a visual workbench, not a full backend simulator. Other groupings,
+  advanced filter combinations, uploads and agent execution are not supported.
+- `--issue-row-height` is used by the production `ListRow`. Its default remains
+  36px; virtualization measures actual row heights. Table and board density are
+  independent. Other design changes still export to the shared token file.
+- The frame's sidebar follows product breakpoints. Use the real sidebar toggle
+  when the preview width triggers automatic collapse. Theme, portals and fonts
+  are isolated from the workbench controls and the original comparison frame.
+
+## Verify
+
+```sh
+pnpm --filter @multica/ui-lab typecheck
+pnpm --filter @multica/ui-lab lint
+pnpm --filter @multica/ui-lab test
+pnpm --filter @multica/ui-lab build
+```
+
+The pure tests cover source token parsing, CSS export scope, restored defaults,
+undo/redo, persistence, the validated iframe message protocol, fixture isolation
+and rejection of unsupported network operations. Browser smoke
+checks should include theme/typography changes, original comparison, Dialog
+portals, local scheme reload and CSS download.
+
+## Button workbench
+
+The Button page is the first dedicated component page. It mounts the shared
+`Button` with all eight variants and eight sizes. The playground supports text,
+leading/trailing icons, icon-only content, disabled, loading and invalid states.
+Hover, focus and pressed feedback come from real pointer/keyboard interaction;
+the gallery does not synthesize these pseudo states. Popover and Dialog examples
+exercise the real portal components. Example submissions stay local.
+
+The size selector controls the playground and variant matrix in both frames.
+Twelve `--button-*` variables in `packages/ui/styles/tokens.css` cover height,
+horizontal padding and icon/text gap for `xs`, `sm`, `default` and `lg`. Icon-only
+buttons share the height ladder. The initial values preserve the production
+geometry, including inline icon padding offsets. Explicit class overrides at
+call sites retain precedence (for example `h-7`, `size-6` and `px-2`).
+
+Button variables are shared between light/dark themes and export to `:root`;
+typography still exports to `@theme`, and colors to `:root` / `.dark`. Existing
+save, undo, redo, original comparison and CSS export apply to these variables.
+Reset Button parameters clears only the button overrides. Exported CSS must be
+merged into the shared source file; the workbench does not write source files.
+
+## Color editor
+
+Color roles appear as labeled swatch rows; click one to open the color picker.
+The sRGB picker supports
+pointer/touch dragging and keyboard adjustment, HEX input, quick colors, copy,
+and original/current comparison. OKLCH controls remain under Precision adjustment.
+A color-plane or hue drag previews live and commits one undo step on release.
+
+Color.js converts edited HEX values to OKLCH for persistence/export. Opening the
+picker does not quantize the source color. Out-of-sRGB colors retain their exact
+OKLCH value; only the HEX/plane preview uses a gamut-mapped approximation. HEX
+input accepts 3 or 6 digits and does not support alpha. The chroma validation
+range is 0–0.4 to include saturated sRGB colors such as pure blue.
+
+## Property inspector
+
+The right panel follows the compact property grouping and swatch-triggered popup
+pattern described in [Figma's property panel guide](https://help.figma.com/hc/en-us/articles/360039832014-Design-prototype-and-explore-layer-properties-in-the-right-sidebar).
+Design shows component dimensions separately from global appearance, colors and
+typography. The Changes tab lists original/current values with per-token reset.
+
+Numeric fields commit on Enter or blur, clamp to the supported bounds, and reject
+non-numeric text. Arrow keys adjust by the field's step; Shift uses 10× and Alt
+uses 0.1×. Drag the field prefix to scrub with live preview and one undo step on
+release. Escape cancels a scrub or discards typed input. Color rows open the
+existing color editor toward the canvas; Escape closes it and returns focus.
