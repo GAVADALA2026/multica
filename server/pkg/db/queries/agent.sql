@@ -2099,7 +2099,8 @@ WHERE id = @comment_id
 -- that one condition is recorded as durable state instead of being re-proven
 -- through four joins and two NOT EXISTS subqueries on every tick. The predicate
 -- of idx_comment_delegated_failure_unsettled matches the first four conditions,
--- so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
+-- narrowing the scan to unsettled signals. Reversible eligibility must still
+-- be checked before LIMIT so paused signals cannot starve executable ones.
 SELECT recovery.*
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
@@ -2124,7 +2125,27 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  -- Match loadDelegatedFailureRecoveryTarget: lifecycle permits recovery only
+  -- for open work; parking belongs exclusively to the fixed Backlog status.
+  -- Built-ins resolve without catalog rows. Normalize pre-backfill categories
+  -- without restoring their old custom parking/review/recovery behavior.
+  AND source_issue.status <> 'backlog'
+  AND CASE
+      WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
+      WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
+      WHEN source_issue.status = 'done' THEN 'done'
+      WHEN source_issue.status = 'cancelled' THEN 'closed'
+      WHEN source_issue.status = 'triage' THEN 'triage'
+      ELSE CASE source_status.category
+          WHEN 'backlog' THEN 'unstarted'
+          WHEN 'todo' THEN 'unstarted'
+          WHEN 'in_progress' THEN 'started'
+          WHEN 'in_review' THEN 'started'
+          WHEN 'blocked' THEN 'started'
+          WHEN 'cancelled' THEN 'closed'
+          ELSE source_status.category
+      END
+  END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id

@@ -2,17 +2,255 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
+	dbfx "github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestPendingDelegatedFailureSweepDoesNotStarveOtherWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	var paused []pgtype.UUID
+	for _, status := range []string{issuestatus.Cancelled, issuestatus.Backlog} {
+		f, svc := seedDelegatedFailureFixture(t)
+		fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+		if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 50; i++ {
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed interrupted recovery: created=%v err=%v", created, err)
+			}
+			paused = append(paused, target.comment.ID)
+		}
+		fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+	}
+	// The 101st signal is newer and belongs to a different, executable workspace.
+	f, svc := seedDelegatedFailureFixture(t)
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
+		t.Fatalf("seed executable recovery: created=%v err=%v", created, err)
+	}
+	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+	if err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
+		t.Fatalf("recovery behind 100 paused signals = %+v, %v; want one scan and replay", result, err)
+	}
+	if covered, err := svc.Queries.HasTaskCoveringDelegatedFailureComment(ctx, db.HasTaskCoveringDelegatedFailureCommentParams{
+		IssueID: target.issue.ID, AgentID: target.agent.ID, CommentID: target.comment.ID,
+	}); err != nil || !covered {
+		t.Fatalf("executable recovery has a task = %v, %v; want true", covered, err)
+	}
+	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+		t.Fatalf("repeat sweep = %+v, %v; want no duplicate dispatch", result, err)
+	}
+	for _, id := range paused {
+		if f.settled(t, id) {
+			t.Fatal("pausing an issue must not settle its undelivered recovery")
+		}
+	}
+}
+
+func TestDelegatedFailureRecoveryStatusEligibility(t *testing.T) {
+	ctx := context.Background()
+	f, svc := seedDelegatedFailureFixture(t)
+	fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+	if err := issuestatus.Ensure(ctx, svc.Queries, util.MustParseUUID(f.workspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
+		t.Fatalf("seed recovery: created=%v err=%v", created, err)
+	}
+	cases := []struct {
+		status, category, legacy      string
+		allowed, archived, unresolved bool
+	}{
+		{status: "backlog"},
+		{status: "todo", allowed: true},
+		{status: "in_progress", allowed: true},
+		{status: "in_review", allowed: true},
+		{status: "blocked", allowed: true},
+		{status: "done"},
+		{status: "cancelled"},
+		{status: "triage"},
+		{status: "missing_recovery_status", unresolved: true},
+		{status: "custom_backlog", category: "unstarted", legacy: "backlog", allowed: true},
+		{status: "custom_todo", category: "unstarted", legacy: "todo", allowed: true},
+		{status: "custom_active", category: "started", legacy: "in_progress", allowed: true},
+		{status: "custom_review", category: "started", legacy: "in_review", allowed: true},
+		{status: "custom_blocked", category: "started", legacy: "blocked", allowed: true},
+		{status: "custom_done", category: "done", legacy: "done"},
+		{status: "custom_closed", category: "closed", legacy: "cancelled"},
+		{status: "archived_done", category: "done", legacy: "done", archived: true},
+		{status: "archived_open", category: "started", legacy: "in_review", allowed: true, archived: true},
+	}
+	for _, tc := range cases {
+		if tc.category == "" {
+			continue
+		}
+		cols := dbfx.Cols{"workspace_id": f.workspaceID, "key": tc.status, "name": tc.status,
+			"category": tc.category, "color": "#22c55e", "position": 1}
+		if tc.archived {
+			cols["archived_at"] = dbfx.Raw("now()")
+		}
+		fx.Insert(t, "issue_status", cols)
+	}
+	for _, format := range []string{"current", "legacy", "mixed", "missing_builtin_catalog"} {
+		t.Run(format, func(t *testing.T) {
+			tx, err := f.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(ctx)
+			// Model pre-backfill catalogs without weakening the real database's
+			// four-category CHECK or affecting another connection's catalog.
+			for _, sql := range []string{
+				`CREATE TEMP TABLE issue_status (LIKE public.issue_status INCLUDING DEFAULTS) ON COMMIT DROP`,
+				`INSERT INTO pg_temp.issue_status SELECT * FROM public.issue_status`,
+				`SET LOCAL search_path = pg_temp, public`,
+			} {
+				if _, err := tx.Exec(ctx, sql); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if format == "legacy" || format == "mixed" {
+				if _, err := tx.Exec(ctx, `UPDATE issue_status SET category = key WHERE is_system`); err != nil {
+					t.Fatal(err)
+				}
+				for i, tc := range cases {
+					if tc.legacy == "" || (format == "mixed" && i%2 == 0) {
+						continue
+					}
+					if _, err := tx.Exec(ctx, `UPDATE issue_status SET category = $2 WHERE key = $1`, tc.status, tc.legacy); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if format == "missing_builtin_catalog" {
+				if _, err := tx.Exec(ctx, `DELETE FROM issue_status WHERE is_system`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := db.New(tx)
+			for _, tc := range cases {
+				t.Run(tc.status, func(t *testing.T) {
+					if _, err := tx.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, tc.status); err != nil {
+						t.Fatal(err)
+					}
+					pending, err := q.ListPendingDelegatedFailureRecoveries(ctx, 100)
+					if err != nil {
+						t.Fatal(err)
+					}
+					included := false
+					for _, comment := range pending {
+						included = included || comment.ID == target.comment.ID
+					}
+					if included != tc.allowed {
+						t.Errorf("SQL selected recovery = %v, want %v", included, tc.allowed)
+					}
+					loaded, err := loadDelegatedFailureRecoveryTarget(ctx, q, target.failed)
+					if (err != nil) != tc.unresolved {
+						t.Errorf("Go eligibility error = %v, want unresolved=%v", err, tc.unresolved)
+					}
+					if (loaded != nil) != tc.allowed {
+						t.Errorf("Go allowed recovery = %v, want %v", loaded != nil, tc.allowed)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDelegatedFailureRecoveryRechecksStatusAndResumes(t *testing.T) {
+	for _, status := range []string{"backlog", "cancelled", "done", "recovery_closed"} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+			if status == "recovery_closed" {
+				fx.Insert(t, "issue_status", dbfx.Cols{"workspace_id": f.workspaceID, "key": status,
+					"name": "Closed", "category": "closed", "color": "#22c55e", "position": 1})
+			}
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("seed recovery: created=%v err=%v", created, err)
+			}
+			pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
+			if err != nil || len(pending) != 1 || pending[0].ID != target.comment.ID {
+				t.Fatalf("initial candidates = %d, %v; want this recovery", len(pending), err)
+			}
+			// Change the issue after selection, before the same dispatch entry
+			// point used by the sweeper and completion reconciliation runs.
+			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
+			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, pending[0], pgtype.UUID{}); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
+				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 || f.settled(t, target.comment.ID) {
+				t.Fatalf("paused recovery: tasks=%d; want no task or permanent receipt", count)
+			}
+			fx.Exec(t, `UPDATE issue SET status = 'todo' WHERE id = $1`, f.issueID)
+			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
+				t.Fatalf("reopened recovery = %+v, %v; want one replay", result, err)
+			}
+			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+				t.Fatalf("repeat sweep = %+v, %v; want no duplicate", result, err)
+			}
+		})
+	}
+}
+
+type recoveryCatalogErrorDB struct {
+	db.DBTX
+	err error
+}
+
+func (d recoveryCatalogErrorDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "FROM issue_status") {
+		return recoveryCatalogErrorRow{d.err}
+	}
+	return d.DBTX.QueryRow(ctx, sql, args...)
+}
+
+type recoveryCatalogErrorRow struct{ err error }
+
+func (r recoveryCatalogErrorRow) Scan(...any) error { return r.err }
+
+func TestDelegatedFailureRecoveryPropagatesCatalogReadError(t *testing.T) {
+	ctx := context.Background()
+	f, svc := seedDelegatedFailureFixture(t)
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	failed, err := svc.Queries.GetAgentTask(ctx, failedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := dbfx.New(f.pool, f.workspaceID, f.userID)
+	fx.Exec(t, `UPDATE issue SET status = 'custom_status' WHERE id = $1`, f.issueID)
+	catalogErr := errors.New("catalog temporarily unavailable")
+	q := db.New(recoveryCatalogErrorDB{DBTX: f.pool, err: catalogErr})
+	if target, err := loadDelegatedFailureRecoveryTarget(ctx, q, failed); target != nil || !errors.Is(err, catalogErr) {
+		t.Fatalf("unreadable catalog: target=%v err=%v; want no target and original error", target != nil, err)
+	}
+}
 
 type delegatedFailureFixture struct {
 	pool          *pgxpool.Pool

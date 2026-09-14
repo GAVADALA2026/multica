@@ -6051,8 +6051,29 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source issue: %w", err)
 	}
-	effectiveStatus := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
-	if effectiveStatus == issuestatus.Done || effectiveStatus == issuestatus.Cancelled || effectiveStatus == issuestatus.Backlog {
+	// Keep this eligibility rule aligned with ListPendingDelegatedFailureRecoveries.
+	// Resolve built-ins without a catalog, but never dispatch on a guessed custom
+	// lifecycle. Effective's raw-key fallback would silently allow unknown states
+	// and catalog read failures through a terminal-status exclusion list.
+	category, builtIn := issuestatus.CategoryForBehavior(issue.Status)
+	if !builtIn {
+		entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{
+			WorkspaceID: issue.WorkspaceID,
+			Key:         issue.Status,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load recovery source issue status %q: %w", issue.Status, err)
+		}
+		// During the category backfill, normalize old storage through the same
+		// parser as API input. Custom states inherit lifecycle, never parking.
+		var valid bool
+		category, valid = issuestatus.ParseCategory(entry.Category)
+		if !valid {
+			return nil, fmt.Errorf("invalid recovery source issue category %q", entry.Category)
+		}
+	}
+	if issue.Status == issuestatus.Backlog ||
+		(category != issuestatus.CategoryUnstarted && category != issuestatus.CategoryStarted) {
 		return nil, nil
 	}
 	agent, err := q.GetAgent(ctx, source.AgentID)
