@@ -11,9 +11,9 @@ import (
 // the no-custom-statuses path is the compatibility contract of MUL-6460.
 const legacyStatusLine = "- `multica issue status <id> <status> [--no-start]` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n"
 
-// catalogBridgeBullet is the workflow-section bridge from category rules to a
-// concrete key choice; it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The workflow rules above name fixed built-in statuses, not categories. Custom statuses inherit only lifecycle semantics: done is successful completion; closed is cancellation. A custom started status does not replace in_review or blocked. Use the built-in key when its special workflow behavior is required.\n"
+// catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
+// it must appear exactly when a catalog is present.
+const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
 
 func TestBriefStatusCatalogAbsentKeepsLegacyLine(t *testing.T) {
 	t.Parallel()
@@ -48,7 +48,7 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 		t.Errorf("catalog brief must replace the legacy seven-value enumeration")
 	}
 	for _, want := range []string{
-		"- `multica issue status <id> <status> [--no-start]` — flip status. Categories describe lifecycle only; custom statuses do not inherit built-in parking, review, failure, or recovery behavior. Built-in status keys are fixed:\n",
+		"- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n",
 		"  - `unstarted`: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
 		"  - `done`: `done` (built-in)\n",
 		"  - `started`: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",

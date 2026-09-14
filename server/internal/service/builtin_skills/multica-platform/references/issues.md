@@ -234,17 +234,8 @@ The rules below name fixed built-in status keys, not category-wide behaviors.
 Custom statuses have only lifecycle semantics: unstarted, started, done
 (successful terminal), or closed (cancelled terminal). They do not inherit
 Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
-Use the built-in key when its special behavior is needed. Historical custom
-statuses follow the same rules as new ones after the category migration.
-The API retains its seven-value wire enum for installed clients: todo means
-unstarted, in_progress means started, done means done, cancelled means closed
-for custom statuses. This encoding does not grant the corresponding built-in
-behavior. Built-in keys themselves are unchanged.
-
-Workspace admins can reorder active built-in and custom statuses within each
-category in Settings. Display order is shared by boards, lists and status
-menus; it never changes automation or a status's category. Built-in definitions
-still cannot be edited or archived.
+Use the built-in key when its special behavior is needed. Built-in definitions
+cannot be edited or archived.
 
 Archive a custom status only after moving every issue off it, including
 completed/canceled issues. An occupied status returns HTTP 409 with code
@@ -254,10 +245,6 @@ replacement, preserve the lifecycle meaning (`done` to `done`, `closed` to
 `closed`); do not reopen or cancel completed work just to retire a status.
 Archival does not move issues automatically. Historical issues on previously
 archived statuses remain readable via an explicit status filter.
-
-Custom statuses can have an independently chosen icon shape and color. These
-are presentation only: never infer lifecycle, completion, or agent behavior
-from an icon. Use the status key and lifecycle category instead.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
@@ -395,12 +382,15 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
-`issue children --output json` reports per-stage `done` counts. A custom status
-counts as terminal here when its lifecycle category is `done` or `closed`.
-For installed-client compatibility, the JSON `status_category` field encodes
-these as `done` or `cancelled` respectively. Check those wire values (or the
-stage counts), not just the child's concrete `status` key: a custom key can
-also be terminal.
+`issue children --output json` reports per-stage `done` counts, including custom
+statuses in terminal categories. When reading issue JSON, `status` is the exact
+key; `status_category` retains the seven-value API enum for installed clients:
+`backlog` / `todo` mean unstarted, `in_progress` / `in_review` / `blocked` mean
+started, `done` means successful terminal, and `cancelled` means cancelled
+terminal (the internal closed category). These values encode lifecycle, not
+built-in automation behavior. Check `status_category` for `done` / `cancelled`
+(or use the stage counts), not just the concrete `status` key, to recognize
+terminal children.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
