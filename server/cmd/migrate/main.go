@@ -303,6 +303,8 @@ var concurrentIndexCleanups = map[string]string{
 	"460_agent_task_queue_autopilot_run_created_at_index":       "idx_agent_task_queue_autopilot_run_created_at",
 	"465_agent_task_queue_chat_with_session_index":              "idx_agent_task_queue_chat_with_session_created_at",
 	"466_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
+	"472_agent_task_queue_chat_session_index":                   "idx_agent_task_queue_chat_session",
+	"474_dingtalk_bot_identity_workspace_index":                 "idx_dingtalk_bot_identity_workspace",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -332,6 +334,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"455_drop_comment_content_trgm_index":                   "idx_comment_content_trgm",
 	"463_drop_issue_description_bigm_index":                 "idx_issue_description_bigm",
 	"464_drop_issue_description_trgm_index":                 "idx_issue_description_trgm",
+	"473_drop_agent_task_queue_chat_with_session_index":     "idx_agent_task_queue_chat_with_session_created_at",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
