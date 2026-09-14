@@ -122,6 +122,12 @@
 }
 
 :root {
+    /* Dialog motion, shared by popup and backdrop. */
+    --dialog-enter-duration: 100ms;
+    --dialog-exit-duration: 100ms;
+    --dialog-enter-easing: ease;
+    --dialog-exit-easing: ease;
+
     color-scheme: light;
     /* Button geometry. Text and icon-only buttons share the height ladder.
        Keep the defaults aligned with the existing compact product controls. */

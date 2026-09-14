@@ -39,12 +39,19 @@ import {
   emptyDraft,
   exportCss,
   tokenValue,
+  numericTokenValue,
   updateToken,
   type Draft,
   type Theme,
 } from "./tokens";
 import { Inspector } from "./inspector";
-import { type PreviewSettings, type Scene } from "./protocol";
+import {
+  playbackSpeeds,
+  dialogActions,
+  type DialogCommand,
+  type PreviewSettings,
+  type Scene,
+} from "./protocol";
 import {
   encodeSession,
   loadSession,
@@ -68,6 +75,7 @@ function PreviewFrame({
   const { t, i18n } = useTranslation("uiLab");
   const locale: LabLocale = i18n.language === "zh-Hans" ? "zh" : "en";
   const ref = useRef<HTMLIFrameElement>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const send = useCallback(() => {
     ref.current?.contentWindow?.postMessage(
       {
@@ -77,10 +85,11 @@ function PreviewFrame({
         scene,
         buttonScale,
         locale,
+        playbackSpeed,
       } satisfies PreviewSettings,
       location.origin,
     );
-  }, [draft, theme, scene, buttonScale, locale]);
+  }, [draft, theme, scene, buttonScale, locale, playbackSpeed]);
   useEffect(() => {
     const onReady = (event: MessageEvent<{ type?: string }>) => {
       if (
@@ -109,6 +118,41 @@ function PreviewFrame({
             : t(($) => $.lab.theme.dark)}
         </span>
       </div>
+      {(scene === "dialog" || scene === "motion") && (
+        <div className="motion-toolbar">
+          {dialogActions.map((action) => (
+            <Button
+              key={action}
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                ref.current?.contentWindow?.postMessage(
+                  {
+                    type: "multica-ui-lab:dialog",
+                    action,
+                  } satisfies DialogCommand,
+                  location.origin,
+                )
+              }
+            >
+              {t(($) => $.motion.actions[action])}
+            </Button>
+          ))}
+          <label>
+            <span>{t(($) => $.motion.controls.speed)}</span>
+            <select
+              value={playbackSpeed}
+              onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
+            >
+              {playbackSpeeds.map((speed) => (
+                <option key={speed} value={speed}>
+                  {speed}×
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       <iframe
         ref={ref}
         src="?preview"
@@ -203,7 +247,7 @@ function Workbench({
           draft,
           "shared",
           numberPreview.key,
-          `${numberPreview.value}px`,
+          numericTokenValue(numberPreview.key, numberPreview.value),
         )
       : draft;
   const css = exportCss(draft);

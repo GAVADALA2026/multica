@@ -40,6 +40,7 @@ describe("UI Lab language preference", () => {
   it("validates iframe locales and maps zh to the production locale", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      playbackSpeed: 1,
       scene: "button",
       theme: "light",
       buttonScale: "default",

@@ -61,7 +61,9 @@
       "components": "组件总览",
       "button": "Button 按钮",
       "list": "任务列表",
-      "detail": "任务详情"
+      "detail": "任务详情",
+      "dialog": "弹窗",
+      "motion": "动效"
     },
     "language": {
       "label": "语言"
@@ -209,7 +211,11 @@
       "label": "信息标签",
       "body": "正文",
       "lineHeight": "正文行高",
-      "title": "标题"
+      "title": "标题",
+      "enterDuration": "进入时长",
+      "exitDuration": "退出时长",
+      "enterEasing": "进入曲线",
+      "exitEasing": "退出曲线"
     }
   },
   "color": {
@@ -389,6 +395,54 @@
     "changes": {
       "reset": "重置全部",
       "return": "打开按钮工作台"
+    }
+  },
+  "motion": {
+    "actions": {
+      "open": "打开",
+      "close": "关闭",
+      "replay": "重播"
+    },
+    "controls": {
+      "title": "动效",
+      "speed": "预览速度",
+      "reduced": "系统已启用减少动态效果，动画已关闭。"
+    },
+    "easing": {
+      "standard": "标准",
+      "linear": "线性",
+      "easeOut": "缓出",
+      "easeIn": "缓入"
+    }
+  },
+  "rules": {
+    "content": {
+      "title": "使用规则与代码",
+      "download": "下载 Markdown"
+    }
+  },
+  "dialog": {
+    "controls": {
+      "example": "示例",
+      "form": "表单",
+      "long": "长内容"
+    },
+    "actions": {
+      "open": "打开弹窗",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "content": {
+      "title": "编辑任务",
+      "description": "更新任务标题。",
+      "label": "标题",
+      "defaultTitle": "检查界面",
+      "item": "检查项 {{number}}：确认布局、内容和操作在窄屏下仍可访问。"
+    },
+    "states": {
+      "open": "已打开",
+      "closed": "已关闭",
+      "saved": "已保存示例"
     }
   }
 }

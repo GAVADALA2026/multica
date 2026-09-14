@@ -61,7 +61,9 @@
       "components": "Components",
       "button": "Button",
       "list": "Issue list",
-      "detail": "Issue detail"
+      "detail": "Issue detail",
+      "dialog": "Dialog",
+      "motion": "Motion"
     },
     "language": {
       "label": "Language"
@@ -209,7 +211,11 @@
       "label": "Label",
       "body": "Body",
       "lineHeight": "Body line height",
-      "title": "Heading"
+      "title": "Heading",
+      "enterDuration": "Enter duration",
+      "exitDuration": "Exit duration",
+      "enterEasing": "Enter easing",
+      "exitEasing": "Exit easing"
     }
   },
   "color": {
@@ -389,6 +395,54 @@
     "changes": {
       "reset": "Reset all",
       "return": "Open Button"
+    }
+  },
+  "motion": {
+    "actions": {
+      "open": "Open",
+      "close": "Close",
+      "replay": "Replay"
+    },
+    "controls": {
+      "title": "Motion",
+      "speed": "Preview speed",
+      "reduced": "Reduced motion is enabled. Animations are disabled."
+    },
+    "easing": {
+      "standard": "Standard",
+      "linear": "Linear",
+      "easeOut": "Ease out",
+      "easeIn": "Ease in"
+    }
+  },
+  "rules": {
+    "content": {
+      "title": "Usage & code",
+      "download": "Download Markdown"
+    }
+  },
+  "dialog": {
+    "controls": {
+      "example": "Example",
+      "form": "Form",
+      "long": "Long content"
+    },
+    "actions": {
+      "open": "Open dialog",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "content": {
+      "title": "Edit issue",
+      "description": "Update the issue title.",
+      "label": "Title",
+      "defaultTitle": "Review interface",
+      "item": "Check {{number}}: verify layout, content and actions remain accessible on a narrow screen."
+    },
+    "states": {
+      "open": "Open",
+      "closed": "Closed",
+      "saved": "Example saved"
     }
   }
 }

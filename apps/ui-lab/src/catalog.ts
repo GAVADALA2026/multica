@@ -18,21 +18,24 @@ const planned = (...ids: PageId[]): CatalogPage[] =>
 export const catalog: readonly CatalogModule[] = [
   {
     id: "foundations",
-    pages: planned(
-      "colors",
-      "typography",
-      "spacing",
-      "radius",
-      "shadows",
-      "motion",
-      "icons",
-    ),
+    pages: [
+      ...planned(
+        "colors",
+        "typography",
+        "spacing",
+        "radius",
+        "shadows",
+        "icons",
+      ),
+      { id: "motion", content: { kind: "preview", scene: "motion" } },
+    ],
   },
   {
     id: "components",
     pages: [
       { id: "gallery", content: { kind: "preview", scene: "components" } },
       { id: "button", content: { kind: "preview", scene: "button" } },
+      { id: "dialog", content: { kind: "preview", scene: "dialog" } },
       ...planned(
         "input",
         "select",
@@ -41,7 +44,6 @@ export const catalog: readonly CatalogModule[] = [
         "badge",
         "tabs",
         "tooltip",
-        "dialog",
         "popover",
       ),
     ],

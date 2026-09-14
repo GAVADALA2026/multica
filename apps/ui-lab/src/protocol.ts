@@ -7,6 +7,8 @@ import {
   type Theme,
 } from "./tokens";
 export const scenes = [
+  { id: "dialog", label: "dialog" },
+  { id: "motion", label: "motion" },
   {
     id: "components",
     label: "components",
@@ -32,6 +34,7 @@ export type PreviewSettings = {
   scene: Scene;
   buttonScale: ButtonScale;
   locale: LabLocale;
+  playbackSpeed: number;
 };
 export function isPreviewSettings(value: unknown): value is PreviewSettings {
   if (!value || typeof value !== "object") return false;
@@ -42,6 +45,22 @@ export function isPreviewSettings(value: unknown): value is PreviewSettings {
     scenes.some((scene) => scene.id === data.scene) &&
     buttonScales.some((scale) => scale === data.buttonScale) &&
     isLabLocale(data.locale) &&
+    playbackSpeeds.some((speed) => speed === data.playbackSpeed) &&
     isDraft(data.draft)
+  );
+}
+
+export const playbackSpeeds = [1, 0.5, 0.25] as const;
+export const dialogActions = ["open", "close", "replay"] as const;
+export type DialogCommand = {
+  type: "multica-ui-lab:dialog";
+  action: (typeof dialogActions)[number];
+};
+export function isDialogCommand(value: unknown): value is DialogCommand {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Record<string, unknown>;
+  return (
+    data.type === "multica-ui-lab:dialog" &&
+    dialogActions.some((action) => action === data.action)
   );
 }

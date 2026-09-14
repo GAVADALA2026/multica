@@ -22,6 +22,10 @@ import {
 } from "@multica/ui/components/ui/tabs";
 import {
   baseline,
+  motionTokens,
+  easingTokens,
+  motionEasings,
+  numericTokenValue,
   buttonScales,
   buttonTokens,
   changeCount,
@@ -129,7 +133,14 @@ export function Inspector({
       modified={!!draft.shared[token.key]}
       onPreview={(value) => onNumberPreview(token.key, value)}
       onCommit={(value) =>
-        onEdit(updateToken(draft, "shared", token.key, `${value}px`))
+        onEdit(
+          updateToken(
+            draft,
+            "shared",
+            token.key,
+            numericTokenValue(token.key, value),
+          ),
+        )
       }
       onCancel={onNumberCancel}
       onReset={() => reset("shared", token.key)}
@@ -138,7 +149,14 @@ export function Inspector({
   const prominent =
     scene === "button"
       ? ["--primary", "--primary-foreground", "--brand", "--destructive"]
-      : ["--page-canvas", "--surface", "--foreground", "--brand"];
+      : scene === "dialog" || scene === "motion"
+        ? [
+            "--surface-raised",
+            "--foreground",
+            "--muted-foreground",
+            "--primary",
+          ]
+        : ["--page-canvas", "--surface", "--foreground", "--brand"];
   const colorRow = ([key, labelKey]: (typeof colorTokens)[number]) => {
     const label = t(($) => $.tokens.labels[labelKey]);
     const value = color === key ? currentColor : tokenValue(draft, theme, key);
@@ -271,7 +289,9 @@ export function Inspector({
               <strong>
                 {scene === "button"
                   ? "Button"
-                  : t(($) => $.inspector.panel.system)}
+                  : scene === "dialog" || scene === "motion"
+                    ? "Dialog"
+                    : t(($) => $.inspector.panel.system)}
               </strong>
             </div>
           </div>
@@ -333,6 +353,51 @@ export function Inspector({
               </div>
             </PropertySection>
           )}
+          {(scene === "dialog" || scene === "motion") && (
+            <PropertySection
+              title={t(($) => $.motion.controls.title)}
+              scope="Dialog"
+            >
+              <div className="property-grid">{motionTokens.map(number)}</div>
+              {easingTokens.map((token) => (
+                <div className="motion-easing" key={token.key}>
+                  <span>{t(($) => $.tokens.labels[token.label])}</span>
+                  <select
+                    aria-label={t(($) => $.tokens.labels[token.label])}
+                    value={tokenValue(draft, "shared", token.key)}
+                    onChange={(event) =>
+                      onEdit(
+                        updateToken(
+                          draft,
+                          "shared",
+                          token.key,
+                          event.target.value,
+                        ),
+                      )
+                    }
+                  >
+                    {motionEasings.map((easing) => (
+                      <option key={easing.value} value={easing.value}>
+                        {t(($) => $.motion.easing[easing.label])}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={!draft.shared[token.key]}
+                    aria-label={t(($) => $.inspector.actions.restore, {
+                      key: token.key,
+                      scope: t(($) => $.inspector.scope.shared),
+                    })}
+                    onClick={() => reset("shared", token.key)}
+                  >
+                    <RotateCcw />
+                  </Button>
+                </div>
+              ))}
+            </PropertySection>
+          )}
           <PropertySection
             title={t(($) => $.inspector.sections.appearance)}
             scope={t(($) => $.inspector.scope.global)}
@@ -383,7 +448,9 @@ export function Inspector({
               {sizeTokens.filter((token) => token.group === "type").map(number)}
             </div>
           </PropertySection>
-          {scene !== "button" && (
+          {(scene === "list" ||
+            scene === "detail" ||
+            scene === "components") && (
             <PropertySection
               title={t(($) => $.inspector.sections.density)}
               scope={t(($) => $.inspector.scope.global)}

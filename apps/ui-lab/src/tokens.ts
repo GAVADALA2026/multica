@@ -1,3 +1,4 @@
+import { UI_EASE_OUT_CSS, UI_EASE_IN } from "@multica/ui/lib/motion";
 import source from "@multica/ui/styles/tokens.css?raw";
 
 export type Theme = "light" | "dark";
@@ -60,7 +61,38 @@ export const buttonTokens = buttonScales.flatMap(
       },
     ] as const,
 );
+export const motionTokens = [
+  {
+    key: "--dialog-enter-duration",
+    label: "enterDuration",
+    min: 0,
+    max: 1000,
+    step: 10,
+    unit: "ms",
+    group: "motion",
+  },
+  {
+    key: "--dialog-exit-duration",
+    label: "exitDuration",
+    min: 0,
+    max: 1000,
+    step: 10,
+    unit: "ms",
+    group: "motion",
+  },
+] as const;
+export const easingTokens = [
+  { key: "--dialog-enter-easing", label: "enterEasing" },
+  { key: "--dialog-exit-easing", label: "exitEasing" },
+] as const;
+export const motionEasings = [
+  { label: "standard", value: "ease" },
+  { label: "linear", value: "linear" },
+  { label: "easeOut", value: UI_EASE_OUT_CSS },
+  { label: "easeIn", value: `cubic-bezier(${UI_EASE_IN.join(", ")})` },
+] as const;
 export const sizeTokens = [
+  ...motionTokens,
   ...buttonTokens,
   {
     key: "--issue-row-height",
@@ -149,7 +181,9 @@ export function readSourceTokens(css: string): Draft {
     shared: {
       ...typography,
       ...Object.fromEntries(
-        Object.entries(light).filter(([key]) => key.startsWith("--button-")),
+        Object.entries(light).filter(
+          ([key]) => key.startsWith("--button-") || key.startsWith("--dialog-"),
+        ),
       ),
       "--radius": light["--radius"]!,
       "--issue-row-height": light["--issue-row-height"]!,
@@ -171,6 +205,11 @@ export function tokenValue(draft: Draft, scope: Scope, key: string): string {
 }
 export function sizeValue(value: string): number {
   return parseFloat(value) * (value.endsWith("rem") ? 16 : 1);
+}
+export function numericTokenValue(key: string, value: number): string {
+  const token = sizeTokens.find((item) => item.key === key);
+  if (!token) throw new Error(`Unknown numeric token: ${key}`);
+  return `${value}${token.unit}`;
 }
 export function parseColor(value: string): [number, number, number] {
   const match = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)$/.exec(value);
@@ -250,7 +289,14 @@ export function isDraft(value: unknown): value is Draft {
       if (typeof v !== "string") return false;
       if (scope === "shared") {
         const definition = sizeTokens.find((token) => token.key === key);
-        if (!definition || !/^\d+(\.\d+)?px$/.test(v)) return false;
+        if (easingTokens.some((token) => token.key === key))
+          return motionEasings.some((easing) => easing.value === v);
+        if (
+          !definition ||
+          !/^\d+(\.\d+)?(px|ms)$/.test(v) ||
+          !v.endsWith(definition.unit)
+        )
+          return false;
         const numeric = sizeValue(v);
         return numeric >= definition.min && numeric <= definition.max;
       }

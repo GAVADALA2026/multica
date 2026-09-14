@@ -6,6 +6,7 @@ import {
   changeCount,
   colorTokens,
   sizeTokens,
+  easingTokens,
   updateToken,
   type Draft,
   type Scope,
@@ -39,6 +40,7 @@ export function TokenChanges({
       {changes.map(({ scope, key, value }) => {
         const label =
           sizeTokens.find((token) => token.key === key)?.label ??
+          easingTokens.find((token) => token.key === key)?.label ??
           colorTokens.find(([token]) => token === key)?.[1];
         return (
           <div className="property-change" key={`${scope}:${key}`}>

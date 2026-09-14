@@ -137,6 +137,7 @@ describe("design editing and persistence", () => {
   it("validates frame settings before applying CSS", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      playbackSpeed: 1,
       locale: "en",
       theme: "dark",
       scene: "list",
@@ -199,6 +200,7 @@ describe("Button geometry export", () => {
   it("accepts only supported button preview sizes", () => {
     const message = {
       type: "multica-ui-lab:preview",
+      playbackSpeed: 1,
       locale: "en",
       theme: "light",
       scene: "button",
@@ -223,5 +225,92 @@ describe("preview theme isolation", () => {
       ":root:not(.dark) {\n  --primary: oklch(0.5 0.2 260);\n}",
     );
     expect(css).not.toContain(".dark {");
+  });
+});
+
+describe("Dialog motion token contract", () => {
+  it("preserves default timing and round trips edited motion through history, persistence and export", () => {
+    expect(baseline.shared["--dialog-enter-duration"]).toBe("100ms");
+    expect(baseline.shared["--dialog-exit-duration"]).toBe("100ms");
+    expect(baseline.shared["--dialog-enter-easing"]).toBe("ease");
+    let draft = updateToken(
+      emptyDraft(),
+      "shared",
+      "--dialog-enter-duration",
+      "320ms",
+    );
+    draft = updateToken(draft, "shared", "--dialog-exit-duration", "0ms");
+    draft = updateToken(
+      draft,
+      "shared",
+      "--dialog-enter-easing",
+      "cubic-bezier(0.23, 1, 0.32, 1)",
+    );
+    expect(isDraft(draft)).toBe(true);
+    expect(decodeSession(encodeSession({ draft, designs: [] })).draft).toEqual(
+      draft,
+    );
+    const css = exportCss(draft);
+    expect(css).toContain("--dialog-enter-duration: 320ms;");
+    expect(css).toContain("--dialog-exit-duration: 0ms;");
+    expect(css).toContain(
+      "--dialog-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);",
+    );
+    expect(css).not.toContain("@theme");
+    const history = editHistory(
+      { past: [], present: emptyDraft(), future: [] },
+      { type: "edit", draft },
+    );
+    expect(editHistory(history, { type: "undo" }).present).toEqual(
+      emptyDraft(),
+    );
+    expect(
+      editHistory(editHistory(history, { type: "undo" }), { type: "redo" })
+        .present,
+    ).toEqual(draft);
+    expect(
+      updateToken(draft, "shared", "--dialog-enter-duration", "100ms").shared,
+    ).not.toHaveProperty("--dialog-enter-duration");
+  });
+  it("rejects incorrect units, unbounded timings and arbitrary easing CSS", () => {
+    for (const value of [
+      "100px",
+      "1s",
+      "-1ms",
+      "1001ms",
+      "NaNms",
+      "100ms; color: red",
+      "var(--other)",
+    ]) {
+      expect(
+        isDraft({
+          ...emptyDraft(),
+          shared: { "--dialog-enter-duration": value },
+        }),
+        value,
+      ).toBe(false);
+    }
+    for (const value of [
+      "cubic-bezier(2, 0, 1, 1)",
+      "ease; display: none",
+      "var(--unknown)",
+    ]) {
+      expect(
+        isDraft({
+          ...emptyDraft(),
+          shared: { "--dialog-enter-easing": value },
+        }),
+        value,
+      ).toBe(false);
+    }
+    expect(isDraft({ ...emptyDraft(), shared: { "--radius": "10ms" } })).toBe(
+      false,
+    );
+    expect(
+      isDraft({
+        ...emptyDraft(),
+        dark: { "--dialog-enter-duration": "200ms" },
+      }),
+    ).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { ComponentRules } from "./component-rules";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import {
@@ -438,19 +439,19 @@ export function ButtonScene({
             <div className="button-example-actions">
               <Button
                 variant="ghost"
-                size="icon"
-                className="size-6"
+                size="icon-xs"
                 aria-label={t(($) => $.button.actions.compactAdd)}
               >
                 <Plus className="size-3" />
               </Button>
-              <Button variant="outline" size={scale} className="h-7 px-2">
+              <Button variant="outline" size="sm">
                 {t(($) => $.button.actions.quick)}
               </Button>
             </div>
           </div>
         </div>
       </section>
+      <ComponentRules component="button" />
     </div>
   );
 }

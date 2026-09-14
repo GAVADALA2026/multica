@@ -20,8 +20,8 @@ languages preserves design overrides, saved schemes, and local sample edits.
 The overview links to six modules: Foundations, Components, Patterns, Product,
 Layouts, and Changes. Each module has an index and a collapsible navigation group.
 Pages marked **To build** are placeholders; their content and editing controls are
-not implemented yet. The existing Button and component gallery live under
-Components; production issue list/detail previews live under Layouts. Changes
+not implemented yet. Button, Dialog and the component gallery live under
+Components. Foundations → Motion previews the shared Dialog motion; production issue list/detail previews live under Layouts. Changes
 contains the working token review, saved designs, and CSS export pages. Impact
 analysis and source application remain planned.
 
@@ -36,7 +36,7 @@ use the validated iframe protocol in `src/protocol.ts`.
 
 ## Workflow
 
-1. Choose Button, the component gallery, an issue list, or an issue detail fixture.
+1. Choose Button, Dialog, Motion, the component gallery, or an issue list/detail fixture.
 2. Adjust a semantic color in the light or dark theme. Typography, radius and
    issue row height apply to both themes. Changes are isolated to the preview.
 3. Switch to the original or compare both versions side by side. On small
@@ -143,3 +143,33 @@ non-numeric text. Arrow keys adjust by the field's step; Shift uses 10× and Alt
 uses 0.1×. Drag the field prefix to scrub with live preview and one undo step on
 release. Escape cancels a scrub or discards typed input. Color rows open the
 existing color editor toward the canvas; Escape closes it and returns focus.
+
+
+## Dialog and Motion
+
+`#/components/dialog` and `#/foundations/motion` mount the real shared Dialog.
+Choose a form or long-content composition. The frame toolbar opens, closes and
+replays the dialog, including after its exit animation completes. Playback speed
+is 1×, 0.5× or 0.25× and is local to each comparison frame; it is never saved or
+exported as a product setting.
+
+The inspector edits `--dialog-enter-duration`, `--dialog-exit-duration`,
+`--dialog-enter-easing` and `--dialog-exit-easing`. Popup and backdrop consume
+these variables. Existing 100ms/ease defaults are preserved, with shared easing
+presets sourced from `@multica/ui/lib/motion`. Saved schemes, undo/redo and CSS
+export include these tokens. They affect shared Dialog consumers only, not
+Popover, Tooltip, AlertDialog or JavaScript animation constants.
+
+Reduced motion disables popup/backdrop animation, including during slow playback.
+Verify Escape, focus restoration, required field validation, long-content scroll,
+rapid open/close, replay, and both themes. Frame commands accept only a known
+same-origin parent and a validated action. Timeline scrubbing, recording and
+frame-state export are not implemented.
+
+## Component rules
+
+Button and Dialog have a collapsed Usage & code section backed directly by
+`packages/ui/docs/{button,dialog}{,.zh}.md`, with Markdown downloads. These files
+are also readable by agents and document supported APIs, usage, correct/incorrect
+examples, affected tokens and how to apply exported changes. Keep the rules next
+to the production components up to date when their contracts change.

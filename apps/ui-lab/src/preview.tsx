@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@multica/ui/components/ui/dialog";
 import { StatusIcon } from "@multica/views/issues/visuals";
+import { DialogScene } from "./dialog-scene";
 import { ButtonScene } from "./button-scene";
 import { ProductPreview } from "./product-preview";
 import { emptyDraft, previewCss } from "./tokens";
@@ -244,6 +245,7 @@ export function Preview() {
     scene: "components",
     buttonScale: "default",
     locale: "en",
+    playbackSpeed: 1,
   });
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>) => {
@@ -278,6 +280,8 @@ export function Preview() {
           <ComponentsScene />
         ) : settings.scene === "button" ? (
           <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
+        ) : settings.scene === "dialog" || settings.scene === "motion" ? (
+          <DialogScene key={settings.scene} motion={settings.scene === "motion"} draft={settings.draft} speed={settings.playbackSpeed} />
         ) : settings.scene === "list" ? (
           <ProductPreview key="list" scene="list" locale={settings.locale} />
         ) : (
