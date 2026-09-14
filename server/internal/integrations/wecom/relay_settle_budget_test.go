@@ -20,7 +20,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
 )
 
 // The claim-bookkeeping calls drop CANCELLATION on purpose — a settle for a

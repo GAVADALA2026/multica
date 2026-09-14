@@ -165,6 +165,16 @@ func TestRunCollectQuietDoesNotWaitWhenTheAnswerIsIn(t *testing.T) {
 		"exit 0\n"
 	writeTestExecutable(t, bin, []byte(body))
 
+	// Make the drain wait unmistakable: at the package-wide test value (750ms)
+	// a broken short-circuit costs about as long as this fixture's own startup
+	// jitter, so no wall-clock bound could tell the two apart — which is how an
+	// earlier revision of this test ended up either flaky or unfailable. With a
+	// 10s grace the healthy path still returns in ~300ms and a regression pays
+	// at least 10s, so the 3s bound below has ~3x headroom on both sides.
+	restore := collectDrainGrace
+	collectDrainGrace = 10 * time.Second
+	t.Cleanup(func() { collectDrainGrace = restore })
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -177,9 +187,9 @@ func TestRunCollectQuietDoesNotWaitWhenTheAnswerIsIn(t *testing.T) {
 	if strings.TrimSpace(string(out)) != `{"ok":true}` {
 		t.Fatalf("stdout = %q", out)
 	}
-	if elapsed >= 5*time.Second {
-		t.Errorf("took %v — a satisfied completeness rule must short-circuit "+
-			"the wait for EOF", elapsed)
+	if elapsed >= 3*time.Second {
+		t.Errorf("took %v against a %v drain grace — a satisfied completeness "+
+			"rule must short-circuit the wait for EOF", elapsed, collectDrainGrace)
 	}
 }
 
