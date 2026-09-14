@@ -196,7 +196,7 @@ func BehaviorsForCategory(category string) []string {
 	}
 }
 
-// ParseCategory accepts previous API enum spellings at the boundary only.
+// ParseCategory normalizes API spellings and pre-backfill stored categories.
 //
 // Triage is refused: CategoryForBehavior answers for it so a Triage issue can
 // still be rendered and grouped, but it is not a category a caller may name —
@@ -223,6 +223,9 @@ func ParseCategory(value string) (string, bool) {
 // clients. This is a presentation adapter, NEVER an execution policy. New clients
 // normalize it into four lifecycle categories. No legacy behavior is persisted.
 func WireCategory(status, category string) string {
+	if normalized, ok := ParseCategory(category); ok {
+		category = normalized
+	}
 	if IsBuiltIn(status) {
 		return status
 	}
@@ -243,6 +246,7 @@ func WireCategory(status, category string) string {
 // Custom statuses inherit only terminal lifecycle semantics, not parked, review,
 // blocked or active-agent recovery behavior. Nonterminal keys stay distinct.
 func customBehavior(status, category string) string {
+	category, _ = ParseCategory(category)
 	switch category {
 	case CategoryDone:
 		return Done
@@ -480,10 +484,8 @@ func CategoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, st
 	if err != nil {
 		return "", ""
 	}
-	if !IsCategory(entry.Category) {
-		return "", entry.Name
-	}
-	return entry.Category, entry.Name
+	category, _ := ParseCategory(entry.Category)
+	return category, entry.Name
 }
 
 // Resolve validates that status is usable in this workspace, returning the
@@ -650,7 +652,7 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
 	for _, e := range entries {
-		r.categories[e.Key] = e.Category
+		r.categories[e.Key], _ = ParseCategory(e.Category)
 		r.names[e.Key] = e.Name
 	}
 }
@@ -814,10 +816,11 @@ func CustomKeyCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID
 	}
 	out := make(map[string]string, len(entries))
 	for _, e := range entries {
-		if IsBuiltIn(e.Key) || !IsCategory(e.Category) {
+		category, ok := ParseCategory(e.Category)
+		if IsBuiltIn(e.Key) || !ok {
 			continue
 		}
-		out[e.Key] = e.Category
+		out[e.Key] = category
 	}
 	return out, nil
 }
