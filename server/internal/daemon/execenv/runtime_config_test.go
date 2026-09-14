@@ -192,6 +192,17 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
 		t.Errorf("brief must not contain a placeholder `<this-issue-id> in_review` flip — status is judged from what the turn delivered")
 	}
+	// The start write must not be gated on the current status: that gate
+	// forced a `multica issue get` on every resumed follow-up just to learn
+	// a value the server already treats idempotently (MUL-7309 / #8337).
+	for _, banned := range []string{
+		"skip when the issue is already",
+		"Write only when the new value differs",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("brief must not gate a status write on reading the current status: %q", banned)
+		}
+	}
 
 	for _, want := range []string{
 		// The anchor: issue state, not run lifecycle, written when it changes.
@@ -201,9 +212,11 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		// on MUL-6460 proved a detached status-block bullet does not fire —
 		// the model is walking the numbered list when the condition triggers.
 		"3. If any part of what this turn will produce is what the issue itself asks for",
-		// Only the exact built-in key satisfies this workflow step. The
-		// started category also contains review and blocked statuses.
-		"already `in_progress`",
+		// No current-status precondition on the start write: UpdateIssue's
+		// did_change makes a same-value write a server-side no-op (no
+		// revision, no updated_at, no run, no parent notification), so the
+		// agent must never read the issue just to decide whether to write.
+		"a same-value write is a server-side no-op",
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
