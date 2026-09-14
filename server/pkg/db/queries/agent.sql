@@ -813,6 +813,22 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
+-- name: SetTaskIssueSnapshot :exec
+-- Record the comparable issue state this claim's payload was built from, so the
+-- NEXT run this agent takes on the issue can be told whether the issue itself
+-- moved. Written for every issue-bound claim, not just comment-backed ones: an
+-- assignment run that skips this leaves the following run with no baseline to
+-- compare against, which reads as "not compared" and costs an extra issue read.
+-- Same CAS as SetTaskDeliveredCommentIDs so a stale handler cannot overwrite a
+-- newer reclaim's snapshot, or write one after execution has started.
+UPDATE agent_task_queue
+SET issue_snapshot = @issue_snapshot
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at;
+
 -- name: RequeueAgentTaskAfterClaimFailure :one
 -- Claim finalization (task token + optional comment receipt) failed before any
 -- response bytes were written. Return only that exact claim generation to the
@@ -1193,6 +1209,21 @@ LIMIT 1;
 -- so this never returns the current claim's own row. MUST use started_at, never
 -- completed_at: a long run would otherwise miss comments posted while it ran.
 SELECT started_at FROM agent_task_queue
+WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
+ORDER BY started_at DESC
+LIMIT 1;
+
+-- name: GetLastTaskIssueSnapshotForIssueAndAgent :one
+-- Returns the issue_snapshot recorded by the most recent prior task for this
+-- (agent, issue) pair — the comparable issue state that run was handed when it
+-- was claimed. Same WHERE and ORDER as GetLastTaskStartedAtForIssueAndAgent, so
+-- both deltas are measured from the same anchor run: "since your last run" means
+-- one thing on this claim, not two. Tasks with no started_at (never dispatched /
+-- the just-claimed current task) are excluded, so this never compares the claim
+-- against itself. A NULL result means that run predates the column or its write
+-- lost the CAS; the caller must report the comparison as not done, never as
+-- unchanged.
+SELECT issue_snapshot FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
 ORDER BY started_at DESC
 LIMIT 1;

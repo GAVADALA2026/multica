@@ -436,7 +436,16 @@ func buildCommentPrompt(task Task, provider string) string {
 				task.IssueID)
 		}
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
+	// Issue-reading pointer (MUL-7344). Same gate as the comment hint below —
+	// `resumed` is computed once for both, so one turn can never claim the
+	// session is warm enough to skip the issue read while treating it as cold
+	// for comments. On anything but a real resume with a server-computed
+	// comparison this renders the unconditional read, byte for byte.
+	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	b.WriteString(execenv.BuildIssueStateHint(
+		task.IssueID, task.IssueStatus, task.IssueAssigneeType, task.IssueAssigneeID,
+		task.IssueChangedFields, task.IssueStateDeltaKnown, resumed,
+	))
 	// Comment-reading pointer. Which hint renders is decided by whether this
 	// run actually RESUMES a provider session, and only then by the new-comment
 	// delta — never by the delta alone.
@@ -471,7 +480,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	// that; these hints carry this turn's facts and exact commands. Final
 	// fallback (no trigger id, shouldn't happen here): plain read.
 	var hint string
-	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
+	if resumed {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
 		if hint == "" {
 			if task.NewCommentsDeltaKnown {

@@ -2076,3 +2076,115 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 		}
 	})
 }
+
+// issueStateTask is the shared comment-trigger fixture for the issue-state
+// hint cases below. Every case differs only in the issue-state fields, so
+// building the rest once keeps the branch under test visible.
+func issueStateTask(issueID string) Task {
+	return Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "ping",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
+		NewCommentsDeltaKnown: true,
+	}
+}
+
+// TestBuildPromptIssueUnchangedDropsTheIssueRead pins MUL-7344's acceptance
+// case: a resumed follow-up whose issue did not move is no longer told to run
+// `multica issue get` before doing anything. The comparison is reported as
+// workflow step 1's answer, with the read left as a conditional fallback.
+func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
+	const issueID = "issue-unchanged-1"
+	task := issueStateTask(issueID)
+	task.IssueStateDeltaKnown = true
+	task.IssueStatus = "in_progress"
+	task.IssueAssigneeType = "agent"
+	task.IssueAssigneeID = "agent-7"
+	out := BuildPrompt(task, "claude")
+
+	if strings.Contains(out, "Start by running `multica issue get") {
+		t.Errorf("an unchanged issue must not carry the unconditional read imperative, got:\n%s", out)
+	}
+	for _, want := range []string{
+		"The issue is unchanged since your last run",
+		"the server compared title, description, status, assignee and priority",
+		"status: in_progress; assignee: agent agent-7",
+		"only if resumed memory is not enough",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q, got:\n%s", want, out)
+		}
+	}
+	// Combined with the empty comment delta this is the full acceptance case:
+	// neither context read is imperative any more.
+	if strings.Contains(out, "--roots-only --summary") {
+		t.Errorf("an unchanged issue with an empty comment delta must carry no scan, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptIssueChangedNamesFieldsAndReads: the comparison found
+// something, so the read comes back — with the changed field names, so the
+// agent knows what moved instead of diffing the whole record.
+func TestBuildPromptIssueChangedNamesFieldsAndReads(t *testing.T) {
+	const issueID = "issue-changed-1"
+	task := issueStateTask(issueID)
+	task.IssueStateDeltaKnown = true
+	task.IssueStatus = "todo"
+	task.IssueAssigneeType = "member"
+	task.IssueAssigneeID = "user-3"
+	task.IssueChangedFields = []string{"description", "status"}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"Since your last run the issue changed: description, status",
+		"status: todo; assignee: member user-3",
+		"Read it: `multica issue get " + issueID + " --output json`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "The issue is unchanged") {
+		t.Errorf("a changed issue must not be reported as unchanged, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptIssueStateFallsBackToTheRead pins the safe default at the
+// prompt layer: a cold start and a dropped resume both keep the instruction
+// they have always carried. An unknown delta is covered by the same branch and
+// is exercised in the execenv helper's own table.
+func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
+	cases := map[string]func(*Task){
+		"cold start": func(task *Task) {
+			task.PriorSessionID = ""
+			task.NewCommentsDeltaKnown = false
+		},
+		"resume dropped": func(task *Task) {
+			task.PriorSessionResumeUnavailable = true
+		},
+		"delta not computed": func(task *Task) {
+			task.IssueStateDeltaKnown = false
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			const issueID = "issue-fallback-1"
+			task := issueStateTask(issueID)
+			// Every case starts from a server that DID compare, so the only
+			// thing suppressing the waiver is the mutation under test.
+			task.IssueStateDeltaKnown = true
+			task.IssueStatus = "todo"
+			mutate(&task)
+			out := BuildPrompt(task, "claude")
+			if !strings.Contains(out, "Start by running `multica issue get "+issueID+" --output json` to understand your task, then decide how to proceed.") {
+				t.Errorf("expected the unconditional issue read, got:\n%s", out)
+			}
+			if strings.Contains(out, "The issue is unchanged") {
+				t.Errorf("nothing may claim the issue is unchanged here, got:\n%s", out)
+			}
+		})
+	}
+}

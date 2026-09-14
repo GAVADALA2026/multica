@@ -314,6 +314,12 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 		"reply-abc", "thread-abc", "reply-def", "thread-def", since,
 		"4 new comment(s) on this issue since your last run",
 		"DISTINCT threads",
+		// MUL-7344's issue-state report is per-run for the same reason the
+		// comment delta is, and TaskContextForEnv deliberately has no field to
+		// carry it. These pin the rendered text so a future "just pass it
+		// through to the brief" cannot land quietly.
+		"The issue is unchanged since your last run",
+		"Since your last run the issue changed",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief must not carry per-run comment value %q (MUL-5377)\n---\n%s", banned, out)
