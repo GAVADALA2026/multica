@@ -3,8 +3,9 @@ import type { TimelineEntry } from "@multica/core/types";
 /**
  * True for a comment deleted while it still had replies (#8296). The server
  * keeps its row as a tombstone — empty content, no attachments, reactions or
- * resolution — so every reply keeps its direct parent. Clients render a
- * placeholder in its place and offer no actions on it.
+ * resolution — so every reply keeps its direct parent. Clients render nothing
+ * in its place: the replies it held render flat, where it was. The one
+ * exception is a thread ROOT, which keeps a placeholder as the thread's head.
  */
 export function isDeletedComment(entry: { deleted_at?: string | null }): boolean {
   return typeof entry.deleted_at === "string" && entry.deleted_at !== "";
