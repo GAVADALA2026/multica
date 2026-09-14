@@ -49,7 +49,7 @@ PR #7990 is subsequent work, not part of this release.
    not interpret their keys as category filters. Tell affected users that those custom statuses will
    no longer park, finish or fail automation. The decision applies to historical
    custom statuses too; no legacy behavior is retained.
-2. Apply migration 468 (categories) and 469 (icon), then deploy the matching backend. The catalog rewrite,
+2. Apply migration 469 (categories) and 470 (icon), then deploy the matching backend. The catalog rewrite,
    constraints and SQL behavior function change in one atomic statement. It
    preserves every status ID/key/name/color/order/archive marker and every issue
    reference. It does not update issues, replay events, or enqueue tasks.
@@ -73,8 +73,10 @@ forward migration. If it committed, repair with a new forward migration or
 patch. The paired down file deliberately refuses reversal; reapplying the up
 statement after an uncertain acknowledgement is idempotent.
 
-Before merging, these migrations were renumbered from 467/468 to 468/469 to
-follow main's 467 autopilot migration. The runner keys its ledger by the full
+Before merging, these migrations were renumbered from 467/468, then 468/469,
+to 469/470 to follow main's existing 468 migrations. Main's two distinct 468
+filenames are preserved, with an exact-pair exception in the numbering lint;
+new collisions remain forbidden. The runner keys its ledger by the full
 filename stem, not just the number. A local preview that ran the earlier names
 will therefore replay the new names; both up statements are idempotent, and
 icon replay preserves saved shapes. Do not rewrite or delete ledger entries.
@@ -107,7 +109,7 @@ will succeed, especially during the accepted mixed-version window.
 
 ## Regression coverage
 
-- Actual 332-to-468 migration and replay against an isolated transactional
+- Actual 332-to-469 migration and replay against an isolated transactional
   schema; non-category field preservation and SQL tenant isolation.
 - Built-in identity, custom lifecycle vs special behavior, unknown-key handling,
   archived status reads, category filtering, table/swimlane grouping.
