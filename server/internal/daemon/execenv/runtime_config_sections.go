@@ -319,12 +319,14 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	byCategory := make(map[string][]IssueStatusForEnv, len(briefStatusCategoryOrder))
+	unknownCategories := 0
 	for _, s := range ctx.IssueStatuses {
 		if sanitizeBriefCodeToken(s.Key) == "" {
 			continue
 		}
 		category, ok := issuestatus.ParseCategory(s.Category)
 		if !ok {
+			unknownCategories++
 			continue
 		}
 		byCategory[category] = append(byCategory[category], s)
@@ -345,6 +347,11 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 			}
 		}
 		b.WriteString("\n")
+	}
+	// Count only otherwise renderable entries, without echoing untrusted
+	// category values or conflating these omissions with the server's cap.
+	if unknownCategories > 0 {
+		fmt.Fprintf(b, "  - %d custom statuses not listed because this daemon does not recognize their categories; upgrade the daemon to display them.\n", unknownCategories)
 	}
 	if ctx.IssueStatusesOmitted > 0 {
 		fmt.Fprintf(b, "  - …and %d more custom statuses not listed; an invalid status errors with the full valid list.\n", ctx.IssueStatusesOmitted)
