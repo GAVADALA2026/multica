@@ -15,6 +15,10 @@ import {
   Copy,
   Moon,
   PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Redo2,
   Save,
   Sun,
@@ -244,6 +248,26 @@ function Workbench({
   } | null>(null);
   const [storageError, setStorageError] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [panels, setPanels] = useState(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("multica-ui-lab:panels") ?? "null",
+      );
+      return {
+        leftCollapsed: saved?.leftCollapsed === true,
+        rightCollapsed: saved?.rightCollapsed === true,
+      };
+    } catch {
+      return { leftCollapsed: false, rightCollapsed: false };
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("multica-ui-lab:panels", JSON.stringify(panels));
+    } catch {
+      /* Panel toggles remain usable when storage is unavailable. */
+    }
+  }, [panels]);
   const count = changeCount(draft);
   const title =
     route.kind === "overview"
@@ -329,16 +353,47 @@ function Workbench({
     setNotice({ key: "exported" });
   };
   return (
-    <div className={`lab-shell ${scene ? "" : "catalog-shell"}`}>
+    <div
+      className={`lab-shell ${scene ? "" : "catalog-shell"} ${panels.leftCollapsed ? "nav-collapsed" : ""} ${panels.rightCollapsed ? "inspector-collapsed" : ""}`}
+    >
       <header className="lab-header">
         <Button
           className="mobile-nav-toggle"
           size="icon"
           variant="ghost"
           aria-label={t(($) => $.lab.nav.toggle)}
+          aria-expanded={navOpen}
+          aria-controls="lab-navigation"
           onClick={() => setNavOpen(!navOpen)}
         >
           <PanelLeft />
+        </Button>
+        <Button
+          className="desktop-nav-toggle"
+          size="icon"
+          variant="ghost"
+          aria-label={t(
+            ($) =>
+              $.lab.panels[
+                panels.leftCollapsed ? "expandLeft" : "collapseLeft"
+              ],
+          )}
+          title={t(
+            ($) =>
+              $.lab.panels[
+                panels.leftCollapsed ? "expandLeft" : "collapseLeft"
+              ],
+          )}
+          aria-expanded={!panels.leftCollapsed}
+          aria-controls="lab-navigation"
+          onClick={() =>
+            setPanels((current) => ({
+              ...current,
+              leftCollapsed: !current.leftCollapsed,
+            }))
+          }
+        >
+          {panels.leftCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
         </Button>
         <a className="lab-brand" href="#/overview" aria-label="Multica UI Lab">
           <span className="logo-mark">
@@ -404,9 +459,42 @@ function Workbench({
             <Code2 />
             <span>{t(($) => $.lab.actions.export)}</span>
           </Button>
+          {scene && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={t(
+                ($) =>
+                  $.lab.panels[
+                    panels.rightCollapsed ? "expandRight" : "collapseRight"
+                  ],
+              )}
+              title={t(
+                ($) =>
+                  $.lab.panels[
+                    panels.rightCollapsed ? "expandRight" : "collapseRight"
+                  ],
+              )}
+              aria-expanded={!panels.rightCollapsed}
+              aria-controls="lab-inspector-panel"
+              onClick={() => {
+                setColorPreview(null);
+                setNumberPreview(null);
+                setPanels((current) => ({
+                  ...current,
+                  rightCollapsed: !current.rightCollapsed,
+                }));
+              }}
+            >
+              {panels.rightCollapsed ? <PanelRightOpen /> : <PanelRightClose />}
+            </Button>
+          )}
         </div>
       </header>
-      <aside className={`lab-nav ${navOpen ? "nav-open" : ""}`}>
+      <aside
+        id="lab-navigation"
+        className={`lab-nav ${navOpen ? "nav-open" : ""}`}
+      >
         <CatalogNavigation route={route} onNavigate={() => setNavOpen(false)} />
       </aside>
       <main className="lab-main">
@@ -603,26 +691,34 @@ function Workbench({
         )}
       </main>
       {scene && (
-        <Inspector
-          scene={scene}
-          theme={theme}
-          draft={draft}
-          previewDraft={previewDraft}
-          buttonScale={buttonScale}
-          color={color}
-          currentColor={currentColor}
-          onScaleChange={setButtonScale}
-          onEdit={edit}
-          onNumberPreview={(key, value) => {
-            setColorPreview(null);
-            setNumberPreview({ key, value });
-          }}
-          onNumberCancel={() => setNumberPreview(null)}
-          onColorSelect={selectColor}
-          onColorPreview={setColorPreview}
-          onColorCancel={() => setColorPreview(null)}
-          onExport={() => setExportOpen(true)}
-        />
+        <div
+          id="lab-inspector-panel"
+          className="lab-inspector-slot"
+          hidden={panels.rightCollapsed}
+        >
+          {!panels.rightCollapsed && (
+            <Inspector
+              scene={scene}
+              theme={theme}
+              draft={draft}
+              previewDraft={previewDraft}
+              buttonScale={buttonScale}
+              color={color}
+              currentColor={currentColor}
+              onScaleChange={setButtonScale}
+              onEdit={edit}
+              onNumberPreview={(key, value) => {
+                setColorPreview(null);
+                setNumberPreview({ key, value });
+              }}
+              onNumberCancel={() => setNumberPreview(null)}
+              onColorSelect={selectColor}
+              onColorPreview={setColorPreview}
+              onColorCancel={() => setColorPreview(null)}
+              onExport={() => setExportOpen(true)}
+            />
+          )}
+        </div>
       )}
       {storageError && (
         <div className="storage-warning" role="alert">

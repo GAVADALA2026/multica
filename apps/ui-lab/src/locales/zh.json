@@ -68,6 +68,12 @@
     },
     "language": {
       "label": "语言"
+    },
+    "panels": {
+      "expandLeft": "展开左侧栏",
+      "collapseLeft": "折叠左侧栏",
+      "expandRight": "展开右侧栏",
+      "collapseRight": "折叠右侧栏"
     }
   },
   "button": {

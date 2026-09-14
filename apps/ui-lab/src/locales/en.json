@@ -68,6 +68,12 @@
     },
     "language": {
       "label": "Language"
+    },
+    "panels": {
+      "expandLeft": "Expand left sidebar",
+      "collapseLeft": "Collapse left sidebar",
+      "expandRight": "Expand right sidebar",
+      "collapseRight": "Collapse right sidebar"
     }
   },
   "button": {

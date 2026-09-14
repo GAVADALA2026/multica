@@ -42,7 +42,6 @@ body {
 }
 .lab-shell {
   display: grid;
-  grid-template-columns: 192px minmax(0, 1fr) 292px;
   grid-template-rows: 64px minmax(0, 1fr);
   height: 100dvh;
   min-height: 540px;
@@ -473,9 +472,6 @@ body {
   font-size: var(--text-micro);
 }
 @media (max-width: 1200px) {
-  .lab-shell {
-    grid-template-columns: 166px minmax(0, 1fr) 264px;
-  }
   .workspace-heading {
     padding: 22px 20px;
   }
@@ -491,9 +487,6 @@ body {
   }
 }
 @media (max-width: 1000px) {
-  .lab-shell {
-    grid-template-columns: minmax(0, 1fr) 260px;
-  }
   .lab-nav {
     display: none;
   }
@@ -1471,12 +1464,6 @@ body {
 }
 
 /* Catalog pages share the workbench shell; only live previews show an inspector. */
-.lab-shell {
-  grid-template-columns: 228px minmax(0, 1fr) 292px;
-}
-.lab-shell.catalog-shell {
-  grid-template-columns: 228px minmax(0, 1fr);
-}
 .lab-nav .catalog-navigation {
   gap: 18px;
 }
@@ -1734,23 +1721,11 @@ body {
   margin-bottom: 20px;
 }
 @media (max-width: 1200px) {
-  .lab-shell {
-    grid-template-columns: 208px minmax(0, 1fr) 264px;
-  }
-  .lab-shell.catalog-shell {
-    grid-template-columns: 208px minmax(0, 1fr);
-  }
   .catalog-module-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 1000px) {
-  .lab-shell {
-    grid-template-columns: minmax(0, 1fr) 260px;
-  }
-  .lab-shell.catalog-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .lab-nav.nav-open {
     width: 240px;
   }
@@ -2181,4 +2156,70 @@ body {
 }
 .colors-scene > [data-slot="tabs"] > [data-slot="tabs-content"] {
   padding-top: 16px;
+}
+
+/* Keep panel widths independent so either side can release canvas space. */
+.lab-shell,
+.lab-shell.catalog-shell {
+  --nav-size: 228px;
+  --inspector-size: 292px;
+  --nav-width: var(--nav-size);
+  --inspector-width: var(--inspector-size);
+  grid-template-columns: var(--nav-width) minmax(0, 1fr) var(--inspector-width);
+}
+.lab-shell.nav-collapsed {
+  --nav-width: 0px;
+}
+.lab-shell.inspector-collapsed,
+.lab-shell.catalog-shell {
+  --inspector-width: 0px;
+}
+.lab-main {
+  grid-column: 2;
+}
+.lab-inspector-slot {
+  grid-column: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.lab-inspector-slot[hidden] {
+  display: none;
+}
+.lab-inspector-slot > .lab-inspector {
+  flex: 1;
+  min-width: 0;
+}
+@media (min-width: 1001px) {
+  .lab-shell.nav-collapsed > .lab-nav {
+    display: none;
+  }
+}
+@media (max-width: 1200px) {
+  .lab-shell,
+  .lab-shell.catalog-shell {
+    --nav-size: 208px;
+    --inspector-size: 264px;
+  }
+}
+@media (max-width: 1000px) {
+  .lab-shell,
+  .lab-shell.catalog-shell {
+    --nav-width: 0px;
+    --inspector-size: 260px;
+  }
+  .desktop-nav-toggle {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  .lab-header > .mobile-nav-toggle,
+  .header-actions > button {
+    width: 28px;
+    padding-inline: 0;
+    flex-shrink: 0;
+  }
+  .language-toggle > button {
+    padding-inline: 6px;
+  }
 }
