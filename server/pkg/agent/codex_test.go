@@ -2784,7 +2784,17 @@ func TestCodexExecuteRetriesAfterSignaledProcessIsReaped(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-signaled","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
-	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+	// The handshake budget is spent twice here, and the two spends pull in
+	// opposite directions: the first attempt only reaches the signal/reap path
+	// by burning the whole budget, while the RETRY has to answer initialize
+	// inside the same budget from a cold `sh` spawn. Tens of milliseconds are
+	// enough for the second spend only on an idle machine. Under the
+	// contention this package sees in CI (`-race`, `-p 2`, neighbours spawning
+	// process trees) that cold spawn measured 100-309ms, so the old 50ms
+	// budget timed the retry out too and the test reported the retry as
+	// missing. Two seconds keeps the margin wide; the cost is one deliberate
+	// 2s wait on a Linux-only test. (MUL-7271 follow-up)
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 10 * time.Second, HandshakeTimeout: 2 * time.Second})
 	if result.Status != "completed" {
 		t.Fatalf("signaled/reaped first attempt should retry: %+v", result)
 	}
