@@ -1929,6 +1929,11 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 }
 
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+	// An issue leaves Triage only by being accepted; a merged "Closes" PR
+	// links to it but must not move it out. (MUL-7189 §2.2)
+	if issue.Status == issuestatus.Triage {
+		return
+	}
 	result, err := h.IssueService.TransitionStatus(ctx, service.IssueTransitionParams{
 		IssueID:     issue.ID,
 		Status:      "done",

@@ -31,6 +31,7 @@ var statusLabels = map[string]string{
 	"done":        "Done",
 	"blocked":     "Blocked",
 	"cancelled":   "Cancelled",
+	"triage":      "Triage",
 }
 
 // priorityLabels maps DB priority values to human-readable labels for notifications.

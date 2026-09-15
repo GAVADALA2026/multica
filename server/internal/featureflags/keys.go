@@ -28,6 +28,14 @@ const (
 	// transition recording are intentionally not gated so a rollback never
 	// leaves an unrepairable history gap.
 	IssueWorkflowV1 = "issue_workflow_v1"
+	// TriageV1 gates the Triage inbox (MUL-7189): creating issues into Triage,
+	// triage runs, and the Triage page. It is a GLOBAL switch — per-workspace
+	// targeting has no production wiring — which is enough because a
+	// workspace with no triager configured and no Triage issues sees nothing
+	// either way. Turning it off stops new intake and triage runs but leaves
+	// existing Triage issues workable; the reserved `triage` status itself is
+	// not gated.
+	TriageV1 = "triage_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -65,6 +73,10 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func IssueWorkflowV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, IssueWorkflowV1, false)
+}
+
+func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, TriageV1, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
