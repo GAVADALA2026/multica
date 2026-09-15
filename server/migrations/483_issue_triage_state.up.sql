@@ -19,7 +19,7 @@
 -- while holding the ALTER's ACCESS EXCLUSIVE lock, which stops all issue reads
 -- and writes for the length of that scan even though the new column needs no
 -- backfill. NOT VALID enforces the constraint on every write from this point
--- on and skips the scan; migration 485 validates the rows already on disk under
+-- on and skips the scan; migration 489 validates the rows already on disk under
 -- SHARE UPDATE EXCLUSIVE, which readers and writers run straight through.
 --
 -- The runner sends this file as one implicit transaction. Bound lock
