@@ -562,19 +562,6 @@ jobs:
         # -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
 
-      - name: Test Windows Cursor background ownership
-        shell: bash
-        working-directory: server
-        # Cursor's background shell is captured through a second Job Object, and
-        # TestCaptureCursorBackgroundProcessRejectsForeignJob is windows-tagged,
-        # so it builds nowhere else. This used to be its own windows-latest job
-        # on the same runtime scope as this one; same runner, same package, same
-        # concern, so it is a step here instead of a second runner per merge.
-        # Explicit, verbose selection keeps a regression from disappearing
-        # behind a build tag or the ordinary Windows test subset; the ubuntu
-        # backend job still covers the untagged and Unix arms.
-        run: go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1
-
       - name: Test bounded CLI output collection on Windows
         working-directory: server
         # MUL-5467: RunCollect / RunCollectQuiet own the pipes as well as the
@@ -688,6 +675,19 @@ jobs:
       - name: Build Windows CLI helper entrypoint
         working-directory: server
         run: go build ./cmd/multica
+
+      - name: Test Windows Cursor background ownership
+        working-directory: server
+        # Cursor's background shell is captured through a second Job Object, and
+        # TestCaptureCursorBackgroundProcessRejectsForeignJob is windows-tagged,
+        # so it builds nowhere else. This used to be its own windows-latest job
+        # on the same runtime scope as this one; same runner, same package, same
+        # concern, so it is a step here instead of a second runner per merge.
+        # Last on purpose: absorbing another job's steps means this job's own
+        # failure modes now truncate that job's coverage too, and Cursor
+        # ownership is the newest arrival, not the load-bearing one. The ubuntu
+        # backend job still covers the untagged and Unix arms.
+        run: go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1 -timeout=5m
 
   # The only macOS runner here, and the only place cursor_background_process_darwin.go
   # is ever built: it signals a process group through XNU's per-process unique
