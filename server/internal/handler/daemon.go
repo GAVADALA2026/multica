@@ -1034,7 +1034,9 @@ type DaemonHeartbeatRequest struct {
 // cleanly un-run from the client side if the context expires mid-script. We
 // therefore only invoke PopPending after HasPending confirms there is work
 // to claim, so we never start a claim we might have to abort.
-const heartbeatHasPendingTimeout = 1 * time.Second
+// Kept as a variable so the slow-probe test can preserve this relationship
+// without paying the production timeout; production never reassigns it.
+var heartbeatHasPendingTimeout = 1 * time.Second
 
 // maxLocalSkillImportBatch is how many pending import requests the heartbeat
 // handler pops per cycle. Higher values let the daemon process more imports
@@ -1633,10 +1635,11 @@ func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtime
 }
 
 // repairStaleCommentPlanIfNeeded handles the edit/delete race where a claimed
-// task's trigger_comment_id was cleared but coalesced_comment_ids survive: such
-// a task must never be dispatched as a generic assignment — its user-scoped MCP
-// overlay still belongs to the deleted author, and the prompt would read issue
-// history exposing that stale user's capabilities. When it applies, the task is
+// task's trigger was deleted (trigger_comment_id cleared, or pointing at a
+// tombstone) but coalesced_comment_ids survive: such a task must never be
+// dispatched as a generic assignment — its user-scoped MCP overlay still
+// belongs to the deleted author, and the prompt would read issue history
+// exposing that stale user's capabilities. When it applies, the task is
 // cancelled and its surviving comments are replayed through normal routing
 // (which recomputes originator + connected-app context).
 //
@@ -1646,8 +1649,16 @@ func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtime
 // proceed with a normal claim. Shared by the per-runtime and batch claim
 // handlers so the batch path can't silently drop surviving comments (MUL-4257).
 func (h *Handler) repairStaleCommentPlanIfNeeded(ctx context.Context, task *db.AgentTaskQueue, runtimeWorkspaceID string) (handled bool, failure *claimBuildFailure) {
-	if task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) == 0 {
+	if len(task.CoalescedCommentIds) == 0 {
 		return false, nil
+	}
+	if task.TriggerCommentID.Valid {
+		// A trigger deleted while it had replies stays as a tombstone instead of
+		// clearing trigger_comment_id (#8296); repair it like a removed one.
+		trigger, err := h.Queries.GetComment(ctx, task.TriggerCommentID)
+		if err != nil || !trigger.DeletedAt.Valid {
+			return false, nil
+		}
 	}
 	if !task.IssueID.Valid {
 		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "comment task has no issue"}
@@ -2155,16 +2166,16 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 // child: a poisoned conversation says nothing about the files it left behind,
 // the same contract the manual-retry branch applies (MUL-4869, MUL-7034).
 //
-// The workdir is offered only to a daemon that warns the fresh session about
-// the files it will find (DaemonCapabilityReusedWorkdirNoticeV1). Unwarned, the
-// session follows the brief and re-runs `multica repo checkout`, which resets
-// an existing checkout and deletes the work being kept, so an older daemon gets
-// a fresh directory as before. The daemon validates the directory before
-// reusing it and falls back to a fresh Prepare when it is gone. Either way the
-// failed attempt's working memory does not come back, so the continuity gap is
-// disclosed.
-func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskResponse, daemonWarnsOfReusedWorkdir bool) {
-	if daemonWarnsOfReusedWorkdir && task.WorkDir.Valid {
+// The workdir is offered only to a daemon whose `multica repo checkout` keeps
+// an existing checkout's work (DaemonCapabilityCheckoutKeepsWorkV1). The fresh
+// session has no memory of that work and will fetch its repositories again;
+// an older daemon's checkout resets the checkout and deletes the work being
+// kept, so it gets a fresh directory as before. The daemon validates the
+// directory before reusing it and falls back to a fresh Prepare when it is
+// gone. Either way the failed attempt's working memory does not come back, so
+// the continuity gap is disclosed.
+func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskResponse, daemonKeepsCheckoutWork bool) {
+	if daemonKeepsCheckoutWork && task.WorkDir.Valid {
 		resp.PriorWorkDir = task.WorkDir.String
 	}
 	resp.PriorSessionResumeUnavailable = true
@@ -2629,10 +2640,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// comment UUID can never pull another workspace's comment text into
 			// this agent's prompt. The task's issue workspace is asserted equal
 			// to runtime.WorkspaceID below, so this is the right tenant (MUL-4252).
+			// A deleted trigger's tombstone is treated like a removed row.
 			if comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
 				ID:          effectiveTriggerUUID,
 				WorkspaceID: runtime.WorkspaceID,
-			}); err == nil {
+			}); err == nil && !comment.DeletedAt.Valid {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -2808,7 +2820,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// Automatic retry that must start a fresh session: continue in the
 			// parent's workdir, never its session. A force_fresh task with no
 			// retry lineage still resumes nothing.
-			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityReusedWorkdirNoticeV1))
+			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
 	}
 
@@ -2987,7 +2999,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// Same as the issue branch. The retry lineage is what separates this
 			// from a user-requested fresh start (the Lark fresh-session command),
 			// which still inherits nothing.
-			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityReusedWorkdirNoticeV1))
+			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
 
 		parts := make([]string, 0, len(unanswered))
@@ -3330,10 +3342,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.IssueStatusesOmitted++
 				continue
 			}
+			// Older daemons only render the seven legacy category values.
 			resp.IssueStatuses = append(resp.IssueStatuses, TaskIssueStatusData{
 				Key:         entry.Key,
 				Name:        entry.Name,
-				Category:    entry.Category,
+				Category:    issuestatus.WireCategory(entry.Key, entry.Category),
 				Description: entry.Description,
 			})
 		}
@@ -3497,7 +3510,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome = "no_task"
 		return
 	}
-	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
+	if len(task.CoalescedCommentIds) > 0 {
 		handled, failure := h.repairStaleCommentPlanIfNeeded(r.Context(), task, runtimeWorkspaceID)
 		if handled {
 			if failure != nil {
@@ -4320,7 +4333,9 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 			ID:          id,
 			WorkspaceID: workspaceID,
 		})
-		if err != nil {
+		// A tombstone (deleted while it still had replies) is as missing as a
+		// removed row: there is no body left to deliver.
+		if err != nil || comment.DeletedAt.Valid {
 			continue
 		}
 		data := CoalescedCommentData{
@@ -5527,7 +5542,31 @@ type batchIssueGCCheckItem struct {
 	ID        string     `json:"id"`
 	Found     bool       `json:"found"`
 	Status    string     `json:"status,omitempty"`
+	Category  string     `json:"category,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// issueGCWire encodes an issue's lifecycle for both GC check endpoints: the
+// four-value `category` a current daemon decides on, and the legacy
+// seven-value `status` enum installed daemons still match literally.
+//
+// `status` predates custom statuses — the daemon tests it against the 7
+// built-in keys and fails closed on anything else (isKnownIssueStatus in
+// daemon/gc.go) — so the stored key cannot be handed back raw. A nonterminal
+// custom key silently disables the GCCompletedTaskTTL full-cleanup path, and a
+// four-value category is not in that vocabulary either. GC consumes exactly one
+// lifecycle fact ("is this issue terminal?"), which is why projecting a custom
+// status onto a built-in key here grants it no built-in behavior anywhere else.
+//
+// A status with no lifecycle category — an unresolvable key after a failed
+// catalog read or a status created since the resolver's snapshot, and Triage,
+// which is deliberately outside the four — is returned raw with no category, so
+// every daemon fails closed and reclaims artifacts only. (MUL-7364)
+func issueGCWire(status, category string) (wireStatus, wireCategory string) {
+	if !issuestatus.IsCategory(category) {
+		return status, ""
+	}
+	return issuestatus.WireCategory(status, category), category
 }
 
 // BatchIssueGCCheck returns one explicit result for every requested issue ID.
@@ -5585,8 +5624,8 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ONE resolver for the whole batch, not a point lookup per row. The
-	// package-level Effective issues a GetIssueStatusEntryByKey for every custom
-	// key it sees, so resolving inside this loop cost up to maxIssueGCBatchSize
+	// package-level helpers issue a GetIssueStatusEntryByKey for every custom
+	// key they see, so resolving inside this loop cost up to maxIssueGCBatchSize
 	// catalog queries per request — on an endpoint whose entire purpose is to
 	// replace per-issue requests, and which every installed daemon runs on a
 	// timer. The resolver reads the catalog lazily and at most once, so an
@@ -5599,10 +5638,11 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		if found {
 			// The daemon consumes this purely as a machine signal ("is this
 			// issue terminal, so its workdir can be reclaimed?") and has no
-			// database of its own, so the canonical status is resolved here.
+			// database of its own, so the lifecycle is resolved here.
 			// Normalizing server-side also means daemons that predate custom
 			// statuses keep making correct GC decisions. (MUL-6243)
-			item.Status = resolver.Effective(r.Context(), h.issueStatusCatalog(), row.Status)
+			item.Status, item.Category = issueGCWire(row.Status,
+				resolver.Category(r.Context(), h.issueStatusCatalog(), row.Status))
 			updatedAt := row.UpdatedAt.Time
 			item.UpdatedAt = &updatedAt
 		}
@@ -5628,10 +5668,13 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
+	// Same reasoning as BatchIssueGCCheck: normalize server-side so the
+	// daemon's terminal-status test stays correct. (MUL-6243)
+	status, category := issueGCWire(issue.Status,
+		issuestatus.Category(r.Context(), h.issueStatusCatalog(), issue.WorkspaceID, issue.Status))
 	writeJSON(w, http.StatusOK, map[string]any{
-		// Same reasoning as BatchIssueGCCheck: normalize server-side so the
-		// daemon's terminal-status test stays correct. (MUL-6243)
-		"status":     issuestatus.Effective(r.Context(), h.issueStatusCatalog(), issue.WorkspaceID, issue.Status),
+		"status":     status,
+		"category":   category,
 		"updated_at": issue.UpdatedAt.Time,
 	})
 }
