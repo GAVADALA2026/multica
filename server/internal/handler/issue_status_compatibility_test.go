@@ -152,7 +152,7 @@ func TestStatusCompatibilityCatalogWritesAndTenantIsolation(t *testing.T) {
 	}
 	ids := []string{}
 	for _, entry := range catalog {
-		if normalizedStatusCategory(entry.Category) == "started" && !entry.IsSystem {
+		if entry.Category == "started" && !entry.IsSystem {
 			ids = append(ids, uuid.UUID(entry.ID.Bytes).String())
 		}
 	}
