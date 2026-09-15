@@ -1,11 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bot, UserRound, Loader2 } from "lucide-react";
+import { Bot, Loader2 } from "lucide-react";
 import type { Issue, IssueWorkflowStatusNode } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { issueAutomationExecutionsOptions, workflowHandoff } from "@multica/core/issue-workflows";
+import { issueAutomationExecutionsOptions, workflowExecutionState } from "@multica/core/issue-workflows";
 import { useTransitionIssueStatusNode } from "@multica/core/issues/mutations";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -14,10 +14,9 @@ import { useT } from "../../i18n";
 export function WorkflowEntryEffects({ node }: { node: IssueWorkflowStatusNode }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const { executor, assignee } = node.entry_policy;
+  const { executor } = node.entry_policy;
   return <span className="block space-y-1.5 text-caption text-muted-foreground">
     <span className="flex items-start gap-2"><Bot className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{executor.type === "none" ? t(($) => $.handoff.manual) : t(($) => $.handoff.starts, { name: getActorName(executor.type, executor.id) })}</span></span>
-    <span className="flex items-start gap-2"><UserRound className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{assignee.type === "keep" ? t(($) => $.handoff.keeps_assignee) : t(($) => $.handoff.assigns, { name: getActorName(assignee.type === "human" ? "member" : assignee.type, assignee.id) })}</span></span>
   </span>;
 }
 
@@ -31,7 +30,7 @@ export function WorkflowTransitionDialog({ issue, target, workflowRevision, onCl
   const wsId = useWorkspaceId();
   const query = useQuery(issueAutomationExecutionsOptions(wsId, issue.id));
   const transition = useTransitionIssueStatusNode();
-  const { active } = workflowHandoff(issue, [], query.data ?? []);
+  const { active } = workflowExecutionState(issue, query.data ?? []);
   const error = query.isError || transition.isError;
   return <Dialog open onOpenChange={(open) => { if (!open && !transition.isPending) onClose(); }}>
     <DialogContent className="sm:max-w-md">

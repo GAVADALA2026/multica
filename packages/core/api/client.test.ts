@@ -176,10 +176,8 @@ describe("ApiClient issue workflow routes", () => {
       expected_revision: 4,
       name: "Building",
       entry_policy: {
-        assignee: { type: "keep" },
         executor: { type: "agent", id: "agent-1" },
         instructions: "Implement the issue.",
-        advance: "executor_may_transition",
       },
     });
     await client.reorderIssueWorkflowStatuses("workflow-1", ["status-2", "status-1"], 5);
@@ -2817,7 +2815,7 @@ describe("ApiClient workflow apply boundary", () => {
     const client = new ApiClient("https://api.example.test");
     const request = { mode: "custom" as const, expected_revision: 7, allow_archive: false,
       spec: { api_version: 1 as const, name: "Launch", initial_status: "ready", statuses: [{ key: "ready", name: "Ready", description: "", color: "#6b7280", phase: "unstarted" as const,
-        entry_policy: { assignee: { type: "keep" as const }, executor: { type: "none" as const }, instructions: "", advance: "human_confirms" as const } }] } };
+        entry_policy: { executor: { type: "none" as const }, instructions: "" } }] } };
     await expect(client.applyProjectWorkflow("project", request)).rejects.toThrow(/Invalid workflow response/);
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.test/api/projects/project/issue-workflow", expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }));
   });

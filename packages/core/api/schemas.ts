@@ -536,22 +536,14 @@ export const IssueWorkflowDefinitionSchema = z.object({
   updated_at: z.string(),
 }).loose();
 
-export const IssueWorkflowAssigneeTargetSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("keep") }),
-  z.object({ type: z.enum(["human", "agent", "squad"]), id: z.string() }),
-]);
-
 export const IssueWorkflowExecutorTargetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("none") }),
   z.object({ type: z.enum(["agent", "squad"]), id: z.string() }),
 ]);
 
 export const IssueWorkflowEntryPolicySchema = z.object({
-  assignee: IssueWorkflowAssigneeTargetSchema.default({ type: "keep" }),
   executor: IssueWorkflowExecutorTargetSchema.default({ type: "none" }),
   instructions: z.string().default(""),
-  advance: z.enum(["executor_may_transition", "human_confirms"]).default("human_confirms"),
-  next_status_key: z.string().optional(),
 });
 
 export const IssueWorkflowStatusNodeSchema = z.object({
@@ -567,10 +559,8 @@ export const IssueWorkflowStatusNodeSchema = z.object({
   phase: z.string(),
   outcome: z.string().nullable().default(null),
   entry_policy: IssueWorkflowEntryPolicySchema.default({
-    assignee: { type: "keep" },
     executor: { type: "none" },
     instructions: "",
-    advance: "human_confirms",
   }),
   entry_policy_revision: z.number().int().positive().default(1),
   archived_at: z.string().nullable().default(null),

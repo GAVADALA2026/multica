@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"testing"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -97,14 +95,6 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		t.Fatalf("custom workflow is missing required status nodes: %#v", customized.Statuses)
 	}
 
-	for _, nextKey := range []string{"missing_stage", "in_progress"} {
-		testutil.Call(t, testHandler.UpdateIssueWorkflowStatus,
-			testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-workflows/"+customized.Workflow.ID+"/statuses/"+inProgressID, map[string]any{
-				"expected_revision": customized.Workflow.Revision,
-				"entry_policy":      map[string]any{"next_status_key": nextKey},
-			}), "workflowId", customized.Workflow.ID, "statusId", inProgressID)).Want(http.StatusBadRequest)
-	}
-
 	// Definition mutations advance the workflow version once. Entry Policy
 	// has its own revision so a worker can pin the exact instructions it ran.
 	definitionRevision := customized.Workflow.Revision
@@ -114,11 +104,8 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 			"expected_revision": revision,
 			"name":              "Building",
 			"entry_policy": map[string]any{
-				"assignee":        map[string]any{"type": "human", "id": testUserID},
-				"executor":        map[string]any{"type": "none"},
-				"instructions":    "Wait for a human confirmation.",
-				"advance":         "human_confirms",
-				"next_status_key": "todo",
+				"executor":     map[string]any{"type": "none"},
+				"instructions": "Wait for a human confirmation.",
 			},
 		}
 	}
@@ -136,8 +123,7 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		}
 	}
 	if updatedNode.Name != "Building" || updatedNode.EntryPolicyRevision != 2 ||
-		updatedNode.EntryPolicy.Assignee.Type != issueworkflow.AssigneeHuman ||
-		updatedNode.EntryPolicy.Assignee.ID != testUserID || updatedNode.EntryPolicy.NextStatusKey != "todo" {
+		updatedNode.EntryPolicy.Instructions != "Wait for a human confirmation." {
 		t.Fatalf("updated workflow node = %#v", updatedNode)
 	}
 
@@ -157,8 +143,8 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-workflows/"+customized.Workflow.ID+"/statuses/"+inProgressID, map[string]any{
 			"expected_revision": updated.Workflow.Revision,
 			"entry_policy": map[string]any{
-				"assignee": map[string]any{"type": "keep"}, "executor": map[string]any{"type": "none"},
-				"instructions": "", "advance": "executor_may_transition",
+				"executor":     map[string]any{"type": "agent"},
+				"instructions": "",
 			},
 		}), "workflowId", customized.Workflow.ID, "statusId", inProgressID)).Want(http.StatusBadRequest)
 
@@ -265,20 +251,6 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 	if transitioned.Execution == nil || transitioned.Execution.Status != "dormant" || transitioned.Execution.TriggerTransitionID != transitioned.Transition.ID || transitioned.TaskID != nil {
 		t.Fatalf("manual entry execution response = %#v", transitioned)
 	}
-	// Generic edits (including drag and batch updates) use this locked write
-	// boundary too; rejecting the gate must roll back before any mutation.
-	_, _, _, gateErr := testHandler.updateIssueAtomically(ctx, workspaceID, db.UpdateIssueParams{
-		ID:     parseUUID(created.ID),
-		Status: pgtype.Text{String: "todo", Valid: true},
-	}, map[string]json.RawMessage{"status": json.RawMessage(`"todo"`)}, nil, nil, nil, "todo", nil,
-		issueworkflow.TransitionActor{Type: "agent"}, "issue_updated")
-	if !errors.Is(gateErr, service.ErrIssueHumanConfirmationRequired) {
-		t.Fatalf("generic status gate error=%v", gateErr)
-	}
-	stillReview, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil || stillReview.Revision != transitioned.Issue.Revision || stillReview.Status != "in_progress" {
-		t.Fatalf("rejected generic edit changed issue: %#v, %v", stillReview, err)
-	}
 
 	var executionHistory []automationExecutionResponse
 	testutil.Call(t, testHandler.ListIssueAutomationExecutions,
@@ -295,6 +267,21 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		}), "id", created.ID)).Want(http.StatusOK).JSON(&noop)
 	if noop.Transition != nil || noop.Execution != nil || noop.TaskID != nil || noop.Issue.Revision != transitioned.Issue.Revision {
 		t.Fatalf("same-node transition should be a stable no-op: %#v", noop)
+	}
+
+	// Generic edits (including drag and batch updates) use this locked write
+	// boundary too; automated writers do not need a separate approval.
+	_, _, _, updateErr := testHandler.updateIssueAtomically(ctx, workspaceID, db.UpdateIssueParams{
+		ID:     parseUUID(created.ID),
+		Status: pgtype.Text{String: "todo", Valid: true},
+	}, map[string]json.RawMessage{"status": json.RawMessage(`"todo"`)}, nil, nil, nil, "todo", nil,
+		issueworkflow.TransitionActor{Type: "system"}, "issue_updated")
+	if updateErr != nil {
+		t.Fatalf("generic status update error=%v", updateErr)
+	}
+	updatedIssue, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil || updatedIssue.Revision <= transitioned.Issue.Revision || updatedIssue.Status != "todo" {
+		t.Fatalf("automated generic edit did not change issue: %#v, %v", updatedIssue, err)
 	}
 
 	var inherited issueWorkflowResponse
@@ -331,8 +318,8 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		withURLParam(newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
 			"project_id":             destinationProjectID,
 			"workflow_status_id":     uuidToString(workspaceInProgress.ID),
-			"expected_revision":      transitioned.Issue.Revision,
-			"expected_transition_id": transitioned.Issue.TransitionID,
+			"expected_revision":      updatedIssue.Revision,
+			"expected_transition_id": uuidToString(updatedIssue.LastTransitionID),
 		}), "id", created.ID)).Want(http.StatusOK).JSON(&moved)
 	if moved.ProjectID == nil || *moved.ProjectID != destinationProjectID || moved.WorkflowID == nil || *moved.WorkflowID != uuidToString(workspaceWorkflow.ID) || moved.WorkflowStatusID == nil || *moved.WorkflowStatusID != uuidToString(workspaceInProgress.ID) {
 		t.Fatalf("explicit cross-workflow move = %#v", moved)
@@ -395,8 +382,7 @@ func TestProjectWorkflowSpecApplyIsDeclarativeAndWorkflowNative(t *testing.T) {
 		return map[string]any{
 			"key": key, "name": name, "phase": phase, "color": color, "icon": "three_quarters",
 			"entry_policy": map[string]any{
-				"assignee": map[string]any{"type": "keep"}, "executor": map[string]any{"type": "none"},
-				"advance": "human_confirms",
+				"executor": map[string]any{"type": "none"},
 			},
 		}
 	}

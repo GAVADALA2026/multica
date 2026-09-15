@@ -23,6 +23,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
+import { BoardWorkflowActions } from "./board-workflow-actions";
 import { StatusIcon } from "./status-icon";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { StatusHeading } from "./status-heading";
@@ -210,7 +211,10 @@ export const BoardColumn = memo(function BoardColumn({
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
         {/* Right: add + menu */}
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
+          {projectId && group.workflowStatusId && !group.workflowStatusArchived && !group.workflowStatusHistorical && (
+            <BoardWorkflowActions projectId={projectId} statusId={group.workflowStatusId} />
+          )}
           {/* Column-header popups mount lazily: a board/swimlane renders one
               header per column and almost none of these menus/tooltips are
               ever opened — eagerly mounting them dominated surface mount

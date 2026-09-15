@@ -23,11 +23,8 @@ type workflowFilePrincipal struct {
 }
 
 type workflowFileEntryPolicy struct {
-	Assignee      workflowFilePrincipal `json:"assignee,omitempty" yaml:"assignee,omitempty"`
-	Executor      workflowFilePrincipal `json:"executor,omitempty" yaml:"executor,omitempty"`
-	Instructions  string                `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Advance       string                `json:"advance,omitempty" yaml:"advance,omitempty"`
-	NextStatusKey string                `json:"next_status_key,omitempty" yaml:"next_status_key,omitempty"`
+	Executor     workflowFilePrincipal `json:"executor,omitempty" yaml:"executor,omitempty"`
+	Instructions string                `json:"instructions,omitempty" yaml:"instructions,omitempty"`
 }
 
 type workflowFileStatus struct {
@@ -148,16 +145,12 @@ func readWorkflowFile(cmd *cobra.Command, path, flagName string) (workflowFileSp
 	return spec, nil
 }
 
-func resolveWorkflowPrincipal(ctx context.Context, client *cli.APIClient, principal workflowFilePrincipal, executor bool) (issueworkflow.EntryPolicyPrincipal, error) {
+func resolveWorkflowPrincipal(ctx context.Context, client *cli.APIClient, principal workflowFilePrincipal) (issueworkflow.EntryPolicyPrincipal, error) {
 	typeName := strings.ToLower(strings.TrimSpace(principal.Type))
 	if typeName == "" {
-		if executor {
-			typeName = issueworkflow.ExecutorNone
-		} else {
-			typeName = issueworkflow.AssigneeKeep
-		}
+		typeName = issueworkflow.ExecutorNone
 	}
-	if typeName == issueworkflow.AssigneeKeep || typeName == issueworkflow.ExecutorNone {
+	if typeName == issueworkflow.ExecutorNone {
 		if strings.TrimSpace(principal.Ref) != "" {
 			return issueworkflow.EntryPolicyPrincipal{}, fmt.Errorf("%s does not accept ref", typeName)
 		}
@@ -165,11 +158,6 @@ func resolveWorkflowPrincipal(ctx context.Context, client *cli.APIClient, princi
 	}
 	var kinds assigneeKinds
 	switch typeName {
-	case issueworkflow.AssigneeHuman:
-		if executor {
-			return issueworkflow.EntryPolicyPrincipal{}, errors.New("executor type cannot be human")
-		}
-		kinds = memberOnlyKinds
 	case "agent":
 		kinds = assigneeKinds{agent: true}
 	case "squad":
@@ -180,12 +168,9 @@ func resolveWorkflowPrincipal(ctx context.Context, client *cli.APIClient, princi
 	if strings.TrimSpace(principal.Ref) == "" {
 		return issueworkflow.EntryPolicyPrincipal{}, fmt.Errorf("%s ref is required", typeName)
 	}
-	resolvedType, id, err := resolveAssignee(ctx, client, principal.Ref, kinds)
+	_, id, err := resolveAssignee(ctx, client, principal.Ref, kinds)
 	if err != nil {
 		return issueworkflow.EntryPolicyPrincipal{}, err
-	}
-	if typeName == issueworkflow.AssigneeHuman && resolvedType != "member" {
-		return issueworkflow.EntryPolicyPrincipal{}, errors.New("human ref did not resolve to a member")
 	}
 	return issueworkflow.EntryPolicyPrincipal{Type: typeName, ID: id}, nil
 }
@@ -193,30 +178,26 @@ func resolveWorkflowPrincipal(ctx context.Context, client *cli.APIClient, princi
 func resolveWorkflowFileSpec(ctx context.Context, client *cli.APIClient, file workflowFileSpec) (workflowAPISpec, error) {
 	result := workflowAPISpec{APIVersion: file.APIVersion, Name: file.Name, InitialStatus: file.InitialStatus, Statuses: make([]workflowAPIStatus, 0, len(file.Statuses))}
 	principalCache := make(map[string]issueworkflow.EntryPolicyPrincipal)
-	resolve := func(principal workflowFilePrincipal, executor bool) (issueworkflow.EntryPolicyPrincipal, error) {
-		key := fmt.Sprintf("%t:%s:%s", executor, strings.ToLower(strings.TrimSpace(principal.Type)), strings.TrimSpace(principal.Ref))
+	resolve := func(principal workflowFilePrincipal) (issueworkflow.EntryPolicyPrincipal, error) {
+		key := fmt.Sprintf("%s:%s", strings.ToLower(strings.TrimSpace(principal.Type)), strings.TrimSpace(principal.Ref))
 		if cached, ok := principalCache[key]; ok {
 			return cached, nil
 		}
-		resolved, err := resolveWorkflowPrincipal(ctx, client, principal, executor)
+		resolved, err := resolveWorkflowPrincipal(ctx, client, principal)
 		if err == nil {
 			principalCache[key] = resolved
 		}
 		return resolved, err
 	}
 	for i, status := range file.Statuses {
-		assignee, err := resolve(status.EntryPolicy.Assignee, false)
-		if err != nil {
-			return workflowAPISpec{}, fmt.Errorf("statuses[%d].entry_policy.assignee: %w", i, err)
-		}
-		executor, err := resolve(status.EntryPolicy.Executor, true)
+		executor, err := resolve(status.EntryPolicy.Executor)
 		if err != nil {
 			return workflowAPISpec{}, fmt.Errorf("statuses[%d].entry_policy.executor: %w", i, err)
 		}
 		result.Statuses = append(result.Statuses, workflowAPIStatus{
 			Key: status.Key, Name: status.Name, Description: status.Description,
 			Color: status.Color, Icon: status.Icon, Phase: status.Phase,
-			EntryPolicy: issueworkflow.EntryPolicy{Assignee: assignee, Executor: executor, Instructions: status.EntryPolicy.Instructions, Advance: status.EntryPolicy.Advance, NextStatusKey: status.EntryPolicy.NextStatusKey},
+			EntryPolicy: issueworkflow.EntryPolicy{Executor: executor, Instructions: status.EntryPolicy.Instructions},
 		})
 	}
 	return result, nil
@@ -234,9 +215,8 @@ func workflowResponseToFile(response workflowAPIResponse, includeArchived bool) 
 		file.Statuses = append(file.Statuses, workflowFileStatus{
 			Key: status.SpecKey, Name: status.Name, Description: status.Description, Color: status.Color, Icon: status.Icon, Phase: status.Phase,
 			EntryPolicy: workflowFileEntryPolicy{
-				Assignee:     workflowFilePrincipal{Type: status.EntryPolicy.Assignee.Type, Ref: status.EntryPolicy.Assignee.ID},
 				Executor:     workflowFilePrincipal{Type: status.EntryPolicy.Executor.Type, Ref: status.EntryPolicy.Executor.ID},
-				Instructions: status.EntryPolicy.Instructions, Advance: status.EntryPolicy.Advance, NextStatusKey: status.EntryPolicy.NextStatusKey,
+				Instructions: status.EntryPolicy.Instructions,
 			},
 		})
 	}

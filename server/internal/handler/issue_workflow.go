@@ -418,6 +418,9 @@ func (h *Handler) TransitionIssueStatusNode(w http.ResponseWriter, r *http.Reque
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
 	params.Actor.Type = actorType
+	if actorType == "agent" {
+		params.Actor.TaskID, _ = util.ParseUUID(r.Header.Get("X-Task-ID"))
+	}
 	if actorID != "" {
 		params.Actor.ID, _ = util.ParseUUID(actorID)
 	}
@@ -445,13 +448,13 @@ func (h *Handler) TransitionIssueStatusNode(w http.ResponseWriter, r *http.Reque
 	result, err := h.IssueService.TransitionStatusNode(r.Context(), params)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrIssueHumanConfirmationRequired):
+		case errors.Is(err, service.ErrIssueExecutionSuperseded):
 			writeError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, service.ErrIssueTransitionConflict):
 			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
 		case errors.Is(err, service.ErrIssueTransitionStatusUnavailable):
 			writeError(w, http.StatusConflict, "workflow status is unavailable")
-		case errors.Is(err, service.ErrIssueEntryPolicyExecutorUnavailable), errors.Is(err, service.ErrIssueEntryPolicyAssigneeUnavailable):
+		case errors.Is(err, service.ErrIssueEntryPolicyExecutorUnavailable):
 			writeError(w, http.StatusConflict, err.Error())
 		default:
 			slog.Warn("transition issue workflow status failed", append(logger.RequestAttrs(r), "error", err)...)

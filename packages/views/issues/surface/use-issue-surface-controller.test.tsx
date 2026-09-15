@@ -307,10 +307,8 @@ describe("useIssueSurfaceController", () => {
             phase: "unstarted",
             outcome: null,
             entry_policy: {
-              assignee: { type: "keep" },
               executor: { type: "none" },
               instructions: "",
-              advance: "human_confirms",
             },
             entry_policy_revision: 1,
             archived_at: null,

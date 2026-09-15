@@ -21,27 +21,9 @@ export interface WorkflowStatus {
 
 export function manualEntryPolicy(): IssueWorkflowEntryPolicy {
   return {
-    assignee: { type: "keep" },
     executor: { type: "none" },
     instructions: "",
-    advance: "human_confirms",
   };
-}
-
-/** Connections are materialized by editor operations, never inferred at execution time. */
-function connectWorkflowStatuses(
-  statuses: WorkflowStatus[],
-): WorkflowStatus[] {
-  return statuses.map((status, index) => ({
-    ...status,
-    policy: {
-      ...status.policy,
-      next_status_key:
-        status.phase === "done" || status.phase === "closed"
-          ? ""
-          : (statuses[index + 1]?.key ?? ""),
-    },
-  }));
 }
 
 export function createWorkflowDraft(
@@ -64,11 +46,11 @@ export function createWorkflowDraft(
   );
   return {
     initialKey: statuses[0]?.key ?? "",
-    statuses: connectWorkflowStatuses(statuses),
+    statuses,
   };
 }
 
-/** Preserve explicit links, initial status, and machine keys when opening an existing definition. */
+/** Preserve initial status and machine keys when opening an existing definition. */
 export function workflowFromDefinition(
   data: IssueWorkflowResponse,
 ): WorkflowDraft {
@@ -109,7 +91,7 @@ export function moveWorkflowStatus(
   const [status] = statuses.splice(from, 1);
   if (!status) return draft;
   statuses.splice(to, 0, status);
-  return { ...draft, statuses: connectWorkflowStatuses(statuses) };
+  return { ...draft, statuses };
 }
 
 export function removeWorkflowStatus(
@@ -117,24 +99,7 @@ export function removeWorkflowStatus(
   key: string,
 ): WorkflowDraft {
   if (key === draft.initialKey || draft.statuses.length <= 1) return draft;
-  const removed = draft.statuses.find((s) => s.key === key);
-  // Repair only links to the removed status; keep unrelated custom handoffs.
-  const statuses = draft.statuses
-    .filter((s) => s.key !== key)
-    .map((s) =>
-      s.policy.next_status_key === key
-        ? {
-            ...s,
-            policy: {
-              ...s.policy,
-              next_status_key:
-                removed?.policy.next_status_key === s.key
-                  ? ""
-                  : (removed?.policy.next_status_key ?? ""),
-            },
-          }
-        : s,
-    );
+  const statuses = draft.statuses.filter((s) => s.key !== key);
   return { ...draft, statuses };
 }
 
@@ -145,7 +110,6 @@ export type WorkflowProblem =
   | "executor"
   | "instructions"
   | "initial"
-  | "next"
   | "phase";
 export function workflowProblems(
   draft: WorkflowDraft,
@@ -169,19 +133,10 @@ export function workflowProblems(
       )
     )
       problems.push({ key: s.key, problem: "phase" });
-    if (
-      (s.policy.executor.type !== "none" && !s.policy.executor.id) ||
-      (s.policy.assignee.type !== "keep" && !s.policy.assignee.id)
-    )
+    if (s.policy.executor.type !== "none" && !s.policy.executor.id)
       problems.push({ key: s.key, problem: "executor" });
     if (s.policy.executor.type !== "none" && !s.policy.instructions.trim())
       problems.push({ key: s.key, problem: "instructions" });
-    if (
-      s.policy.next_status_key &&
-      (!keys.has(s.policy.next_status_key) ||
-        s.policy.next_status_key === s.key)
-    )
-      problems.push({ key: s.key, problem: "next" });
   }
   return problems;
 }
@@ -201,7 +156,7 @@ export function workflowToSpec(
       color: s.color,
       icon: s.icon,
       phase: s.phase,
-      entry_policy: structuredClone(s.policy),
+      entry_policy: { executor: { ...s.policy.executor }, instructions: s.policy.instructions },
     })),
   };
 }

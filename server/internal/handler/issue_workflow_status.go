@@ -58,30 +58,20 @@ func (h *Handler) workflowMutationContext(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) validateEntryPolicyReferences(w http.ResponseWriter, r *http.Request, workspaceID string, policy issueworkflow.EntryPolicy) bool {
-	validate := func(principal issueworkflow.EntryPolicyPrincipal, executor bool) bool {
-		if principal.Type == issueworkflow.AssigneeKeep || principal.Type == issueworkflow.ExecutorNone {
-			return true
-		}
-		id, ok := parseUUIDOrBadRequest(w, principal.ID, "entry policy principal id")
-		if !ok {
-			return false
-		}
-		principalType := principal.Type
-		if principalType == issueworkflow.AssigneeHuman {
-			if executor {
-				writeError(w, http.StatusBadRequest, "executor.type must be none, agent, or squad")
-				return false
-			}
-			principalType = "member"
-		}
-		if status, message := h.validateAssigneePair(r.Context(), r, workspaceID,
-			pgtype.Text{String: principalType, Valid: true}, id); status != 0 {
-			writeError(w, status, message)
-			return false
-		}
+	principal := policy.Executor
+	if principal.Type == issueworkflow.ExecutorNone {
 		return true
 	}
-	return validate(policy.Assignee, false) && validate(policy.Executor, true)
+	id, ok := parseUUIDOrBadRequest(w, principal.ID, "entry policy executor id")
+	if !ok {
+		return false
+	}
+	if status, message := h.validateAssigneePair(r.Context(), r, workspaceID,
+		pgtype.Text{String: principal.Type, Valid: true}, id); status != 0 {
+		writeError(w, status, message)
+		return false
+	}
+	return true
 }
 
 func (h *Handler) publishIssueWorkflowChanged(workspaceID string, member db.Member, action string, workflowID pgtype.UUID) {
@@ -183,20 +173,6 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load workflow statuses")
 		return
-	}
-
-	if req.EntryPolicy != nil && normalizedPolicy.NextStatusKey != "" {
-		found := false
-		for _, status := range active {
-			if status.ID != current.ID && status.SpecKey == normalizedPolicy.NextStatusKey {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeError(w, http.StatusBadRequest, "next_status_key must reference another active status in this workflow")
-			return
-		}
 	}
 
 	name := current.Name

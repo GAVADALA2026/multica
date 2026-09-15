@@ -144,15 +144,6 @@ func (h *Handler) normalizeWorkflowSpec(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "initial_status must reference a status key in this workflow")
 		return normalizedWorkflowSpec{}, false
 	}
-	for _, status := range normalized.statuses {
-		next := status.policyValue.NextStatusKey
-		if next != "" {
-			if _, exists := seenKeys[next]; !exists || next == status.Key {
-				writeError(w, http.StatusBadRequest, "next_status_key must reference another status in this workflow")
-				return normalizedWorkflowSpec{}, false
-			}
-		}
-	}
 	return normalized, true
 }
 

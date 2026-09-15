@@ -2252,10 +2252,8 @@ describe("issue workflow schemas", () => {
     phase: "started",
     outcome: null,
     entry_policy: {
-      assignee: { type: "keep" },
       executor: { type: "agent", id: "agent-1" },
       instructions: "Implement the issue.",
-      advance: "executor_may_transition",
     },
     entry_policy_revision: 3,
     archived_at: null,
@@ -2286,10 +2284,8 @@ describe("issue workflow schemas", () => {
       mode: "custom",
     });
     expect(parsed.statuses[0]?.entry_policy).toEqual({
-      assignee: { type: "keep" },
       executor: { type: "none" },
       instructions: "",
-      advance: "human_confirms",
     });
   });
 
@@ -2404,12 +2400,8 @@ describe("TaskMessageListSchema", () => {
   });
 });
 
-it("accepts old workflow policies but rejects malformed handoff destinations", () => {
-  const manual = {
-    assignee: { type: "keep" }, executor: { type: "none" },
-    instructions: "", advance: "human_confirms",
-  };
-  expect(IssueWorkflowEntryPolicySchema.parse(manual).next_status_key).toBeUndefined();
-  expect(IssueWorkflowEntryPolicySchema.parse({ ...manual, next_status_key: "review" }).next_status_key).toBe("review");
-  expect(IssueWorkflowEntryPolicySchema.safeParse({ ...manual, next_status_key: 42 }).success).toBe(false);
+it("parses executor instructions and rejects malformed executors", () => {
+  const manual = { executor: { type: "none" }, instructions: "" };
+  expect(IssueWorkflowEntryPolicySchema.parse(manual)).toEqual(manual);
+  expect(IssueWorkflowEntryPolicySchema.safeParse({ executor: { type: "agent", id: 42 } }).success).toBe(false);
 });

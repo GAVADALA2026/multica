@@ -10,12 +10,13 @@ import {
 } from "@multica/core/issue-workflows";
 import { projectListOptions } from "@multica/core/projects";
 import {
-  memberListOptions,
   agentListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import enProjects from "../../locales/en/projects.json";
+import enIssues from "../../locales/en/issues.json";
 import { WorkflowSetup, type WorkflowSetupScreen } from "./workflow-setup";
+vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 
 function Harness() {
@@ -37,7 +38,6 @@ function setup(copy = false) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   for (const query of [
-    memberListOptions("ws"),
     agentListOptions("ws"),
     squadListOptions("ws"),
   ])
@@ -61,17 +61,15 @@ function setup(copy = false) {
           description: "",
           archived_at: null,
           entry_policy: {
-            assignee: { type: "keep" },
             executor: { type: "none" },
             instructions: "",
-            advance: "human_confirms",
           },
         },
       ],
     });
   }
   render(
-    <I18nProvider locale="en" resources={{ en: { projects: enProjects } }}>
+    <I18nProvider locale="en" resources={{ en: { projects: enProjects, issues: enIssues } }}>
       <QueryClientProvider client={qc}>
         <Harness />
       </QueryClientProvider>
@@ -80,30 +78,19 @@ function setup(copy = false) {
   return qc;
 }
 describe("workflow setup", () => {
-  it("separates workflow sources from specific templates and opens the shared status editor", async () => {
+  it("defaults to inheritance and allows creating a workflow or copying a project", async () => {
     setup();
     const user = userEvent.setup();
-    expect(
-      screen.getByRole("button", { name: /Start from scratch/ }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: /Copy from a project/ }),
-    ).toBeVisible();
-    expect(
-      screen.queryByText("Software development and review"),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Use a template/ }));
-    await user.click(
-      screen.getByRole("button", { name: /Software development and review/ }),
-    );
-    expect(screen.getByLabelText("Status name")).toHaveValue("Ready");
-    await user.click(
-      screen.getByRole("button", { name: /Code review.*Choose an agent/ }),
-    );
-    expect(screen.getByLabelText("Status name")).toHaveValue("Code review");
-    expect(
-      screen.getByLabelText("Action instructions"),
-    ).toHaveValue(enProjects.workflow.review_prompt);
+    expect(screen.getByRole("button", { name: /Inherit from workspace/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Create a new workflow/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Copy from a project/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /template/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Create a new workflow/ }));
+    expect(screen.getByLabelText("Status name")).toHaveValue("Todo");
+    await user.click(screen.getByRole("button", { name: "Change workflow source" }));
+    await user.click(screen.getByRole("button", { name: /Inherit from workspace/ }));
+    expect(screen.getByRole("button", { name: /Inherit from workspace/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 });
 
@@ -121,12 +108,8 @@ it("previews a source project before copying its statuses into the local editor"
 });
 
 
-it("configures the owner and action independently", async () => {
+it("chooses an action type before its target and clears the target when switching types", async () => {
   const qc = setup();
-  qc.setQueryData(memberListOptions("ws").queryKey, [{
-    id: "member", workspace_id: "ws", user_id: "owner", name: "Alex",
-    role: "member", created_at: "", email: "alex@example.test", avatar_url: null,
-  }]);
   qc.setQueryData(agentListOptions("ws").queryKey, [{
     id: "executor", name: "Reviewer", workspace_id: "ws", runtime_id: "runtime",
     description: "", instructions: "", avatar_url: null, runtime_mode: "local",
@@ -135,21 +118,55 @@ it("configures the owner and action independently", async () => {
     max_concurrent_tasks: 1, model: "", owner_id: "owner", skills: [],
     created_at: "", updated_at: "", archived_at: null, archived_by: null,
   }]);
+  qc.setQueryData(squadListOptions("ws").queryKey, [{
+    id: "squad", workspace_id: "ws", name: "Review team", description: "",
+    instructions: "", avatar_url: null, leader_id: "executor", creator_id: "owner",
+    created_at: "", updated_at: "", archived_at: null, archived_by: null,
+  }]);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Start from scratch/ }));
-  await user.click(screen.getByRole("combobox", { name: "Owner" }));
-  await user.click(await screen.findByRole("option", { name: "Alex" }));
+  await user.click(screen.getByRole("button", { name: /Create a new workflow/ }));
+  expect(screen.queryByRole("combobox", { name: "Owner" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Next status" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Action instructions")).not.toBeInTheDocument();
   await user.click(screen.getByRole("combobox", { name: "Run on entry" }));
-  await user.click(await screen.findByRole("option", { name: "Reviewer · Agent" }));
-  expect(screen.getByRole("combobox", { name: "Owner" })).toHaveTextContent("Alex");
-  await user.click(screen.getByRole("combobox", { name: "Owner" }));
-  await user.click(await screen.findByRole("option", { name: "Keep current assignee" }));
-  expect(screen.getByRole("combobox", { name: "Run on entry" })).toHaveTextContent("Reviewer · Agent");
-  await user.click(screen.getByRole("combobox", { name: "How does work advance?" }));
-  await user.click(await screen.findByRole("option", { name: "Allow the executor to advance" }));
+  expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual(["No action", "Run an agent", "Run a squad"]);
+  await user.click(screen.getByRole("option", { name: "Run an agent" }));
+  expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Choose an agent…");
+  await user.click(screen.getByRole("button", { name: "Agent" }));
+  expect(await screen.findByRole("button", { name: "Reviewer" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Review team" })).not.toBeInTheDocument();
+  await user.type(screen.getByPlaceholderText("Search agents…"), "missing");
+  expect(screen.queryByRole("button", { name: "Reviewer" })).not.toBeInTheDocument();
+  await user.clear(screen.getByPlaceholderText("Search agents…"));
+  await user.type(screen.getByPlaceholderText("Search agents…"), "review");
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Reviewer");
+  await user.type(screen.getByLabelText("Action instructions"), "Review the change");
+  await user.click(screen.getByRole("combobox", { name: "Run on entry" }));
+  await user.click(await screen.findByRole("option", { name: "Run a squad" }));
+  expect(screen.queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Squad" })).toHaveTextContent("Choose a squad…");
+  expect(screen.getByLabelText("Action instructions")).toHaveValue("Review the change");
+  await user.click(screen.getByRole("button", { name: "Squad" }));
+  expect(await screen.findByRole("button", { name: "Review team" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Reviewer" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Review team/ }));
   await user.click(screen.getByRole("combobox", { name: "Run on entry" }));
   await user.click(await screen.findByRole("option", { name: "No action" }));
+  expect(screen.queryByRole("button", { name: "Squad" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Action instructions")).not.toBeInTheDocument();
   await user.click(screen.getByRole("combobox", { name: "Run on entry" }));
-  await user.click(await screen.findByRole("option", { name: "Reviewer · Agent" }));
-  expect(screen.getByRole("combobox", { name: "How does work advance?" })).toHaveTextContent("Wait for human confirmation");
+  await user.click(await screen.findByRole("option", { name: "Run an agent" }));
+  expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Choose an agent…");
+  expect(screen.getByLabelText("Action instructions")).toHaveValue("");
+});
+
+it("shows an empty target list without mixing the other executor type into it", async () => {
+  setup();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /Create a new workflow/ }));
+  await user.click(screen.getByRole("combobox", { name: "Run on entry" }));
+  await user.click(await screen.findByRole("option", { name: "Run a squad" }));
+  await user.click(screen.getByRole("button", { name: "Squad" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("No squads available");
 });

@@ -8,18 +8,12 @@ import (
 )
 
 const (
-	AssigneeKeep  = "keep"
-	AssigneeHuman = "human"
-	ExecutorNone  = "none"
-
-	AdvanceExecutorMayTransition = "executor_may_transition"
-	AdvanceHumanConfirms         = "human_confirms"
+	ExecutorNone = "none"
 
 	MaxEntryInstructionsRunes = 8000
 )
 
-// EntryPolicyPrincipal is a typed assignee or executor reference. Assignee
-// supports keep/human/agent/squad; executor supports none/agent/squad. The
+// EntryPolicyPrincipal references an executor: none, agent, or squad. The
 // storage envelope stays JSON so a future workflow executor can be added
 // without changing the workflow-status table.
 type EntryPolicyPrincipal struct {
@@ -31,19 +25,13 @@ type EntryPolicyPrincipal struct {
 // a status. Defaults describe a purely manual status with no responsibility
 // change, matching the historical empty JSON policy seeded by migrations.
 type EntryPolicy struct {
-	Assignee     EntryPolicyPrincipal `json:"assignee"`
 	Executor     EntryPolicyPrincipal `json:"executor"`
 	Instructions string               `json:"instructions"`
-	Advance      string               `json:"advance"`
-	// NextStatusKey selects a handoff destination explicitly; order is presentation only.
-	NextStatusKey string `json:"next_status_key,omitempty"`
 }
 
 func DefaultEntryPolicy() EntryPolicy {
 	return EntryPolicy{
-		Assignee: EntryPolicyPrincipal{Type: AssigneeKeep},
 		Executor: EntryPolicyPrincipal{Type: ExecutorNone},
-		Advance:  AdvanceHumanConfirms,
 	}
 }
 
@@ -52,27 +40,8 @@ func DefaultEntryPolicy() EntryPolicy {
 // permission are request-context checks owned by the handler.
 func NormalizeEntryPolicy(policy EntryPolicy) (EntryPolicy, error) {
 	defaults := DefaultEntryPolicy()
-	if policy.Assignee.Type == "" {
-		policy.Assignee.Type = defaults.Assignee.Type
-	}
 	if policy.Executor.Type == "" {
 		policy.Executor.Type = defaults.Executor.Type
-	}
-	if policy.Advance == "" {
-		policy.Advance = defaults.Advance
-	}
-
-	switch policy.Assignee.Type {
-	case AssigneeKeep:
-		if policy.Assignee.ID != "" {
-			return EntryPolicy{}, errors.New("assignee.id must be empty when assignee.type is keep")
-		}
-	case AssigneeHuman, "agent", "squad":
-		if strings.TrimSpace(policy.Assignee.ID) == "" {
-			return EntryPolicy{}, fmt.Errorf("assignee.id is required when assignee.type is %s", policy.Assignee.Type)
-		}
-	default:
-		return EntryPolicy{}, errors.New("assignee.type must be keep, human, agent, or squad")
 	}
 
 	switch policy.Executor.Type {
@@ -93,12 +62,6 @@ func NormalizeEntryPolicy(policy EntryPolicy) (EntryPolicy, error) {
 
 	if len([]rune(policy.Instructions)) > MaxEntryInstructionsRunes {
 		return EntryPolicy{}, fmt.Errorf("instructions must be at most %d characters", MaxEntryInstructionsRunes)
-	}
-	if policy.Advance != AdvanceExecutorMayTransition && policy.Advance != AdvanceHumanConfirms {
-		return EntryPolicy{}, errors.New("advance must be executor_may_transition or human_confirms")
-	}
-	if policy.Executor.Type == ExecutorNone && policy.Advance == AdvanceExecutorMayTransition {
-		return EntryPolicy{}, errors.New("executor_may_transition requires an executor")
 	}
 	return policy, nil
 }

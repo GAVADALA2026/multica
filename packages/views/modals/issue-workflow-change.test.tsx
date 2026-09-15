@@ -58,10 +58,8 @@ function flow(id: string): IssueWorkflowResponse {
       outcome: index ? "completed" : null,
       archived_at: null,
       entry_policy: {
-        assignee: { type: "keep" },
         executor: { type: "none" },
         instructions: "",
-        advance: "human_confirms",
       },
       entry_policy_revision: 1,
       created_at: "",

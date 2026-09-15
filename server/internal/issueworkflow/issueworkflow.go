@@ -209,6 +209,8 @@ func SyncDefault(ctx context.Context, q Querier, workspaceID pgtype.UUID) error 
 type TransitionActor struct {
 	Type string
 	ID   pgtype.UUID
+	// TaskID identifies the authenticated run, not merely its agent.
+	TaskID pgtype.UUID
 }
 
 // RecordTransition appends the immutable transition corresponding to a

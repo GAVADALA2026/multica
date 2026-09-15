@@ -11,25 +11,18 @@ import {
 import type { IssueWorkflowResponse } from "../types";
 
 describe("workflow drafts", () => {
-  it("materializes order as explicit handoffs without running or assigning an agent", () => {
+  it("reorders statuses without changing their actions or initial status", () => {
     const draft = createWorkflowDraft(["Ready", "Work", "Review", "Done"]);
+    draft.statuses[2]!.policy = { executor: { type: "agent", id: "reviewer" }, instructions: "Review the change" };
     const reordered = moveWorkflowStatus(draft, 2, 1);
     expect(reordered.initialKey).toBe(draft.initialKey);
-    expect(reordered.statuses.map((s) => s.policy.next_status_key)).toEqual([
-      "status_3",
-      "status_2",
-      "status_4",
-      "",
-    ]);
-    expect(draft.statuses[0]?.policy.next_status_key).toBe("status_2");
-    expect(
-      reordered.statuses.every((s) => s.policy.executor.type === "none"),
-    ).toBe(true);
+    expect(reordered.statuses).toEqual([draft.statuses[0], draft.statuses[2], draft.statuses[1], draft.statuses[3]]);
+    expect(draft.statuses.map((s) => s.name)).toEqual(["Ready", "Work", "Review", "Done"]);
   });
 
-  it("preserves stable keys, initial identity, and explicit nonsequential links on import", () => {
+  it("preserves stable keys, initial identity, and independent actions on import", () => {
     const draft = createWorkflowDraft(["Ready", "Review", "Work", "Done"]);
-    draft.statuses[0]!.policy.next_status_key = "status_3";
+    draft.statuses[0]!.policy.instructions = "Review the specification";
     draft.statuses[0]!.icon = "three_quarters";
     const definition = {
       mode: "custom",
@@ -46,43 +39,38 @@ describe("workflow drafts", () => {
     const copied = workflowFromDefinition(definition);
     expect(copied.initialKey).toBe("status_3");
     expect(workflowToSpec(copied, "New project").statuses[0]?.icon).toBe("three_quarters");
-    expect(copied.statuses[0]?.policy.next_status_key).toBe("status_3");
-    copied.statuses[0]!.policy.next_status_key = "status_4";
-    expect(draft.statuses[0]?.policy.next_status_key).toBe("status_3");
+    expect(copied.statuses[0]?.policy.instructions).toBe("Review the specification");
+    copied.statuses[0]!.policy.instructions = "Changed instructions";
+    expect(draft.statuses[0]?.policy.instructions).toBe("Review the specification");
     expect(workflowToSpec(copied, "New project").statuses[0]?.key).toBe(
       "status_1",
     );
   });
 
-  it("repairs incoming links when removing a status while retaining unrelated links", () => {
+  it("removes only the selected status and preserves the initial status", () => {
     const draft = createWorkflowDraft(["Ready", "Work", "Review", "Done"]);
     const next = removeWorkflowStatus(draft, "status_2");
-    expect(next.statuses[0]?.policy.next_status_key).toBe("status_3");
-    expect(next.statuses[1]?.policy.next_status_key).toBe("status_4");
+    expect(next.statuses).toEqual([draft.statuses[0], draft.statuses[2], draft.statuses[3]]);
     expect(removeWorkflowStatus(draft, draft.initialKey)).toBe(draft);
   });
 
-  it("blocks unresolved participants and missing instructions in automated templates", () => {
+  it("blocks unresolved participants and missing instructions in automated statuses", () => {
     const draft = createWorkflowDraft(["Ready", "Work", "Done"]);
     draft.statuses[1]!.policy.executor = { type: "agent", id: "" };
-    draft.statuses[1]!.policy.assignee = { type: "agent", id: "" };
     expect(workflowProblems(draft).map((p) => p.problem)).toEqual([
       "executor",
       "instructions",
     ]);
     draft.statuses[1]!.policy.executor = { type: "agent", id: "agent" };
-    draft.statuses[1]!.policy.assignee = { type: "agent", id: "agent" };
     draft.statuses[1]!.policy.instructions = "Implement and report";
     expect(workflowProblems(draft)).toEqual([]);
   });
 
-  it("rejects ambiguous status names, stale handoff targets and a missing starting status", () => {
+  it("rejects ambiguous status names and a missing starting status", () => {
     const draft = createWorkflowDraft([" Review ", "review"]);
     draft.initialKey = "gone";
-    draft.statuses[0]!.policy.next_status_key = "gone";
     expect(workflowProblems(draft).map((p) => p.problem)).toEqual([
       "initial",
-      "next",
       "duplicate",
     ]);
   });

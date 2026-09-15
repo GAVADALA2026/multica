@@ -5,7 +5,7 @@ import { statusCategoryOfKey } from "@multica/core/issues";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Issue, IssueWorkflowStatusNode } from "@multica/core/types";
-import { issueWorkflowOptions, issueAutomationExecutionsOptions, workflowHandoff, activeWorkflowStatuses } from "@multica/core/issue-workflows";
+import { issueWorkflowOptions, issueAutomationExecutionsOptions, workflowExecutionState, activeWorkflowStatuses } from "@multica/core/issue-workflows";
 import { useTransitionIssueStatusNode } from "@multica/core/issues/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -30,7 +30,7 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
   const data = workflowQuery.data;
   const transition = useTransitionIssueStatusNode();
   const executions = useQuery(issueAutomationExecutionsOptions(wsId, issue.id));
-  const { active } = workflowHandoff(issue, [], executions.data ?? []);
+  const { active } = workflowExecutionState(issue, executions.data ?? []);
   const [preview, setPreview] = useState<{ node: IssueWorkflowStatusNode; revision: number } | null>(null);
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -91,7 +91,7 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
             onClick={() => {
               if (!data?.workflow.id) return;
               if (status.id === issue.workflow_status_id) { setOpen(false); return; }
-              if (!executions.isSuccess || active || status.entry_policy.executor.type !== "none" || status.entry_policy.assignee.type !== "keep") {
+              if (!executions.isSuccess || active || status.entry_policy.executor.type !== "none") {
                 setPreview({ node: status, revision: data.workflow.revision });
                 setOpen(false);
                 return;
@@ -111,7 +111,7 @@ export function WorkflowStatusPicker({ issue, align = "start", trigger, open: co
               className="h-3.5 w-3.5"
             />
             <span className="min-w-0 flex-1 text-left"><span className="block truncate">{status.name}</span>
-              {(status.entry_policy.executor.type !== "none" || status.entry_policy.assignee.type !== "keep") && <WorkflowEntryEffects node={status} />}
+              {(status.entry_policy.executor.type !== "none") && <WorkflowEntryEffects node={status} />}
             </span>
           </PickerItem>
         );

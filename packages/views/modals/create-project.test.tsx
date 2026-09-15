@@ -231,21 +231,50 @@ it("waits for workflow setup, submits project and workflow together, and keeps t
   await user.type(screen.getByPlaceholderText("Project title"), "Launch");
   await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
   expect(createProject).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: /Start from scratch/ }));
+  await user.click(screen.getByRole("button", { name: /Create a new workflow/ }));
   await user.click(screen.getByRole("button", { name: "Change workflow source" }));
   expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "Back" }));
   await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
   expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /Start from scratch/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Create a new workflow/ })).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   await user.click(screen.getByRole("button", { name: "Create Project" }));
   await waitFor(() => expect(createProject).toHaveBeenCalledTimes(1));
-  expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ title: "Launch", description: "Project goal", issue_workflow: expect.objectContaining({ api_version: 1, initial_status: "status_1", statuses: expect.arrayContaining([expect.objectContaining({ name: "Ready" }), expect.objectContaining({ name: "Done" })]) }) }));
+  expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ title: "Launch", description: "Project goal", issue_workflow: expect.objectContaining({ api_version: 1, initial_status: "status_1", statuses: [expect.objectContaining({ name: "Todo", phase: "unstarted" }), expect.objectContaining({ name: "In Progress", phase: "started" }), expect.objectContaining({ name: "Done", phase: "done" })] }) }));
   expect(onClose).not.toHaveBeenCalled();
-  expect(useProjectDraftStore.getState().draft.workflow?.statuses).toHaveLength(2);
+  expect(useProjectDraftStore.getState().draft.workflow?.statuses).toHaveLength(3);
   await user.click(screen.getByRole("button", { name: "Create Project" }));
   await waitFor(() => expect(push).toHaveBeenCalledWith("/test-workspace/projects/new-project?view=workflow"));
   expect(onClose).toHaveBeenCalledOnce();
   expect(useProjectDraftStore.getState().draft.workflow).toBeUndefined();
+});
+
+
+it("creates with workspace inheritance by default without sending a custom workflow", async () => {
+  const user = userEvent.setup();
+  renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+  await user.type(screen.getByPlaceholderText("Project title"), "Inherited project");
+  await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
+  expect(screen.getByRole("button", { name: "Create Project" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: /template/i })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Create Project" }));
+  await waitFor(() => expect(createProject).toHaveBeenCalledOnce());
+  expect(createProject.mock.calls[0]![0]).not.toHaveProperty("issue_workflow");
+  expect(push).toHaveBeenCalledWith("/test-workspace/projects/new-project");
+});
+
+it("discards a custom draft when switching back to workspace inheritance", async () => {
+  const user = userEvent.setup();
+  renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+  await user.type(screen.getByPlaceholderText("Project title"), "Inherited project");
+  await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
+  await user.click(screen.getByRole("button", { name: /Create a new workflow/ }));
+  expect(useProjectDraftStore.getState().draft.workflow).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Change workflow source" }));
+  await user.click(screen.getByRole("button", { name: /Inherit from workspace/ }));
+  expect(useProjectDraftStore.getState().draft.workflow).toBeUndefined();
+  await user.click(screen.getByRole("button", { name: "Create Project" }));
+  await waitFor(() => expect(createProject).toHaveBeenCalledOnce());
+  expect(createProject.mock.calls[0]![0]).not.toHaveProperty("issue_workflow");
 });

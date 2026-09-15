@@ -23,10 +23,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 it("edits the complete definition locally and saves once with its original revision", async () => {
   const user = userEvent.setup();
   const policy = {
-    assignee: { type: "keep" },
     executor: { type: "none" },
     instructions: "",
-    advance: "human_confirms",
   };
   const definition = {
     workflow: {
@@ -45,7 +43,7 @@ it("edits the complete definition locally and saves once with its original revis
         color: "#6552cb",
         phase: "started",
         position: 0,
-        entry_policy: { ...policy, next_status_key: "code_review" },
+        entry_policy: { ...policy },
       },
       {
         id: "review",
@@ -98,7 +96,8 @@ it("edits the complete definition locally and saves once with its original revis
               key: "implementation",
               name: "Build",
               entry_policy: expect.objectContaining({
-                next_status_key: "code_review",
+                executor: { type: "none" },
+                instructions: "",
               }),
             }),
           ]),

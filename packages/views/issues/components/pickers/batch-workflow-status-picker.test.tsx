@@ -60,10 +60,8 @@ function setup(mixed: boolean) {
         created_at: "",
         updated_at: "",
         entry_policy: {
-          assignee: { type: "keep" },
           executor: { type: "none" },
           instructions: "",
-          advance: "human_confirms",
         },
       },
     ],

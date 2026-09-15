@@ -122,7 +122,7 @@ test.describe("project-scoped issue workflow", () => {
     }
   });
 
-  test("runs agent, squad, human takeover, re-entry, and replay cases", async ({ page }, testInfo) => {
+  test("runs agent, squad, manual status changes, re-entry, and replay cases", async ({ page }, testInfo) => {
     const suffix = Date.now();
     const agentName = `Workflow Agent ${suffix}`;
     const squadName = `Workflow Squad ${suffix}`;
@@ -170,10 +170,8 @@ test.describe("project-scoped issue workflow", () => {
       color: "#2563eb",
       phase: "unstarted",
       entry_policy: {
-        assignee: { type: "agent", id: agentId },
         executor: { type: "agent", id: agentId },
         instructions: "Implement the scoped change and report the result.",
-        advance: "executor_may_transition",
       },
     });
     workflow = await updateStatus(api, workspaceId, workflow, "in_progress", {
@@ -182,10 +180,8 @@ test.describe("project-scoped issue workflow", () => {
       color: "#7c3aed",
       phase: "started",
       entry_policy: {
-        assignee: { type: "squad", id: squadId },
         executor: { type: "squad", id: squadId },
         instructions: "Coordinate the implementation as a squad.",
-        advance: "human_confirms",
       },
     });
     workflow = await updateStatus(api, workspaceId, workflow, "in_review", {
@@ -194,10 +190,8 @@ test.describe("project-scoped issue workflow", () => {
       color: "#d97706",
       phase: "started",
       entry_policy: {
-        assignee: { type: "human", id: userId },
         executor: { type: "none" },
         instructions: "",
-        advance: "human_confirms",
       },
     });
 
@@ -215,36 +209,22 @@ test.describe("project-scoped issue workflow", () => {
     const issue = await api.createIssue(issueTitle, { project_id: projectId, status: "todo", priority: "high" }) as IssueResponse;
     expect(issue.workflow_id).toBe(workflow.workflow.id);
     expect(issue.workflow_status_id).toBe(todo.id);
-    expect(issue.assignee_type).toBe("agent");
-    expect(issue.assignee_id).toBe(agentId);
+    expect(issue.assignee_type).toBeNull();
+    expect(issue.assignee_id).toBeNull();
 
     await page.goto(`/${(await api.getWorkspaces())[0]?.slug}/issues/${issue.id}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText(issueTitle).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Ready for Agent", exact: true }).first()).toBeVisible();
-    const automationSection = page.getByRole("region", { name: "Next step", exact: true });
-    await expect(automationSection).toBeVisible();
-    await expect(automationSection.getByText(agentName)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Take over" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Status action", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Execution log", exact: true })).toBeVisible();
     await capture(page, testInfo, "02-agent-entry-queued.png");
 
-    await page.getByRole("button", { name: "Take over" }).click();
-    await expect(page.getByRole("button", { name: "Take over" })).toBeHidden();
-    let executions = await request<AutomationExecution[]>(api, workspaceId, `/api/issues/${issue.id}/automation-executions`);
-    expect(executions).toHaveLength(1);
-    expect(executions[0]).toMatchObject({ status: "superseded", executor_type: "agent", executor_id: agentId });
-
     await chooseStatus(page, "Ready for Agent", "Squad Build");
-    await expect(automationSection.getByText(squadName)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Take over" })).toBeVisible();
     await capture(page, testInfo, "03-squad-entry-queued.png");
 
     await chooseStatus(page, "Squad Build", "Human Review");
-    await expect(automationSection).toBeHidden();
-    await expect(page.getByRole("button", { name: "Take over" })).toBeHidden();
 
     await chooseStatus(page, "Human Review", "Ready for Agent");
-    await expect(automationSection.getByText(agentName)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Take over" })).toBeVisible();
     await expect(page.getByText(/changed status from Human Review to Ready for Agent/i)).toBeVisible();
     await capture(page, testInfo, "04-agent-reentry-queued.png");
 
@@ -259,7 +239,7 @@ test.describe("project-scoped issue workflow", () => {
     });
     expect(replay).toMatchObject({ transition: null, execution: null, task_id: null });
 
-    executions = await request<AutomationExecution[]>(api, workspaceId, `/api/issues/${issue.id}/automation-executions`);
+    const executions = await request<AutomationExecution[]>(api, workspaceId, `/api/issues/${issue.id}/automation-executions`);
     expect(executions).toHaveLength(4);
     expect(executions.map((execution) => execution.status)).toEqual([
       "queued",

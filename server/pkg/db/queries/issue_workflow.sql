@@ -385,32 +385,7 @@ WHERE i.id = sqlc.arg('issue_id')::uuid
   AND s.archived_at IS NULL
 RETURNING i.*;
 
--- name: UpdateIssueWorkflowStatusAndAssignee :one
--- Entry policy is applied at the same serialization boundary as the status
--- node. The caller has already resolved "keep" to the current persisted
--- assignee, so nullable values here mean an explicitly unassigned issue.
-UPDATE issue AS i
-SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'unstarted' THEN 'todo'
-        WHEN 'done' THEN 'done'
-        WHEN 'closed' THEN 'cancelled'
-        ELSE 'in_progress'
-    END),
-    workflow_status_id = s.id,
-    assignee_type = sqlc.narg('assignee_type')::text,
-    assignee_id = sqlc.narg('assignee_id')::uuid,
-    revision = i.revision + 1,
-    updated_at = now()
-FROM issue_workflow_status AS s
-WHERE i.id = sqlc.arg('issue_id')::uuid
-  AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND s.id = sqlc.arg('workflow_status_id')::uuid
-  AND s.workspace_id = i.workspace_id
-  AND s.workflow_id = i.workflow_id
-  AND s.archived_at IS NULL
-RETURNING i.*;
-
--- name: UpdateIssueAssigneeFromEntryPolicy :one
+-- name: UpdateIssueAssigneeForTakeover :one
 UPDATE issue
 SET assignee_type = sqlc.narg('assignee_type')::text,
     assignee_id = sqlc.narg('assignee_id')::uuid,
@@ -485,7 +460,17 @@ UPDATE automation_execution
 SET status = 'superseded', updated_at = now()
 WHERE issue_id = sqlc.arg('issue_id')::uuid
   AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND trigger_transition_id = sqlc.arg('trigger_transition_id')::uuid
   AND status IN ('pending', 'queued', 'running')
+  -- A run that moves its own issue is handing work off. Let the daemon
+  -- report its actual result instead of cancelling it mid-response.
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS task
+      WHERE task.automation_execution_id = automation_execution.id
+        AND task.id = sqlc.narg('actor_task_id')::uuid
+        AND task.agent_id = sqlc.narg('actor_agent_id')::uuid
+        AND task.status = 'running'
+  )
 RETURNING *;
 
 -- name: SupersedeAutomationExecution :one

@@ -3415,7 +3415,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		statusChanges = statusChanges || workflowBinding.WorkflowID != current.WorkflowID || workflowBinding.WorkflowStatusID != current.WorkflowStatusID
 	}
 	if statusChanges {
-		if err := service.AssertIssueWorkflowAdvance(ctx, qtx, current, actor); err != nil {
+		if err := service.AssertIssueWorkflowWriteAllowed(ctx, qtx, current, actor); err != nil {
 			return db.Issue{}, current, false, err
 		}
 	}
@@ -3535,6 +3535,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// the same transaction as the issue mutation.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	transitionActor := issueworkflow.TransitionActor{Type: actorType}
+	if actorType == "agent" {
+		transitionActor.TaskID, _ = util.ParseUUID(r.Header.Get("X-Task-ID"))
+	}
 	if actorID != "" {
 		transitionActor.ID, _ = util.ParseUUID(actorID)
 	}
@@ -3848,7 +3851,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
 			return
 		}
-		if errors.Is(err, service.ErrIssueHumanConfirmationRequired) {
+		if errors.Is(err, service.ErrIssueExecutionSuperseded) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
@@ -4375,6 +4378,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	transitionActor := issueworkflow.TransitionActor{Type: actorType}
+	if actorType == "agent" {
+		transitionActor.TaskID, _ = util.ParseUUID(r.Header.Get("X-Task-ID"))
+	}
 	if actorID != "" {
 		transitionActor.ID, _ = util.ParseUUID(actorID)
 	}

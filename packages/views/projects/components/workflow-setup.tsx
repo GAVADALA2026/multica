@@ -6,7 +6,8 @@ import {
   ArrowLeft,
   ChevronRight,
   Copy,
-  LayoutTemplate,
+  Check,
+  GitBranch,
   Plus,
 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -103,11 +104,8 @@ function CopyProjectWorkflow({
           <div className="flex flex-wrap items-center gap-2">
             {workflow.data.statuses
               .filter((s) => !s.archived_at)
-              .map((s, i) => (
+              .map((s) => (
                 <span key={s.id} className="flex items-center gap-2 text-body">
-                  {i > 0 && (
-                    <ChevronRight className="size-3 text-muted-foreground" />
-                  )}
                   {s.name}
                 </span>
               ))}
@@ -133,7 +131,7 @@ function CopyProjectWorkflow({
   );
 }
 
-export type WorkflowSetupScreen = "source" | "templates" | "copy" | "editor";
+export type WorkflowSetupScreen = "source" | "copy" | "editor";
 
 export function WorkflowSetup({
   value,
@@ -144,7 +142,7 @@ export function WorkflowSetup({
   onScreenChange: setScreen,
 }: {
   value?: WorkflowDraft;
-  onChange: (draft: WorkflowDraft) => void;
+  onChange: (draft: WorkflowDraft | undefined) => void;
   showErrors: boolean;
   disabled: boolean;
   screen: WorkflowSetupScreen;
@@ -155,47 +153,23 @@ export function WorkflowSetup({
     onChange(draft);
     setScreen("editor");
   };
-  const ready = t(($) => $.workflow.ready),
-    done = t(($) => $.workflow.done);
-  const chooseTemplate = (kind: "simple" | "development") => {
-    const draft =
-      kind === "simple"
-        ? createWorkflowDraft(
-            [ready, t(($) => $.workflow.working), done],
-          )
-        : createWorkflowDraft(
-            [
-              ready,
-              t(($) => $.workflow.develop),
-              t(($) => $.workflow.review),
-              t(($) => $.workflow.accept),
-              done,
-            ],
-          );
-    if (kind === "development") {
-      for (const status of draft.statuses.slice(1, 3)) {
-        status.policy.assignee = { type: "agent", id: "" };
-        status.policy.executor = { type: "agent", id: "" };
-      }
-      draft.statuses[1]!.policy.instructions = t(
-        ($) => $.workflow.develop_prompt,
-      );
-      draft.statuses[2]!.policy.instructions = t(($) => $.workflow.review_prompt);
-    }
-    pick(draft);
-  };
   const origins = [
+    {
+      icon: GitBranch,
+      title: t(($) => $.workflow.inherit),
+      hint: t(($) => $.workflow.inherit_hint),
+      selected: !value,
+      action: () => onChange(undefined),
+    },
     {
       icon: Plus,
       title: t(($) => $.workflow.blank),
       hint: t(($) => $.workflow.blank_hint),
-      action: () => pick(createWorkflowDraft([ready, done])),
-    },
-    {
-      icon: LayoutTemplate,
-      title: t(($) => $.workflow.templates),
-      hint: t(($) => $.workflow.templates_hint),
-      action: () => setScreen("templates"),
+      action: () => pick(createWorkflowDraft([
+        t(($) => $.workflow.todo),
+        t(($) => $.workflow.in_progress),
+        t(($) => $.workflow.done),
+      ])),
     },
     {
       icon: Copy,
@@ -211,11 +185,9 @@ export function WorkflowSetup({
           <h2 className="text-title font-semibold">
             {screen === "source"
               ? t(($) => $.workflow.source_title)
-              : screen === "templates"
-                ? t(($) => $.workflow.template_title)
-                : screen === "copy"
-                  ? t(($) => $.workflow.copy)
-                  : t(($) => $.workflow.editor_title)}
+              : screen === "copy"
+                ? t(($) => $.workflow.copy)
+                : t(($) => $.workflow.editor_title)}
           </h2>
           <p className="mt-1 text-body text-muted-foreground">
             {screen === "editor"
@@ -248,12 +220,13 @@ export function WorkflowSetup({
               {t(($) => $.workflow.replace_warning)}
             </p>
           )}
-          {origins.map(({ icon: Icon, title, hint, action }) => (
+          {origins.map(({ icon: Icon, title, hint, action, selected }) => (
             <button
               key={title}
               type="button"
               onClick={action}
-              className="flex w-full items-center gap-4 rounded-lg border p-5 text-left hover:bg-accent/60"
+              aria-pressed={selected}
+              className="flex w-full items-center gap-4 rounded-lg border p-5 text-left hover:bg-accent/60 aria-pressed:border-primary aria-pressed:bg-accent/60"
             >
               <Icon className="size-5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
@@ -262,38 +235,11 @@ export function WorkflowSetup({
                   {hint}
                 </span>
               </span>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-            </button>
-          ))}
-        </div>
-      )}
-      {screen === "templates" && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(["simple", "development"] as const).map((key) => (
-            <button
-              type="button"
-              key={key}
-              onClick={() => chooseTemplate(key)}
-              className="space-y-3 rounded-lg border p-5 text-left hover:bg-accent/60"
-            >
-              <span className="text-caption text-muted-foreground">
-                {t(($) => $.workflow.preset)}
-              </span>
-              <span className="block text-body font-medium">
-                {t(($) => $.workflow[key])}
-              </span>
-              <span className="block text-caption text-muted-foreground">
-                {t(($) =>
-                  key === "simple"
-                    ? $.workflow.simple_hint
-                    : $.workflow.development_hint,
-                )}
-              </span>
-              <span className="block text-caption">
-                {key === "simple"
-                  ? `${ready} → ${t(($) => $.workflow.working)} → ${done}`
-                  : `${ready} → ${t(($) => $.workflow.develop)} → ${t(($) => $.workflow.review)} → ${t(($) => $.workflow.accept)} → ${done}`}
-              </span>
+              {selected ? (
+                <Check className="size-4 shrink-0 text-primary" />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              )}
             </button>
           ))}
         </div>

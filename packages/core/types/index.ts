@@ -10,7 +10,6 @@ export type {
   IssueWorkflowSpec,
   ApplyProjectWorkflowRequest,
   IssueWorkflowDefinition,
-  IssueWorkflowAssigneeTarget,
   IssueWorkflowExecutorTarget,
   IssueWorkflowEntryPolicy,
   IssueWorkflowStatusNode,

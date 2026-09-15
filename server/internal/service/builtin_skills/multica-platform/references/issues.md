@@ -227,12 +227,11 @@ multica issue get <issue-id> --resolve-properties
 
 ## Status changes have server side effects
 
-Project workflow statuses can require a member to confirm a handoff. When an
-entry policy uses `human_confirms`, automated executions and explicitly configured
-human handoffs cannot be advanced by agent, system, or integration status writes.
-Report the result and wait for a member. Do not try another status endpoint or
-claim human takeover to bypass the gate. A successful run is distinct from an
-issue reaching its next status. See `projects.md` for `next_status_key` and snapshots.
+Project workflow executors can change status according to their instructions;
+there is no separate per-status approval setting. A successful run does not itself
+advance the issue. After human takeover, automated writes from the superseded
+entry are rejected. Describe conditional status changes in the executor instructions. See `projects.md`
+for entry actions and execution snapshots.
 
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.

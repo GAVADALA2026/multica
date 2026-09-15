@@ -92,23 +92,15 @@ export interface IssueWorkflowDefinition {
   updated_at: string;
 }
 
-export type IssueWorkflowAssigneeTarget =
-  | { type: "keep"; id?: never }
-  | { type: "human" | "agent" | "squad"; id: string };
-
 export type IssueWorkflowExecutorTarget =
   | { type: "none"; id?: never }
   | { type: "agent" | "squad"; id: string };
 
-/** Status entry rules: ownership, action execution, and workflow transitions. */
+/** Action to run when an issue enters a status. */
 export interface IssueWorkflowEntryPolicy {
-  assignee: IssueWorkflowAssigneeTarget;
   executor: IssueWorkflowExecutorTarget;
   /** Prompt supplied to the executor when the issue enters this node. */
   instructions: string;
-  advance: "executor_may_transition" | "human_confirms";
-  /** Explicit handoff destination within this workflow; never inferred from order. */
-  next_status_key?: string;
 }
 
 export interface IssueWorkflowStatusNode {

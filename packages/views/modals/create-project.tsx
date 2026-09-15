@@ -151,7 +151,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [showWorkflowErrors, setShowWorkflowErrors] = useState(false);
   const workflow = draft.workflowWorkspaceId === wsId ? draft.workflow : undefined;
   const [workflowScreen, setWorkflowScreen] = useState<WorkflowSetupScreen>(workflow ? "editor" : "source");
-  const updateWorkflow = (value: WorkflowDraft) => setDraft({ workflow: value, workflowWorkspaceId: wsId });
+  const updateWorkflow = (value: WorkflowDraft | undefined) => setDraft({ workflow: value, workflowWorkspaceId: wsId });
+  const canCreateWithWorkflow = workflow
+    ? workflowScreen === "editor"
+    : workflowScreen === "source";
   const advanceToWorkflow = () => {
     if (!title.trim()) return;
     setDraft({ description: descEditorRef.current?.getMarkdown() ?? draft.description });
@@ -333,7 +336,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const handleSubmit = async () => {
     if (!title.trim() || submitting || step !== "workflow") return;
     setShowWorkflowErrors(true);
-    if (workflowScreen !== "editor" || !workflow || workflowProblems(workflow).length) return;
+    if (!canCreateWithWorkflow || (workflow && workflowProblems(workflow).length)) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -366,7 +369,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     try {
       const project = await createProject.mutateAsync({
         title: title.trim(),
-        issue_workflow: workflowToSpec(workflow, title),
+        ...(workflow ? { issue_workflow: workflowToSpec(workflow, title) } : {}),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         icon,
         status,
@@ -381,7 +384,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
-      router.push(`${wsPaths.projectDetail(project.id)}?view=workflow`);
+      router.push(`${wsPaths.projectDetail(project.id)}${workflow ? "?view=workflow" : ""}`);
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -1008,7 +1011,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <p className="max-w-sm text-caption text-muted-foreground">{tProjects(($) => step === "info" ? $.workflow.create_hint : $.workflow.draft_hint)}</p>
           <div className="flex gap-2">
             {step === "workflow" && <Button variant="ghost" size="sm" disabled={submitting} onClick={() => setStep("info")}>{tProjects(($) => $.workflow.back)}</Button>}
-            <Button size="sm" onClick={step === "info" ? advanceToWorkflow : handleSubmit} disabled={!title.trim() || submitting || (step === "workflow" && (!workflow || workflowScreen !== "editor"))}>
+            <Button size="sm" onClick={step === "info" ? advanceToWorkflow : handleSubmit} disabled={!title.trim() || submitting || (step === "workflow" && !canCreateWithWorkflow)}>
               {step === "info" ? tProjects(($) => $.workflow.next) : submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
             </Button>
           </div>

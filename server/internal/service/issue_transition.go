@@ -25,7 +25,6 @@ var (
 	// ErrIssueEntryPolicyExecutorUnavailable leaves the issue at its previous
 	// status rather than entering an automated node without the configured run.
 	ErrIssueEntryPolicyExecutorUnavailable = errors.New("issue entry policy executor unavailable")
-	ErrIssueEntryPolicyAssigneeUnavailable = errors.New("issue entry policy assignee unavailable")
 )
 
 type IssueTransitionParams struct {
@@ -117,7 +116,7 @@ func TransitionIssue(ctx context.Context, q *db.Queries, txStarter TxStarter, p 
 	}
 
 	if previous.Status != p.Status {
-		if err := AssertIssueWorkflowAdvance(ctx, qtx, previous, p.Actor); err != nil {
+		if err := AssertIssueWorkflowWriteAllowed(ctx, qtx, previous, p.Actor); err != nil {
 			return IssueTransitionResult{}, err
 		}
 	}
@@ -194,7 +193,7 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 			PreviousStatusName: name, StatusName: name,
 		}, nil
 	}
-	if err := AssertIssueWorkflowAdvance(ctx, qtx, previous, p.Actor); err != nil {
+	if err := AssertIssueWorkflowWriteAllowed(ctx, qtx, previous, p.Actor); err != nil {
 		return IssueTransitionResult{}, err
 	}
 	var previousStatus db.IssueWorkflowStatus
@@ -216,10 +215,6 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	if err != nil {
 		return IssueTransitionResult{}, fmt.Errorf("normalize workflow entry policy: %w", err)
 	}
-	assigneeType, assigneeID, err := resolveEntryPolicyAssignee(ctx, qtx, previous, policy)
-	if err != nil {
-		return IssueTransitionResult{}, err
-	}
 	executor, err := resolveEntryPolicyExecutor(ctx, qtx, p.WorkspaceID, policy)
 	if err != nil {
 		return IssueTransitionResult{}, err
@@ -235,9 +230,8 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 		return IssueTransitionResult{}, ErrIssueTransitionConflict
 	}
 
-	current, err := qtx.UpdateIssueWorkflowStatusAndAssignee(ctx, db.UpdateIssueWorkflowStatusAndAssigneeParams{
+	current, err := qtx.UpdateIssueWorkflowStatus(ctx, db.UpdateIssueWorkflowStatusParams{
 		IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, WorkflowStatusID: target.ID,
-		AssigneeType: assigneeType, AssigneeID: assigneeID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -261,6 +255,8 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 
 	if _, err := qtx.SupersedeIssueAutomationExecutions(ctx, db.SupersedeIssueAutomationExecutionsParams{
 		IssueID: current.ID, WorkspaceID: p.WorkspaceID,
+		TriggerTransitionID: previous.LastTransitionID,
+		ActorTaskID:         p.Actor.TaskID, ActorAgentID: p.Actor.ID,
 	}); err != nil {
 		return IssueTransitionResult{}, fmt.Errorf("supersede previous automation executions: %w", err)
 	}
@@ -384,22 +380,9 @@ func enterInitialWorkflowStatus(ctx context.Context, q *db.Queries, issue db.Iss
 	if err != nil {
 		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, err
 	}
-	assigneeType, assigneeID, err := resolveEntryPolicyAssignee(ctx, q, issue, policy)
-	if err != nil {
-		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, err
-	}
 	executor, err := resolveEntryPolicyExecutor(ctx, q, issue.WorkspaceID, policy)
 	if err != nil {
 		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, err
-	}
-	if issue.AssigneeType != assigneeType || issue.AssigneeID != assigneeID {
-		issue, err = q.UpdateIssueAssigneeFromEntryPolicy(ctx, db.UpdateIssueAssigneeFromEntryPolicyParams{
-			AssigneeType: assigneeType, AssigneeID: assigneeID,
-			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("apply initial entry assignee: %w", err)
-		}
 	}
 	workflow, err := q.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
 		ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,
@@ -429,37 +412,6 @@ func enterInitialWorkflowStatus(ctx context.Context, q *db.Queries, issue db.Iss
 		}
 	}
 	return issue, execution, task, nil
-}
-
-func resolveEntryPolicyAssignee(ctx context.Context, q *db.Queries, issue db.Issue, policy issueworkflow.EntryPolicy) (pgtype.Text, pgtype.UUID, error) {
-	if policy.Assignee.Type == issueworkflow.AssigneeKeep {
-		return issue.AssigneeType, issue.AssigneeID, nil
-	}
-	id, err := util.ParseUUID(policy.Assignee.ID)
-	if err != nil {
-		return pgtype.Text{}, pgtype.UUID{}, fmt.Errorf("invalid entry policy assignee: %w", err)
-	}
-	typ := policy.Assignee.Type
-	if typ == issueworkflow.AssigneeHuman {
-		typ = "member"
-	}
-	switch typ {
-	case "member":
-		if _, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: id, WorkspaceID: issue.WorkspaceID}); err != nil {
-			return pgtype.Text{}, pgtype.UUID{}, fmt.Errorf("%w: human is no longer a workspace member", ErrIssueEntryPolicyAssigneeUnavailable)
-		}
-	case "agent":
-		agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: id, WorkspaceID: issue.WorkspaceID})
-		if err != nil || agent.ArchivedAt.Valid {
-			return pgtype.Text{}, pgtype.UUID{}, fmt.Errorf("%w: agent is missing or archived", ErrIssueEntryPolicyAssigneeUnavailable)
-		}
-	case "squad":
-		squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: id, WorkspaceID: issue.WorkspaceID})
-		if err != nil || squad.ArchivedAt.Valid {
-			return pgtype.Text{}, pgtype.UUID{}, fmt.Errorf("%w: squad is missing or archived", ErrIssueEntryPolicyAssigneeUnavailable)
-		}
-	}
-	return pgtype.Text{String: typ, Valid: true}, id, nil
 }
 
 type resolvedEntryExecutor struct {
@@ -560,7 +512,7 @@ func (s *IssueService) TakeOverAutomationExecution(ctx context.Context, p IssueA
 		}
 		return IssueAutomationTakeoverResult{}, err
 	}
-	issue, err = qtx.UpdateIssueAssigneeFromEntryPolicy(ctx, db.UpdateIssueAssigneeFromEntryPolicyParams{
+	issue, err = qtx.UpdateIssueAssigneeForTakeover(ctx, db.UpdateIssueAssigneeForTakeoverParams{
 		AssigneeType: pgtype.Text{String: "member", Valid: true}, AssigneeID: p.MemberID,
 		IssueID: issue.ID, WorkspaceID: p.WorkspaceID,
 	})

@@ -83,24 +83,32 @@ clear a date; an unset flag leaves it untouched.
 ## Project workflow setup in Web and Desktop
 
 Project creation collects project details first, then offers three workflow sources:
-start from scratch, use a preset template, or copy an existing project's workflow.
-Specific business workflows, such as development and review, live inside the
-template library. The selected workflow is editable before the project is created.
+inherit the workspace workflow (the default), create a new workflow, or copy an
+existing project's workflow. New workflows start with Todo → In Progress → Done.
+New and copied workflows are editable before the project is created. Templates
+are not currently offered.
 Project metadata, resources, and the `issue_workflow` definition are committed in
 one transaction. Creating a project does not create issues or start agent runs.
 Incomplete workflow configuration remains in the workspace-scoped local project
 draft; the UI does not silently replace it with the workspace default.
 
-The workflow contains statuses. Each status independently configures its owner,
-action (executor and instructions), and transition rules. `entry_policy` stores
-all three; it is not an action definition. An action may run an agent or squad,
-and can later support a composed agent flow without changing the outer workflow.
+The workflow contains statuses. Each status optionally runs an agent or squad with
+instructions, stored in `entry_policy`. In the editor, choose No action, Run an
+agent, or Run a squad first, then select a target of that type and enter its
+instructions. Target pickers show avatars and support name search, including pinyin.
+No action hides the target and instructions fields; validation appears beside
+the affected field. A run action cannot be saved without a target. Entering a status
+preserves the issue assignee.
 
 The project's Workflow tab displays the full workflow and opens the same status
 editor used during creation. Editing is local until Save workflow applies one
-revision-guarded definition. Reordering explicitly rewrites handoff links to the
-new order; users can configure different next-status links in status details.
-Copying a workflow preserves its explicit links and initial status. Removing a
+revision-guarded definition. Reordering only changes display order.
+On a project's status-grouped board, each current column shows its configured
+agent or squad avatar. Workspace owners/admins can click it, or use the column's
+more menu, to edit that status in place. Saving an inherited workflow creates a
+project-specific definition; it does not edit the workspace default or rebind
+existing issues. Historical/archived columns do not expose this editor.
+Copying a workflow preserves its actions and initial status. Removing a
 status requires an archive acknowledgement when saving: existing issues remain
 bound to their archived status until explicitly transitioned. Customizing an
 inherited workflow applies to new issues; existing issues retain their pinned
@@ -129,11 +137,8 @@ statuses:
     color: "#2563eb"
     phase: started
     entry_policy:
-      assignee: { type: agent, ref: Architect }
       executor: { type: agent, ref: Architect }
-      instructions: Implement the approved technical spec and report evidence.
-      advance: human_confirms
-      next_status_key: shipped
+      instructions: Implement the approved technical spec, report evidence, and move the issue to Shipped when complete.
   - key: shipped
     name: Shipped
     color: "#16a34a"
@@ -145,26 +150,26 @@ statuses:
 represents cancellation. An optional `icon` controls appearance independently
 of category and is preserved when copying or exporting a workflow.
 
-`entry_policy.next_status_key` optionally names the explicit handoff destination
-within this workflow. It must name another active status. Renaming or reordering
-statuses does not change the destination; without this field, no next status is
-inferred. Entry executions keep the original policy snapshot, including this key.
+There are no configured transition links or automatic next-status buttons.
+Describe any conditional status changes in the executor instructions.
 
-`advance: human_confirms` requires a member to move out of an automated status
-or an explicitly configured human handoff. Agent, system and integration status
-writes cannot bypass it. Completion leaves the issue in its current status until
-a member confirms. Taking over also leaves the status unchanged and prevents the
-superseded executor from advancing it.
+Executors can explicitly change status according to their instructions. A successful
+run does not itself move the issue to the next status. Taking over leaves the status
+unchanged and prevents automated writes from the superseded entry.
+When the current executor moves its own issue, its run can finish and report its
+actual result while the next status starts its action. That earlier run cannot
+change a later entry, even if the issue returns to the same status. A manual
+status change interrupts the current entry's active run.
 
-The Web/Desktop task detail keeps its status selector and exposes a handoff action
-when entering the configured destination assigns responsibility or starts work,
-or when the current execution awaits human confirmation. State changes that start
-or interrupt execution show the entry effects. The native transition API accepts
+The Web/Desktop task detail uses the status selector for manual changes. The
+existing agent indicator, Activity, and Execution log show runs and their results;
+use the run controls to stop an execution. Status changes
+that start or interrupt execution show the entry effects. The native transition API accepts
 `expected_workflow_revision` alongside the issue revision and transition ID to
 reject a stale preview before applying any effects.
 
-Actor `ref` values accept the same names, IDs, emails, and unambiguous short
-IDs as assignee flags. Project creation applies its workflow in the same
+Executor `ref` values accept agent or squad names, IDs, and unambiguous short
+IDs. Project creation applies its workflow in the same
 server transaction as the project and bundled resources. `get --output yaml`
 exports an applyable definition (actor refs are emitted as stable IDs).
 

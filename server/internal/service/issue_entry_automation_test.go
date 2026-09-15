@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -100,9 +101,8 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 		}
 	}
 	policy := issueworkflow.EntryPolicy{
-		Assignee:     issueworkflow.EntryPolicyPrincipal{Type: "agent", ID: util.UUIDToString(agentID)},
 		Executor:     issueworkflow.EntryPolicyPrincipal{Type: "agent", ID: util.UUIDToString(agentID)},
-		Instructions: "Implement the next workflow step.", Advance: issueworkflow.AdvanceExecutorMayTransition,
+		Instructions: "Implement the next workflow step.",
 	}
 	rawPolicy, _, err := issueworkflow.EncodeEntryPolicy(policy)
 	if err != nil {
@@ -112,9 +112,8 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 	squadPolicy := issueworkflow.EntryPolicy{
-		Assignee:     issueworkflow.EntryPolicyPrincipal{Type: "squad", ID: util.UUIDToString(squadID)},
 		Executor:     issueworkflow.EntryPolicyPrincipal{Type: "squad", ID: util.UUIDToString(squadID)},
-		Instructions: "Coordinate the implementation as a squad.", Advance: issueworkflow.AdvanceHumanConfirms,
+		Instructions: "Coordinate the implementation as a squad.",
 	}
 	rawSquadPolicy, _, err := issueworkflow.EncodeEntryPolicy(squadPolicy)
 	if err != nil {
@@ -129,12 +128,13 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	created, err := issueSvc.Create(ctx, IssueCreateParams{
 		WorkspaceID: workspaceID, ProjectID: projectID, Title: "Automated issue", Status: "todo", Priority: "medium",
 		CreatorType: "member", CreatorID: userID,
+		AssigneeType: pgtype.Text{String: "member", Valid: true}, AssigneeID: userID,
 	}, IssueCreateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Issue.AssigneeType.String != "agent" || created.Issue.AssigneeID != agentID || !created.AssignedTaskID.Valid {
-		t.Fatalf("initial entry did not atomically assign and enqueue: issue=%#v task=%v", created.Issue, created.AssignedTaskID)
+	if created.Issue.AssigneeType.String != "member" || created.Issue.AssigneeID != userID || !created.AssignedTaskID.Valid {
+		t.Fatalf("initial entry must preserve the assignee while enqueueing the executor: issue=%#v task=%v", created.Issue, created.AssignedTaskID)
 	}
 	executions, err := q.ListIssueAutomationExecutions(ctx, db.ListIssueAutomationExecutionsParams{IssueID: created.Issue.ID, WorkspaceID: workspaceID})
 	if err != nil || len(executions) != 1 || executions[0].Status != "queued" || executions[0].PolicyRevision != 2 {
@@ -186,31 +186,11 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !squadEntry.Task.ID.Valid || squadEntry.Execution.ExecutorType.String != "squad" || squadEntry.Execution.ExecutorID != squadID || squadEntry.Issue.AssigneeType.String != "squad" || squadEntry.Issue.AssigneeID != squadID {
-		t.Fatalf("squad entry did not resolve leader run and assignment: %#v", squadEntry)
+	if !squadEntry.Task.ID.Valid || squadEntry.Execution.ExecutorType.String != "squad" || squadEntry.Execution.ExecutorID != squadID || squadEntry.Issue.AssigneeType.String != "member" || squadEntry.Issue.AssigneeID != userID {
+		t.Fatalf("squad entry must start its leader and preserve the assignee: %#v", squadEntry)
 	}
 	if squadEntry.PreviousStatusName != "Ready for Agent" || squadEntry.StatusName != "Squad Build" {
 		t.Fatalf("squad entry workflow names = %q -> %q", squadEntry.PreviousStatusName, squadEntry.StatusName)
-	}
-	// Both native and legacy status writes must respect the human gate and
-	// leave the issue/execution untouched when an agent tries to bypass it.
-	_, gateErr := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
-		IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: todo.ID,
-		Actor: issueworkflow.TransitionActor{Type: "agent", ID: agentID},
-	})
-	if !errors.Is(gateErr, ErrIssueHumanConfirmationRequired) {
-		t.Fatalf("native gate error=%v", gateErr)
-	}
-	_, gateErr = TransitionIssue(ctx, q, pool, IssueTransitionParams{
-		IssueID: created.Issue.ID, WorkspaceID: workspaceID, Status: "todo",
-		Actor: issueworkflow.TransitionActor{Type: "system"},
-	})
-	if !errors.Is(gateErr, ErrIssueHumanConfirmationRequired) {
-		t.Fatalf("legacy gate error=%v", gateErr)
-	}
-	unchanged, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: created.Issue.ID, WorkspaceID: workspaceID})
-	if err != nil || unchanged.Revision != squadEntry.Issue.Revision || unchanged.WorkflowStatusID != inProgress.ID {
-		t.Fatalf("rejected transition mutated the issue: %#v, %v", unchanged, err)
 	}
 	_, staleErr := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
 		IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: todo.ID,
@@ -223,7 +203,7 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 
 	reentered, err := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
 		IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: todo.ID,
-		Actor: issueworkflow.TransitionActor{Type: "member", ID: userID}, ExpectedRevision: pgtype.Int8{Int64: squadEntry.Issue.Revision, Valid: true},
+		Actor: issueworkflow.TransitionActor{Type: "agent", ID: agentID}, ExpectedRevision: pgtype.Int8{Int64: squadEntry.Issue.Revision, Valid: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -258,4 +238,72 @@ func TestWorkflowEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	if taken.Execution.Status != "superseded" || taken.Issue.AssigneeType.String != "member" || taken.Issue.AssigneeID != userID || len(taken.CancelledTasks) != 1 {
 		t.Fatalf("takeover result=%#v", taken)
 	}
+	// Both native and legacy writes must still be blocked after takeover.
+	_, gateErr := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
+		IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: inProgress.ID,
+		Actor: issueworkflow.TransitionActor{Type: "agent", ID: agentID},
+	})
+	if !errors.Is(gateErr, ErrIssueExecutionSuperseded) {
+		t.Fatalf("native gate error=%v", gateErr)
+	}
+	_, gateErr = TransitionIssue(ctx, q, pool, IssueTransitionParams{
+		IssueID: created.Issue.ID, WorkspaceID: workspaceID, Status: "in_progress",
+		Actor: issueworkflow.TransitionActor{Type: "system"},
+	})
+	if !errors.Is(gateErr, ErrIssueExecutionSuperseded) {
+		t.Fatalf("legacy gate error=%v", gateErr)
+	}
+	unchanged, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: created.Issue.ID, WorkspaceID: workspaceID})
+	if err != nil || unchanged.Revision != taken.Issue.Revision || unchanged.WorkflowStatusID != todo.ID {
+		t.Fatalf("rejected transition mutated the issue: %#v, %v", unchanged, err)
+	}
+
+	t.Run("executor handoff finishes without cancellation", func(t *testing.T) {
+		fx := testutil.New(pool, util.UUIDToString(workspaceID), util.UUIDToString(userID))
+		entry, err := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
+			IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: inProgress.ID,
+			Actor: issueworkflow.TransitionActor{Type: "member", ID: userID},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fx.Exec(t, `UPDATE agent_task_queue SET status='running' WHERE id=$1`, entry.Task.ID)
+		actor := issueworkflow.TransitionActor{Type: "agent", ID: agentID, TaskID: entry.Task.ID}
+		handoff, err := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
+			IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: todo.ID, Actor: actor,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(handoff.CancelledTasks) != 0 || !handoff.Task.ID.Valid {
+			t.Fatalf("self handoff must start the next run without cancelling its caller: %#v", handoff)
+		}
+		// The next entry can move again before the first daemon reports back.
+		// Only that current entry is interrupted; the handed-off run can finish.
+		interrupted, err := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
+			IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: inProgress.ID,
+			Actor: issueworkflow.TransitionActor{Type: "member", ID: userID},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(interrupted.CancelledTasks) != 1 || interrupted.CancelledTasks[0].ID != handoff.Task.ID {
+			t.Fatalf("manual move must cancel only the current entry: %#v", interrupted.CancelledTasks)
+		}
+		priorTask, err := q.GetAgentTask(ctx, entry.Task.ID)
+		if err != nil || priorTask.Status != "running" {
+			t.Fatalf("handed-off run was interrupted: %s, %v", priorTask.Status, err)
+		}
+		_, err = issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
+			IssueID: created.Issue.ID, WorkspaceID: workspaceID, WorkflowStatusID: todo.ID, Actor: actor,
+		})
+		if !errors.Is(err, ErrIssueExecutionSuperseded) {
+			t.Fatalf("a previous run must not move a later entry, even with the same agent/status: %v", err)
+		}
+		fx.Exec(t, `UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1`, entry.Task.ID)
+		finished, err := q.GetAutomationExecution(ctx, db.GetAutomationExecutionParams{ID: entry.Execution.ID, WorkspaceID: workspaceID})
+		if err != nil || finished.Status != "completed" {
+			t.Fatalf("handoff must retain the daemon's actual completion: %s, %v", finished.Status, err)
+		}
+	})
 }

@@ -1705,17 +1705,36 @@ UPDATE automation_execution
 SET status = 'superseded', updated_at = now()
 WHERE issue_id = $1::uuid
   AND workspace_id = $2::uuid
+  AND trigger_transition_id = $3::uuid
   AND status IN ('pending', 'queued', 'running')
+  -- A run that moves its own issue is handing work off. Let the daemon
+  -- report its actual result instead of cancelling it mid-response.
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS task
+      WHERE task.automation_execution_id = automation_execution.id
+        AND task.id = $4::uuid
+        AND task.agent_id = $5::uuid
+        AND task.status = 'running'
+  )
 RETURNING id, workspace_id, issue_id, trigger_transition_id, workflow_id, workflow_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at
 `
 
 type SupersedeIssueAutomationExecutionsParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID             pgtype.UUID `json:"issue_id"`
+	WorkspaceID         pgtype.UUID `json:"workspace_id"`
+	TriggerTransitionID pgtype.UUID `json:"trigger_transition_id"`
+	ActorTaskID         pgtype.UUID `json:"actor_task_id"`
+	ActorAgentID        pgtype.UUID `json:"actor_agent_id"`
 }
 
 func (q *Queries) SupersedeIssueAutomationExecutions(ctx context.Context, arg SupersedeIssueAutomationExecutionsParams) ([]AutomationExecution, error) {
-	rows, err := q.db.Query(ctx, supersedeIssueAutomationExecutions, arg.IssueID, arg.WorkspaceID)
+	rows, err := q.db.Query(ctx, supersedeIssueAutomationExecutions,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.TriggerTransitionID,
+		arg.ActorTaskID,
+		arg.ActorAgentID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1812,7 +1831,7 @@ func (q *Queries) SyncDefaultIssueWorkflowStatuses(ctx context.Context, arg Sync
 	return err
 }
 
-const updateIssueAssigneeFromEntryPolicy = `-- name: UpdateIssueAssigneeFromEntryPolicy :one
+const updateIssueAssigneeForTakeover = `-- name: UpdateIssueAssigneeForTakeover :one
 UPDATE issue
 SET assignee_type = $1::text,
     assignee_id = $2::uuid,
@@ -1823,15 +1842,15 @@ WHERE id = $3::uuid
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, workflow_id, workflow_status_id, last_transition_id
 `
 
-type UpdateIssueAssigneeFromEntryPolicyParams struct {
+type UpdateIssueAssigneeForTakeoverParams struct {
 	AssigneeType pgtype.Text `json:"assignee_type"`
 	AssigneeID   pgtype.UUID `json:"assignee_id"`
 	IssueID      pgtype.UUID `json:"issue_id"`
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) UpdateIssueAssigneeFromEntryPolicy(ctx context.Context, arg UpdateIssueAssigneeFromEntryPolicyParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, updateIssueAssigneeFromEntryPolicy,
+func (q *Queries) UpdateIssueAssigneeForTakeover(ctx context.Context, arg UpdateIssueAssigneeForTakeoverParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueAssigneeForTakeover,
 		arg.AssigneeType,
 		arg.AssigneeID,
 		arg.IssueID,
@@ -1903,85 +1922,6 @@ type UpdateIssueWorkflowStatusParams struct {
 
 func (q *Queries) UpdateIssueWorkflowStatus(ctx context.Context, arg UpdateIssueWorkflowStatusParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, updateIssueWorkflowStatus, arg.IssueID, arg.WorkspaceID, arg.WorkflowStatusID)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
-		&i.Revision,
-		&i.LastActivityAt,
-		&i.WorkflowID,
-		&i.WorkflowStatusID,
-		&i.LastTransitionID,
-	)
-	return i, err
-}
-
-const updateIssueWorkflowStatusAndAssignee = `-- name: UpdateIssueWorkflowStatusAndAssignee :one
-UPDATE issue AS i
-SET status = COALESCE(s.legacy_status_key, CASE s.phase
-        WHEN 'unstarted' THEN 'todo'
-        WHEN 'done' THEN 'done'
-        WHEN 'closed' THEN 'cancelled'
-        ELSE 'in_progress'
-    END),
-    workflow_status_id = s.id,
-    assignee_type = $1::text,
-    assignee_id = $2::uuid,
-    revision = i.revision + 1,
-    updated_at = now()
-FROM issue_workflow_status AS s
-WHERE i.id = $3::uuid
-  AND i.workspace_id = $4::uuid
-  AND s.id = $5::uuid
-  AND s.workspace_id = i.workspace_id
-  AND s.workflow_id = i.workflow_id
-  AND s.archived_at IS NULL
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.workflow_id, i.workflow_status_id, i.last_transition_id
-`
-
-type UpdateIssueWorkflowStatusAndAssigneeParams struct {
-	AssigneeType     pgtype.Text `json:"assignee_type"`
-	AssigneeID       pgtype.UUID `json:"assignee_id"`
-	IssueID          pgtype.UUID `json:"issue_id"`
-	WorkspaceID      pgtype.UUID `json:"workspace_id"`
-	WorkflowStatusID pgtype.UUID `json:"workflow_status_id"`
-}
-
-// Entry policy is applied at the same serialization boundary as the status
-// node. The caller has already resolved "keep" to the current persisted
-// assignee, so nullable values here mean an explicitly unassigned issue.
-func (q *Queries) UpdateIssueWorkflowStatusAndAssignee(ctx context.Context, arg UpdateIssueWorkflowStatusAndAssigneeParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, updateIssueWorkflowStatusAndAssignee,
-		arg.AssigneeType,
-		arg.AssigneeID,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.WorkflowStatusID,
-	)
 	var i Issue
 	err := row.Scan(
 		&i.ID,

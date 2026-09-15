@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -10,11 +10,10 @@ import {
   Plus,
   Trash2,
   User,
-  Zap,
+  ChevronRight,
 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
-  memberListOptions,
   agentListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
@@ -26,11 +25,7 @@ import {
   type WorkflowDraft,
   type WorkflowStatus,
 } from "@multica/core/issue-workflows";
-import type {
-  IssueWorkflowAssigneeTarget,
-  IssueWorkflowExecutorTarget,
-  IssueWorkflowPhase,
-} from "@multica/core/types";
+import type { IssueWorkflowPhase } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -41,12 +36,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Field, FieldLabel, FieldDescription, FieldError, FieldGroup } from "@multica/ui/components/ui/field";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
+import { WorkflowExecutorPicker } from "./workflow-executor-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
 interface Choice {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 function ChoiceField({
   id,
@@ -54,37 +53,39 @@ function ChoiceField({
   value,
   items,
   onChange,
+  placeholder,
 }: {
   id: string;
   label: string;
   value: string;
   items: Choice[];
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="text-caption font-medium">
+    <Field className="gap-1.5">
+      <FieldLabel htmlFor={id} className="text-caption font-medium">
         {label}
-      </label>
+      </FieldLabel>
       <Select
         items={items}
-        value={value}
+        value={value || null}
         onValueChange={(v) => {
           if (v !== null) onChange(v);
         }}
       >
         <SelectTrigger id={id} className="w-full">
-          <SelectValue />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
+            <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
               {item.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </Field>
   );
 }
 
@@ -93,52 +94,46 @@ export function WorkflowEditor({
   onChange,
   showErrors = false,
   disabled = false,
+  statusKey,
 }: {
   value: WorkflowDraft;
   onChange: (draft: WorkflowDraft) => void;
   showErrors?: boolean;
   disabled?: boolean;
+  statusKey?: string;
 }) {
   const { t } = useT("projects");
   const id = useId();
+  const editorRef = useRef<HTMLFieldSetElement>(null);
+  useEffect(() => {
+    if (showErrors) editorRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [showErrors]);
   const wsId = useWorkspaceId();
-  const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
   const squads = useQuery(squadListOptions(wsId));
   const [selectedKey, setSelectedKey] = useState(value.initialKey);
   const status =
-    value.statuses.find((s) => s.key === selectedKey) ?? value.statuses[0];
+    statusKey
+      ? value.statuses.find((s) => s.key === statusKey)
+      : value.statuses.find((s) => s.key === selectedKey) ?? value.statuses[0];
   const index = status ? value.statuses.indexOf(status) : -1;
   const problems = workflowProblems(value);
-  const actorChoices: Choice[] = [
-    { value: "keep", label: t(($) => $.workflow.manual) },
-    { value: "agent:", label: t(($) => $.workflow.choose_agent) },
-    ...(members.data ?? []).map((m) => ({
-      value: `human:${m.user_id}`,
-      label: m.name,
-    })),
-    ...(agents.data ?? [])
-      .filter((a) => !a.archived_at)
-      .map((a) => ({
-        value: `agent:${a.id}`,
-        label: t(($) => $.workflow_rules.agent_target, { name: a.name }),
-      })),
-    ...(squads.data ?? [])
-      .filter((s) => !s.archived_at)
-      .map((s) => ({
-        value: `squad:${s.id}`,
-        label: t(($) => $.workflow_rules.squad_target, { name: s.name }),
-      })),
-  ];
-  const actorValue = (s: WorkflowStatus) =>
-    s.policy.executor.type !== "none"
-      ? `${s.policy.executor.type}:${s.policy.executor.id}`
-      : s.policy.assignee.type === "keep"
-        ? "keep"
-        : `${s.policy.assignee.type}:${s.policy.assignee.id}`;
-  const nameFor = (s: WorkflowStatus) =>
-    actorChoices.find((c) => c.value === actorValue(s))?.label ??
-    t(($) => $.workflow.unavailable);
+  const agentChoices = (agents.data ?? [])
+    .filter((agent) => !agent.archived_at)
+    .map((agent) => ({ value: agent.id, label: agent.name }));
+  const squadChoices = (squads.data ?? [])
+    .filter((squad) => !squad.archived_at)
+    .map((squad) => ({ value: squad.id, label: squad.name }));
+  const nameFor = (s: WorkflowStatus) => {
+    const executor = s.policy.executor;
+    if (executor.type === "none") return t(($) => $.workflow_rules.no_automatic_run);
+    if (!executor.id) return t(($) => executor.type === "agent" ? $.workflow.choose_agent : $.workflow.choose_squad);
+    const name = (executor.type === "agent" ? agentChoices : squadChoices)
+      .find((choice) => choice.value === executor.id)?.label;
+    return name
+      ? t(($) => executor.type === "agent" ? $.workflow_rules.agent_target : $.workflow_rules.squad_target, { name })
+      : t(($) => $.workflow.unavailable);
+  };
   const update = (patch: Partial<WorkflowStatus>) => {
     if (status)
       onChange({
@@ -153,7 +148,6 @@ export function WorkflowEditor({
   };
   const add = (after: number) => {
     const key = `status_${crypto.randomUUID().replaceAll("-", "")}`;
-    const previous = value.statuses[after];
     const statuses = [...value.statuses];
     const newStatus: WorkflowStatus = {
       key,
@@ -161,28 +155,14 @@ export function WorkflowEditor({
       description: "",
       color: "#6b7280",
       phase: "started",
-      policy: {
-        ...manualEntryPolicy(),
-        next_status_key:
-          previous?.policy.next_status_key || statuses[after + 1]?.key || "",
-      },
+      policy: manualEntryPolicy(),
     };
     statuses.splice(after + 1, 0, newStatus);
-    if (
-      previous &&
-      previous.phase !== "done" &&
-      previous.phase !== "closed"
-    )
-      statuses[after] = {
-        ...previous,
-        policy: { ...previous.policy, next_status_key: key },
-      };
     onChange({ ...value, initialKey: value.initialKey || key, statuses });
     setSelectedKey(key);
   };
   const move = (from: number, to: number) =>
     onChange(moveWorkflowStatus(value, from, to));
-  const terminal = status?.phase === "done" || status?.phase === "closed";
   const phases: IssueWorkflowPhase[] = [
     "unstarted",
     "started",
@@ -195,41 +175,20 @@ export function WorkflowEditor({
     done: t(($) => $.workflow_rules.phase_done),
     closed: t(($) => $.workflow_rules.phase_closed),
   };
-  const assignee = status?.policy.assignee;
-  const ownerValue =
-    assignee?.type === "keep" || !assignee
-      ? "keep"
-      : `${assignee.type}:${assignee.id}`;
-  const ownerChoices = actorChoices.map((c) =>
-    c.value === "keep"
-      ? { ...c, label: t(($) => $.workflow_rules.keep_assignee) }
-      : c,
-  );
-  if (!ownerChoices.some((c) => c.value === ownerValue))
-    ownerChoices.push({
-      value: ownerValue,
-      label: t(($) => $.workflow.unavailable),
-    });
   const executor = status?.policy.executor;
-  const executorValue =
-    !executor || executor.type === "none"
-      ? "none"
-      : `${executor.type}:${executor.id}`;
-  const executorChoices = [
-    { value: "none", label: t(($) => $.workflow_rules.no_automatic_run) },
-    ...actorChoices.filter(
-      (c) => c.value.startsWith("agent:") || c.value.startsWith("squad:"),
-    ),
-  ];
-  if (!executorChoices.some((c) => c.value === executorValue))
-    executorChoices.push({
-      value: executorValue,
-      label: t(($) => $.workflow.unavailable),
-    });
+  const executorType = executor?.type ?? "none";
+  const executorId = executor && executor.type !== "none" ? executor.id : "";
+  const targetQuery = executorType === "agent" ? agents : squads;
+  const fieldError = (field: "name" | "executor" | "instructions") => {
+    const problem = showErrors && problems.find((p) => p.key === status?.key &&
+      (p.problem === field || (field === "name" && p.problem === "duplicate")));
+    return problem ? t(($) => $.workflow.problems[problem.problem]) : undefined;
+  };
 
   return (
-    <fieldset disabled={disabled} className="min-w-0 space-y-4">
-      <div className="grid min-w-0 gap-6 md:grid-cols-2">
+    <fieldset ref={editorRef} disabled={disabled} className="min-w-0 space-y-4">
+      <div className={cn("grid min-w-0 gap-6", !statusKey && "md:grid-cols-2")}>
+        {!statusKey && (
         <section
           aria-label={t(($) => $.workflow.title)}
           className="min-w-0 space-y-1"
@@ -311,27 +270,11 @@ export function WorkflowEditor({
                   )}
                 </button>
               </div>
-              <div className="ml-5 flex min-h-7 items-center justify-between border-l pl-3">
-                <span className="text-caption text-muted-foreground">
-                  {s.policy.next_status_key
-                    ? `→ ${value.statuses.find((n) => n.key === s.policy.next_status_key)?.name || t(($) => $.workflow.new_status)}`
-                    : ""}
-                </span>
-                {value.statuses.length < 50 && (
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`${t(($) => $.workflow.add)}: ${s.name}`}
-                    onClick={() => add(i)}
-                  >
-                    <Plus className="size-3" />
-                  </Button>
-                )}
-              </div>
             </div>
           ))}
-          {!value.statuses.length && (
-            <Button variant="outline" onClick={() => add(-1)}>
+          {value.statuses.length < 50 && (
+            <Button variant="outline" onClick={() => add(value.statuses.length - 1)}>
+              <Plus className="size-3" />
               {t(($) => $.workflow.add)}
             </Button>
           )}
@@ -339,12 +282,13 @@ export function WorkflowEditor({
             {t(($) => $.workflow.reorder_hint)}
           </p>
         </section>
+        )}
         {status && (
           <section
             aria-label={t(($) => $.workflow.editor_title)}
-            className="min-w-0 space-y-4 border-t pt-5 md:border-l md:border-t-0 md:pl-6 md:pt-0"
+            className={cn("min-w-0 space-y-4", !statusKey && "border-t pt-5 md:border-l md:border-t-0 md:pl-6 md:pt-0")}
           >
-            <div className="flex items-center justify-between gap-2">
+            {!statusKey && (<div className="flex items-center justify-between gap-2">
               <span className="text-caption text-muted-foreground">
                 {index + 1} / {value.statuses.length}
               </span>
@@ -382,186 +326,152 @@ export function WorkflowEditor({
                 </Button>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label
-                htmlFor={`${id}-name`}
-                className="text-caption font-medium"
-              >
-                {t(($) => $.workflow.status_name)}
-              </label>
-              <Input
-                id={`${id}-name`}
-                maxLength={64}
-                value={status.name}
-                onChange={(event) => update({ name: event.target.value })}
-              />
-            </div>
-            <ChoiceField
-              id={`${id}-owner`}
-              label={t(($) => $.workflow.owner)}
-              value={ownerValue}
-              items={ownerChoices}
-              onChange={(v) => {
-                const [type, targetId = ""] = v.split(":");
-                updatePolicy({
-                  assignee:
-                    type === "keep"
-                      ? { type: "keep" }
-                      : ({
-                          type,
-                          id: targetId,
-                        } as IssueWorkflowAssigneeTarget),
-                });
-              }}
-            />
-            <h3 className="pt-3 text-body font-medium">
-              {t(($) => $.workflow.action)}
-            </h3>
-            <ChoiceField
-              id={`${id}-executor`}
-              label={t(($) => $.workflow.run_on_entry)}
-              value={executorValue}
-              items={executorChoices}
-              onChange={(v) => {
-                const [type, targetId = ""] = v.split(":");
-                updatePolicy({
-                  ...(type === "none" ? { advance: "human_confirms" as const } : {}),
-                  executor:
-                    type === "none"
-                      ? { type: "none" }
-                      : ({
-                          type,
-                          id: targetId,
-                        } as IssueWorkflowExecutorTarget),
-                });
-              }}
-            />
-            <p className="flex gap-2 text-caption text-muted-foreground">
-              <Zap className="size-3.5 shrink-0" />
-              {t(($) =>
-                status.policy.executor.type === "none"
-                  ? $.workflow.manual_hint
-                  : $.workflow.auto_hint,
-              )}
-            </p>
-            <div className="space-y-1.5">
-              <label
-                htmlFor={`${id}-instructions`}
-                className="text-caption font-medium"
-              >
-                {t(($) => $.workflow.instructions)}
-              </label>
-              <Textarea
-                id={`${id}-instructions`}
-                rows={4}
-                value={status.policy.instructions}
-                onChange={(event) =>
-                  updatePolicy({ instructions: event.target.value })
-                }
-              />
-            </div>
-            <h3 className="pt-3 text-body font-medium">
-              {t(($) => $.workflow.transitions)}
-            </h3>
-            <ChoiceField
-              id={`${id}-next`}
-              label={t(($) => $.workflow.next_status)}
-              value={status.policy.next_status_key ?? ""}
-              items={[
-                { value: "", label: t(($) => $.workflow.no_next) },
-                ...value.statuses
-                  .filter((s) => s.key !== status.key)
-                  .map((s) => ({
-                    value: s.key,
-                    label: s.name || t(($) => $.workflow.new_status),
-                  })),
-              ]}
-              onChange={(next_status_key) => updatePolicy({ next_status_key })}
-            />
-            {status.policy.executor.type !== "none" && (
-              <ChoiceField
-                id={`${id}-advance`}
-                label={t(($) => $.workflow.advance)}
-                value={status.policy.advance}
-                items={[
-                  {
-                    value: "human_confirms",
-                    label: t(($) => $.workflow.human_confirms),
-                  },
-                  {
-                    value: "executor_may_transition",
-                    label: t(($) => $.workflow.agent_advances),
-                  },
-                ]}
-                onChange={(v) =>
-                  updatePolicy({
-                    advance: v as WorkflowStatus["policy"]["advance"],
-                  })
-                }
-              />
             )}
-            {terminal && (
-              <p className="text-caption text-muted-foreground">
-                {t(($) => $.workflow.terminal_hint)}
-              </p>
-            )}
-            <details className="space-y-3 text-caption">
-              <summary className="cursor-pointer text-muted-foreground">
-                {t(($) => $.workflow.advanced)}
-              </summary>
-              <ChoiceField
-                id={`${id}-initial`}
-                label={t(($) => $.workflow.start)}
-                value={value.initialKey}
-                items={value.statuses.map((s) => ({
-                  value: s.key,
-                  label: s.name || t(($) => $.workflow.new_status),
-                }))}
-                onChange={(initialKey) => onChange({ ...value, initialKey })}
-              />
-              <ChoiceField
-                id={`${id}-phase`}
-                label={t(($) => $.workflow.phase)}
-                value={status.phase}
-                items={phases.map((v) => ({ value: v, label: phaseLabels[v] }))}
-                onChange={(v) => update({ phase: v as IssueWorkflowPhase })}
-              />
-              <div className="space-y-1.5">
-                <label htmlFor={`${id}-color`}>
-                  {t(($) => $.workflow_rules.color_label)}
-                </label>
+            <FieldGroup>
+              <Field className="gap-1.5" data-invalid={!!fieldError("name")}>
+                <FieldLabel
+                  htmlFor={`${id}-name`}
+                  className="text-caption font-medium"
+                >
+                  {t(($) => $.workflow.status_name)}
+                </FieldLabel>
                 <Input
-                  id={`${id}-color`}
-                  type="color"
-                  value={status.color}
-                  onChange={(event) => update({ color: event.target.value })}
-                  className="w-16 p-1"
+                  id={`${id}-name`}
+                  aria-invalid={!!fieldError("name") || undefined}
+                  aria-describedby={fieldError("name") ? `${id}-name-error` : undefined}
+                  maxLength={64}
+                  value={status.name}
+                  onChange={(event) => update({ name: event.target.value })}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor={`${id}-description`}>
-                  {t(($) => $.workflow.description)}
-                </label>
-                <Textarea
-                  id={`${id}-description`}
-                  maxLength={256}
-                  value={status.description}
-                  onChange={(event) =>
-                    update({ description: event.target.value })
+                <FieldError id={`${id}-name-error`} className="text-caption">{fieldError("name")}</FieldError>
+              </Field>
+              <ChoiceField
+                id={`${id}-action`}
+                label={t(($) => $.workflow.run_on_entry)}
+                value={executorType}
+                items={[
+                  { value: "none", label: t(($) => $.workflow_rules.no_automatic_run) },
+                  { value: "agent", label: t(($) => $.workflow.run_agent) },
+                  { value: "squad", label: t(($) => $.workflow.run_squad) },
+                ]}
+                onChange={(type) => {
+                  if (type === executorType) return;
+                  if (type === "none") {
+                    updatePolicy({ executor: { type: "none" }, instructions: "" });
+                  } else if (type === "agent" || type === "squad") {
+                    updatePolicy({ executor: { type, id: "" } });
                   }
-                />
-              </div>
-            </details>
+                }}
+              />
+              {executorType !== "none" && (
+                <Field className="gap-1.5" data-invalid={!!fieldError("executor")}>
+                  <FieldLabel htmlFor={`${id}-executor`} className="text-caption font-medium">
+                    {t(($) => executorType === "agent" ? $.workflow.agent : $.workflow.squad)}
+                  </FieldLabel>
+                  <WorkflowExecutorPicker
+                    key={`${status.key}-${executorType}`}
+                    id={`${id}-executor`}
+                    type={executorType}
+                    value={executorId}
+                    choices={executorType === "agent" ? agentChoices : squadChoices}
+                    disabled={disabled}
+                    invalid={!!fieldError("executor")}
+                    loading={targetQuery.isPending}
+                    loadError={targetQuery.isError}
+                    onRetry={() => { void targetQuery.refetch(); }}
+                    onChange={(targetId) => updatePolicy({ executor: { type: executorType, id: targetId } })}
+                  />
+                  <FieldError id={`${id}-executor-error`} className="text-caption">{fieldError("executor")}</FieldError>
+                </Field>
+              )}
+              {status.policy.executor.type !== "none" && (
+                <Field className="gap-1.5" data-invalid={!!fieldError("instructions")}>
+                  <FieldLabel
+                    htmlFor={`${id}-instructions`}
+                    className="text-caption font-medium"
+                  >
+                    {t(($) => $.workflow.instructions)}
+                  </FieldLabel>
+                  <Textarea
+                    id={`${id}-instructions`}
+                    aria-invalid={!!fieldError("instructions") || undefined}
+                    aria-describedby={fieldError("instructions") ? `${id}-instructions-error` : `${id}-instructions-hint`}
+                    placeholder={t(($) => $.workflow.instructions_placeholder)}
+                    rows={4}
+                    value={status.policy.instructions}
+                    onChange={(event) =>
+                      updatePolicy({ instructions: event.target.value })
+                    }
+                  />
+                  <FieldDescription id={`${id}-instructions-hint`} className="text-caption">
+                    {t(($) => $.workflow.instructions_hint)}
+                  </FieldDescription>
+                  <FieldError id={`${id}-instructions-error`} className="text-caption">{fieldError("instructions")}</FieldError>
+                </Field>
+              )}
+              <Collapsible>
+                <CollapsibleTrigger render={<Button variant="ghost" size="sm" className="group -ml-2 text-muted-foreground" />}>
+                  <ChevronRight className="size-3.5 group-data-[panel-open]:rotate-90" />
+                  {t(($) => $.workflow.advanced)}
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <FieldGroup className="pt-4">
+                    {!statusKey && (<ChoiceField
+                      id={`${id}-initial`}
+                      label={t(($) => $.workflow.start)}
+                      value={value.initialKey}
+                      items={value.statuses.map((s) => ({
+                        value: s.key,
+                        label: s.name || t(($) => $.workflow.new_status),
+                      }))}
+                      onChange={(initialKey) => onChange({ ...value, initialKey })}
+                    />)}
+                    <ChoiceField
+                      id={`${id}-phase`}
+                      label={t(($) => $.workflow.phase)}
+                      value={status.phase}
+                      items={phases.map((v) => ({ value: v, label: phaseLabels[v] }))}
+                      onChange={(v) => update({ phase: v as IssueWorkflowPhase })}
+                    />
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`${id}-color`} className="text-caption font-medium">
+                        {t(($) => $.workflow_rules.color_label)}
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-color`}
+                        type="color"
+                        value={status.color}
+                        onChange={(event) => update({ color: event.target.value })}
+                        className="max-w-16 p-1"
+                      />
+                    </Field>
+                    <Field className="gap-1.5">
+                      <FieldLabel htmlFor={`${id}-description`} className="text-caption font-medium">
+                        {t(($) => $.workflow.description)}
+                      </FieldLabel>
+                      <Textarea
+                        id={`${id}-description`}
+                        maxLength={256}
+                        value={status.description}
+                        onChange={(event) =>
+                          update({ description: event.target.value })
+                        }
+                      />
+                    </Field>
+                  </FieldGroup>
+                </CollapsibleContent>
+              </Collapsible>
+            </FieldGroup>
           </section>
         )}
       </div>
-      {value.statuses.find((s) => s.key === value.initialKey)?.policy.executor
+      {!statusKey && value.statuses.find((s) => s.key === value.initialKey)?.policy.executor
         .type !== "none" && (
         <p className="text-caption text-muted-foreground">
           {t(($) => $.workflow.initial_auto_hint)}
         </p>
       )}
-      {showErrors && problems.length > 0 && (
+      {showErrors && problems.length > 0 && !problems.some((p) => p.key === status?.key && ["name", "duplicate", "executor", "instructions"].includes(p.problem)) && (
         <p role="alert" className="text-caption text-destructive">
           {t(($) => $.workflow.problems[problems[0]!.problem])}
         </p>

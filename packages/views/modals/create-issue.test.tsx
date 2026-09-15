@@ -319,7 +319,7 @@ function workflowFixture(projectId: string | null = null) {
     statuses: ["Ready", "Review"].map((name, position) => ({
       id: `${prefix}-${name.toLowerCase()}`, workflow_id: `${prefix}-flow`, spec_key: name.toLowerCase(), legacy_status_key: `${prefix}_${name.toLowerCase()}`, name,
       position, phase: position ? "started" : "unstarted", color: "#123456", description: "", outcome: null, archived_at: null,
-      entry_policy: { assignee: { type: "keep" }, executor: { type: "none" }, instructions: "", advance: "human_confirms" }, entry_policy_revision: 1, created_at: "", updated_at: "",
+      entry_policy: { executor: { type: "none" }, instructions: "" }, entry_policy_revision: 1, created_at: "", updated_at: "",
     })),
   };
 }

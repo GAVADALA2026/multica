@@ -15,7 +15,7 @@ import {
 import {
   activeWorkflowStatuses,
   issueAutomationExecutionsOptions,
-  workflowHandoff,
+  workflowExecutionState,
   effectiveIssueWorkflowOptions,
   issueWorkflowOptions,
 } from "@multica/core/issue-workflows";
@@ -121,7 +121,7 @@ function ChangeForm({
     ...issueAutomationExecutionsOptions(wsId, issue.id),
     enabled: !moving && !!issue.workflow_id,
   });
-  const { active } = workflowHandoff(issue, [], executions.data ?? []);
+  const { active } = workflowExecutionState(issue, executions.data ?? []);
   const executionReady = moving || !issue.workflow_id || executions.isSuccess;
   const nodes = activeWorkflowStatuses(workflowQuery.data);
   const [selectedId, setSelectedId] = useState<string>();

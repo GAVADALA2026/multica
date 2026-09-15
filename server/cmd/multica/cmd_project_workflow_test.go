@@ -48,7 +48,7 @@ statuses:
     phase: unstarted
     icon: three_quarters
     entry_policy:
-      next_status_key: review
+      instructions: Review the specification.
 `)
 	spec, err := readWorkflowFile(workflowFileTestCommand(t), path, "file")
 	if err != nil {
@@ -59,8 +59,8 @@ statuses:
 	}
 
 	resolved, err := resolveWorkflowFileSpec(context.Background(), &cli.APIClient{}, spec)
-	if err != nil || resolved.Statuses[0].EntryPolicy.NextStatusKey != "review" || resolved.Statuses[0].Icon != "three_quarters" {
-		t.Fatalf("handoff destination lost during CLI resolution: %#v, %v", resolved, err)
+	if err != nil || resolved.Statuses[0].EntryPolicy.Instructions != "Review the specification." || resolved.Statuses[0].Icon != "three_quarters" {
+		t.Fatalf("status configuration lost during CLI resolution: %#v, %v", resolved, err)
 	}
 
 	badPath := writeWorkflowTestFile(t, "api_version: 1\nunknown_field: true\n")
@@ -71,11 +71,7 @@ statuses:
 
 func TestResolveWorkflowPrincipalDefaultsWithoutNetwork(t *testing.T) {
 	client := &cli.APIClient{}
-	assignee, err := resolveWorkflowPrincipal(context.Background(), client, workflowFilePrincipal{}, false)
-	if err != nil || assignee.Type != issueworkflow.AssigneeKeep {
-		t.Fatalf("default assignee = %#v, %v", assignee, err)
-	}
-	executor, err := resolveWorkflowPrincipal(context.Background(), client, workflowFilePrincipal{}, true)
+	executor, err := resolveWorkflowPrincipal(context.Background(), client, workflowFilePrincipal{})
 	if err != nil || executor.Type != issueworkflow.ExecutorNone {
 		t.Fatalf("default executor = %#v, %v", executor, err)
 	}
