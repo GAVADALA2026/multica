@@ -63,7 +63,7 @@ the command returns; this is not a background service.
    deployment revision/replica evidence: the database cannot prove this.
    `parameters.writers_upgraded=true` is the operator's explicit attestation,
    not automatic proof of deployment.
-3. Apply migrations 479–482. They only create the maintenance table and three
+3. Apply migrations 485–488. They only create the maintenance table and three
    unique indexes; indexes run concurrently in separate migration files with
    invalid-index cleanup hooks. No issue-status rows are changed.
 4. Record baseline API latency/error rate, row-lock waits, DB I/O, WAL rate and

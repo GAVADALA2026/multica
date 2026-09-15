@@ -58,7 +58,7 @@ func fixture(t *testing.T) (*pgxpool.Pool, *Service) {
 		}
 	}
 	exec("CREATE TABLE schema_migrations(version text)")
-	for _, name := range []string{"332_issue_status", "333_issue_status_pkey_index", "478_issue_status_category_expand", "479_maintenance_job", "480_maintenance_job_id_index", "481_maintenance_job_idempotency_index", "482_maintenance_job_active_index"} {
+	for _, name := range []string{"332_issue_status", "333_issue_status_pkey_index", "478_issue_status_category_expand", "485_maintenance_job", "486_maintenance_job_id_index", "487_maintenance_job_idempotency_index", "488_maintenance_job_active_index"} {
 		body, err := os.ReadFile(filepath.Join("..", "..", "migrations", name+".up.sql"))
 		if err != nil {
 			t.Fatal(err)
