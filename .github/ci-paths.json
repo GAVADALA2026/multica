@@ -70,9 +70,7 @@
     "scripts/check-ui-wildcard-exports.test.sh",
     ".github/workflows/mobile-verify.yml",
     ".github/workflows/ci.yml",
-    ".github/ci-paths.json",
-    "scripts/ci-scope.mjs",
-    "scripts/ci-scope.test.mjs"
+    ".github/ci-paths.json"
   ],
   "scripts": [
     "scripts/generate-reserved-slugs.mjs",

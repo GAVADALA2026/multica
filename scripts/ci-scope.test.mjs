@@ -69,57 +69,6 @@ test("missing, malformed and unsupported filter results fail closed", () => {
   assert.throws(() => decideScopes("unknown", filterFiles([])), /Unsupported/);
 });
 
-const mapping = { tests: "backend", sqlc: "sqlc" };
-function needs(backend = "true", sqlc = "false") {
-  return {
-    changes: { result: "success", outputs: { backend, sqlc } },
-    tests: { result: backend === "true" ? "success" : "skipped" },
-    sqlc: { result: sqlc === "true" ? "success" : "skipped" },
-  };
-}
-
-test("gates accept success and only explicitly selected skips", () => {
-  for (const backend of ["true", "false"]) {
-    for (const sqlc of ["true", "false"]) checkGate(needs(backend, sqlc), mapping);
-  }
-});
-
-test("failed or cancelled changes cannot turn skipped tests into a green gate", () => {
-  for (const result of ["failure", "cancelled", "skipped", undefined]) {
-    const input = needs("false", "false");
-    input.changes.result = result;
-    assert.throws(() => checkGate(input, mapping), /Path filtering/);
-  }
-});
-
-test("an expected job cannot fail, disappear or be skipped", () => {
-  for (const result of ["failure", "cancelled", "skipped", undefined]) {
-    const input = needs();
-    input.tests.result = result;
-    assert.throws(() => checkGate(input, mapping), /tests/);
-  }
-  const input = needs();
-  delete input.tests;
-  assert.throws(() => checkGate(input, mapping), /missing/);
-});
-
-test("unselected jobs cannot hide failures, and missing outputs cannot authorize skips", () => {
-  const input = needs("false");
-  input.tests.result = "failure";
-  assert.throws(() => checkGate(input, mapping), /tests/);
-  for (const value of [undefined, "", "unknown"]) {
-    const missing = needs("false");
-    missing.changes.outputs.backend = value;
-    assert.throws(() => checkGate(missing, mapping), /scope/);
-  }
-});
-
-test("adding a dependency without checking it cannot silently pass", () => {
-  const input = needs();
-  input.extra = { result: "failure" };
-  assert.throws(() => checkGate(input, mapping), /Unchecked dependency/);
-});
-
 // Read the production wiring without installing workspace dependencies in the
 // lightweight changes job. These fields deliberately use single-line syntax;
 // unsupported formatting fails the assertions instead of being silently ignored.
@@ -179,11 +128,36 @@ for (const gate of ["frontend", "backend"]) {
       for (const result of ["failure", "cancelled", "skipped", undefined]) {
         const input = productionNeeds(gate, outputs);
         assert.equal(input[job].result, "success");
-        if (result === undefined) delete input[job];
-        else input[job].result = result;
+        input[job].result = result;
         assert.throws(() => checkGate(input, mapping), new RegExp(job));
       }
+      const missing = productionNeeds(gate, outputs);
+      delete missing[job];
+      assert.throws(() => checkGate(missing, mapping), new RegExp(job));
     }
+  });
+
+  test(`production ${gate} gate rejects invalid filtering and unchecked dependencies`, () => {
+    const mapping = productionMapping(gate);
+    const unselected = () => productionNeeds(gate, decideScopes("pull_request", filterFiles([])));
+    for (const result of ["failure", "cancelled", "skipped", undefined]) {
+      const input = unselected();
+      input.changes.result = result;
+      assert.throws(() => checkGate(input, mapping), /Path filtering/);
+    }
+    for (const [job, scope] of Object.entries(mapping)) {
+      const failed = unselected();
+      failed[job].result = "failure";
+      assert.throws(() => checkGate(failed, mapping), new RegExp(job));
+      for (const value of [undefined, "", "unknown"]) {
+        const invalid = unselected();
+        invalid.changes.outputs[scope] = value;
+        assert.throws(() => checkGate(invalid, mapping), /scope/);
+      }
+    }
+    const extra = unselected();
+    extra.extra = { result: "failure" };
+    assert.throws(() => checkGate(extra, mapping), /Unchecked dependency/);
   });
 }
 
@@ -224,12 +198,12 @@ test("the CLI writes real Actions outputs and exits nonzero on a failed gate", (
   });
   assert.equal(run.status, 0, run.stderr);
   assert.match(readFileSync(output, "utf8"), /^backend=false$/m);
-  const failed = needs();
-  failed.tests.result = "failure";
+  const failed = productionNeeds("backend", decideScopes("workflow_dispatch", {}));
+  failed["backend-tests"].result = "failure";
   const gate = spawnSync(process.execPath, [script, "gate"], {
-    env: { ...process.env, NEEDS_JSON: JSON.stringify(failed), JOB_SCOPES: JSON.stringify(mapping) },
+    env: { ...process.env, NEEDS_JSON: JSON.stringify(failed), JOB_SCOPES: JSON.stringify(productionMapping("backend")) },
     encoding: "utf8",
   });
   assert.equal(gate.status, 1);
-  assert.match(gate.stderr, /tests/);
+  assert.match(gate.stderr, /backend-tests/);
 });
