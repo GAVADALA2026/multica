@@ -514,7 +514,6 @@
       "loading": "接続を読み込み中…",
       "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
       "empty_title": "接続済みのアプリがありません",
-      "empty_hint": "接続済みのアプリはありません。",
       "empty_link_to_settings": "設定 → 連携 で接続する",
       "connected": "接続済み",
       "toggle_aria": "この agent に {{toolkit}} を許可",

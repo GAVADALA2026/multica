@@ -474,7 +474,7 @@ function OverviewTab({
         <section>
           <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
           <details className="mt-1 text-caption text-muted-foreground">
-            <summary className="cursor-pointer rounded py-2 focus-visible:outline-2 focus-visible:outline-ring">
+            <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
               {t(($) => $.detail.overview.properties_help)}
             </summary>
             <p className="mt-1">{t(($) => $.detail.overview.properties_hint)}</p>

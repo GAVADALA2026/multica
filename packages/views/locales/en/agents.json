@@ -628,7 +628,6 @@
       "loading": "Loading your connections…",
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
-      "empty_hint": "No connected apps yet.",
       "empty_link_to_settings": "Connect one in Settings → Integrations",
       "connected": "Connected",
       "toggle_aria": "Allow {{toolkit}} for this agent",

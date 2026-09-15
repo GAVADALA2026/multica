@@ -522,7 +522,6 @@
       "loading": "연결을 불러오는 중…",
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
-      "empty_hint": "연결된 앱이 없습니다.",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",

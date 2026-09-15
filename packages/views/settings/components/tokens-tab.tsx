@@ -135,7 +135,7 @@ export function TokensTab() {
         description={t(($) => $.tokens.security_note)}
       >
         <details className="text-caption text-muted-foreground">
-          <summary className="cursor-pointer rounded py-2 focus-visible:outline-2 focus-visible:outline-ring">
+          <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
             {t(($) => $.tokens.usage_help)}
           </summary>
           <p className="mt-1">{t(($) => $.tokens.description)}</p>

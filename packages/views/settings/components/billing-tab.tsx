@@ -1439,7 +1439,7 @@ function BillingTabContent() {
             <SettingsRow
               label={
                 <details>
-                  <summary className="cursor-pointer rounded py-2 focus-visible:outline-2 focus-visible:outline-ring">
+                  <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
                     {t(($) => $.workspace.seats.available)}
                   </summary>
                   <p className="mt-1 text-caption font-normal text-muted-foreground">

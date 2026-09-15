@@ -616,7 +616,6 @@
       "loading": "正在加载你的连接…",
       "load_failed": "无法加载你已连接的应用，请稍后重试。",
       "empty_title": "还没有已连接的应用",
-      "empty_hint": "暂无已连接应用。",
       "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
       "connected": "已连接",
       "toggle_aria": "允许该智能体使用 {{toolkit}}",
