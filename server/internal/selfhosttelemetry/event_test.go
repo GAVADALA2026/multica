@@ -170,12 +170,20 @@ func TestNormalizeVersion(t *testing.T) {
 		want  string
 	}{
 		{"v1.2.3", "v1.2.3"},
-		{"1.2.3", "1.2.3"},
+		{"1.2.3", "v1.2.3"},
 		{" v0.4.30 ", "v0.4.30"},
+		{"v1.2.3-alpha", "v1.2.3-alpha"},
+		{"1.2.3-alpha.1", "v1.2.3-alpha.1"},
+		{"v1.2.3-beta.2", "v1.2.3-beta.2"},
+		{"v1.2.3-rc.999", "v1.2.3-rc.999"},
 		{"dev", "unknown"},
 		{"", "unknown"},
 		{"v1.2.3-dirty", "unknown"},
 		{"v1.2.3-4-gabcdef", "unknown"},
+		{"v1.2.3-preview.1", "unknown"},
+		{"v1.2.3-rc.0", "unknown"},
+		{"v1.2.3-rc.1000", "unknown"},
+		{"v10000.2.3", "unknown"},
 		{"abcdef012345", "unknown"},
 		{"v01.2.3", "unknown"},
 	} {

@@ -129,7 +129,7 @@ func (w *Worker) runOnce(ctx context.Context, now time.Time) (next time.Time, er
 		return scheduledAt(state.InstanceID, tomorrow), nil
 	}
 
-	if state.PendingDay != nil && (!sameDay(*state.PendingDay, today) || now.Sub(utcDay(*state.PendingDay)) >= 72*time.Hour) {
+	if state.PendingDay != nil && !sameDay(*state.PendingDay, today) {
 		if err := session.DropPending(ctx); err != nil {
 			return now.Add(leaderRetryDelay), err
 		}

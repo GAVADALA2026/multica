@@ -17,7 +17,8 @@ const (
 	maxTaskCount   = int64(1_000_000)
 )
 
-var releaseVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+var releaseVersionPattern = regexp.MustCompile(
+	`^v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})(-(alpha|beta|rc)(\.[1-9][0-9]{0,2})?)?$`)
 
 // Event is the complete V1 wire contract. Keep this strongly typed: the Cloud
 // receiver rejects unknown fields, and arbitrary maps could accidentally turn
@@ -116,6 +117,9 @@ func normalizeVersion(version string) string {
 	version = strings.TrimSpace(version)
 	if !releaseVersionPattern.MatchString(version) {
 		return "unknown"
+	}
+	if !strings.HasPrefix(version, "v") {
+		return "v" + version
 	}
 	return version
 }
