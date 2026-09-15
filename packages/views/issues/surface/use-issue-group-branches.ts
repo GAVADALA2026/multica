@@ -81,8 +81,9 @@ function branchDescriptors(
   return descriptors.flatMap((descriptor) =>
     descriptor.secondary_groups?.length
       ? descriptor.secondary_groups.filter((secondary) => {
-          if (!allowed || secondary.value.kind !== "status") return true;
-          return allowed.has(secondary.value.status);
+          if (!allowed) return true;
+          if (secondary.value.kind === "workflow_status") return allowed.has(secondary.value.workflow_status_id ?? secondary.value.status);
+          return secondary.value.kind !== "status" || allowed.has(secondary.value.status);
         })
       : [descriptor],
   );

@@ -336,6 +336,15 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
+	if issue.WorkflowID.Valid {
+		workflow, err := s.Queries.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			return err
+		}
+		if workflow.ScopeType == "project" {
+			return nil
+		}
+	}
 	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
 	if state.Behavior != "todo" && state.Behavior != "in_progress" {
 		return nil
@@ -774,13 +783,22 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
-	issue, _, _, err = issueworkflow.RecordTransition(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
-		Type: "agent",
-		ID:   leader.ID,
-	}, "autopilot_issue_created")
+	// Link before entry so its task resolves the firing trigger's principal.
+	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID: run.ID, IssueID: issue.ID,
+	})
 	if err != nil {
-		return fmt.Errorf("record initial issue transition: %w", err)
+		return fmt.Errorf("link run to issue: %w", err)
 	}
+	actor := issueworkflow.TransitionActor{Type: "agent", ID: leader.ID}
+	if actorUserID.Valid {
+		actor = issueworkflow.TransitionActor{Type: "member", ID: actorUserID}
+	}
+	entry, err := EnterIssueWorkflowStatus(ctx, qtx, nil, issue, actor, "autopilot_issue_created")
+	if err != nil {
+		return fmt.Errorf("apply initial workflow entry: %w", err)
+	}
+	issue = entry.Issue
 
 	// Fan out the default subscriber template inside the same tx as the
 	// issue insert, before EventIssueCreated fires — so notification
@@ -801,18 +819,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		}
 	}
 
-	// Link the run inside the same tx as the issue insert. This makes the
-	// recent-duplicate guard count only fully observable autopilot issues and
-	// avoids a crash window where recovery would see an orphan issue but no
-	// linked run.
-	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
-		ID:      run.ID,
-		IssueID: issue.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("link run to issue: %w", err)
-	}
-	*run = updatedRun
 	if _, err := settleAutopilotQuota(ctx, qtx, run.QuotaReservationID, true); err != nil {
 		return fmt.Errorf("consume quota reservation: %w", err)
 	}
@@ -820,6 +826,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
+	*run = updatedRun
 
 	// Publish issue:created so the existing event chain fires
 	// (subscriber listeners, activity listeners, notification listeners). For
@@ -847,6 +854,16 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// the inbox rows directly here. Done after commit so a failure here doesn't
 	// roll back the issue itself.
 	s.notifyAutopilotSubscribersOnCreate(ctx, ap, issue, leader.ID, templateSubs)
+
+	// Workflow entry is durable with the issue. Project workflows own their
+	// initial action, including an explicitly manual entry; do not also dispatch
+	// the autopilot assignee through the legacy workspace path.
+	if s.TaskSvc != nil {
+		s.TaskSvc.NotifyWorkflowEntry(ctx, entry)
+	}
+	if entry.Task.ID.Valid || workflow.ScopeType == "project" {
+		return nil
+	}
 
 	// Enqueue agent task via the existing flow. Squad-assigned autopilots
 	// route to the resolved leader as the executing agent (Path A from

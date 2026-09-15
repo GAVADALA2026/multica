@@ -77,8 +77,8 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       options?: IssueSurfaceMutationOptions,
     ) => {
       if (!issueId) return;
-      if (issue?.workflow_id && (updates.status !== undefined || updates.workflow_status_id !== undefined ||
-        (updates.project_id !== undefined && updates.project_id !== issue.project_id))) {
+      if ((updates.project_id !== undefined && updates.project_id !== issueProjectId) ||
+        (issue?.workflow_id && (updates.status !== undefined || updates.workflow_status_id !== undefined))) {
         openModal("issue-workflow-change", { issueId, updates, options });
         return;
       }
@@ -121,7 +121,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         );
       }
     },
-    [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
+    [issue, issueId, issueProjectId, entryOf, surfaceActions, updateIssue, openModal, t],
   );
 
   // Explicit "open it somewhere else" CTA, so the new tab takes focus

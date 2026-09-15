@@ -477,21 +477,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
-	var initialTransition db.IssueTransition
-	issue, initialTransition, _, err = issueworkflow.RecordTransition(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
-		Type: p.CreatorType,
-		ID:   p.CreatorID,
+	entry, err := EnterIssueWorkflowStatus(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
+		Type: p.CreatorType, ID: p.CreatorID,
 	}, "issue_created")
-	if err != nil {
-		return IssueCreateResult{}, fmt.Errorf("record initial issue transition: %w", err)
-	}
-	issue, _, assignedTask, err = enterInitialWorkflowStatus(ctx, qtx, issue, initialTransition, issueworkflow.TransitionActor{
-		Type: p.CreatorType,
-		ID:   p.CreatorID,
-	})
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("apply initial workflow entry policy: %w", err)
 	}
+	issue, assignedTask = entry.Issue, entry.Task
 	workflowEntryTask = assignedTask.ID.Valid
 	initialWorkflow, err := qtx.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
 		ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,

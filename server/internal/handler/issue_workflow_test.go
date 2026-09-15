@@ -275,7 +275,7 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		ID:     parseUUID(created.ID),
 		Status: pgtype.Text{String: "todo", Valid: true},
 	}, map[string]json.RawMessage{"status": json.RawMessage(`"todo"`)}, nil, nil, nil, "todo", nil,
-		issueworkflow.TransitionActor{Type: "system"}, "issue_updated")
+		issueworkflow.TransitionActor{Type: "system"}, "issue_updated", nil)
 	if updateErr != nil {
 		t.Fatalf("generic status update error=%v", updateErr)
 	}
@@ -300,29 +300,16 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		t.Fatalf("switching project default drifted existing issue workflow to %s", uuidToString(pinned.WorkflowID))
 	}
 
-	// A project move that crosses workflow definitions cannot guess a mapping
-	// from matching names or legacy keys. The client must choose a target node.
-	testutil.Call(t, testHandler.UpdateIssue,
-		withURLParam(newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
-			"project_id": destinationProjectID,
-		}), "id", created.ID)).Want(http.StatusConflict)
-	workspaceInProgress, err := testHandler.Queries.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
-		WorkspaceID: workspaceID, WorkflowID: workspaceWorkflow.ID,
-		LegacyStatusKey: pgtype.Text{String: "in_progress", Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("load workspace in-progress node: %v", err)
-	}
+	// Project moves enter the effective workflow's configured initial status.
 	var moved IssueResponse
 	testutil.Call(t, testHandler.UpdateIssue,
 		withURLParam(newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
 			"project_id":             destinationProjectID,
-			"workflow_status_id":     uuidToString(workspaceInProgress.ID),
 			"expected_revision":      updatedIssue.Revision,
 			"expected_transition_id": uuidToString(updatedIssue.LastTransitionID),
 		}), "id", created.ID)).Want(http.StatusOK).JSON(&moved)
-	if moved.ProjectID == nil || *moved.ProjectID != destinationProjectID || moved.WorkflowID == nil || *moved.WorkflowID != uuidToString(workspaceWorkflow.ID) || moved.WorkflowStatusID == nil || *moved.WorkflowStatusID != uuidToString(workspaceInProgress.ID) {
-		t.Fatalf("explicit cross-workflow move = %#v", moved)
+	if moved.ProjectID == nil || *moved.ProjectID != destinationProjectID || moved.WorkflowID == nil || *moved.WorkflowID != uuidToString(workspaceWorkflow.ID) || moved.WorkflowStatusID == nil || *moved.WorkflowStatusID != uuidToString(workspaceWorkflow.InitialStatusID) {
+		t.Fatalf("initial-status project move = %#v", moved)
 	}
 
 	reloaded, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
@@ -338,7 +325,7 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 	status, err := testHandler.Queries.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 		WorkspaceID: workspaceID, WorkflowID: reloaded.WorkflowID, ID: reloaded.WorkflowStatusID,
 	})
-	if err != nil || uuidToString(status.ID) != uuidToString(workspaceInProgress.ID) {
+	if err != nil || uuidToString(status.ID) != uuidToString(workspaceWorkflow.InitialStatusID) {
 		t.Fatalf("load canonical status node = %#v, err=%v", status, err)
 	}
 }

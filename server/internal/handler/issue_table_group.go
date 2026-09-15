@@ -94,6 +94,8 @@ type resolvedIssueTableGroup struct {
 	// secondaryCategory marks a compound whose secondary axis is the CATEGORY
 	// of the status rather than its key, retained for installed clients.
 	secondaryCategory bool
+	secondaryWorkflow bool
+	workflowStatuses  map[string]issueTableWorkflowStatusRef
 	// categoryKeys maps each of the 4 categories to the concrete status keys
 	// that belong to it, resolved ONCE per request. Category predicates expand
 	// through this into `i.status = ANY(...)` so the (workspace_id, status)
@@ -316,17 +318,40 @@ END, ''))`,
 )) END`,
 		}, true
 	case "compound":
-		if group.Secondary != "status" && group.Secondary != "status_category" {
+		if group.Secondary != "status" && group.Secondary != "status_category" && group.Secondary != "workflow_status" {
 			writeIssueTableUnsupportedGroup(w, "secondary_group_unsupported", "Only status is supported as a secondary group.")
 			return resolvedIssueTableGroup{}, false
 		}
 		secondaryCategory := group.Secondary == "status_category"
+		secondaryWorkflow := group.Secondary == "workflow_status"
+		workflowStatuses := map[string]issueTableWorkflowStatusRef{}
 		if group.Primary != "assignee" && group.Primary != "project" && group.Primary != "parent" {
 			writeIssueTableUnsupportedGroup(w, "primary_group_unsupported", "This primary group is not supported.")
 			return resolvedIssueTableGroup{}, false
 		}
 		var customKeys map[string]string
-		if !secondaryCategory {
+		if secondaryWorkflow {
+			customKeys = map[string]string{}
+			rows, err := h.DB.Query(r.Context(), `SELECT id::text, workflow_id::text, COALESCE(legacy_status_key,''), name, color, COALESCE(icon,''), position, phase, archived_at::text FROM issue_workflow_status WHERE workspace_id=$1`, workspaceID)
+			if err != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+				return resolvedIssueTableGroup{}, false
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var node issueTableWorkflowStatusRef
+				if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt); err != nil {
+					writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+					return resolvedIssueTableGroup{}, false
+				}
+				workflowStatuses[node.ID] = node
+				customKeys[node.ID] = node.Phase
+			}
+			if rows.Err() != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
+				return resolvedIssueTableGroup{}, false
+			}
+		} else if !secondaryCategory {
 			var err error
 			customKeys, err = issuestatus.CustomKeyCategories(r.Context(), h.issueStatusCatalog(), workspaceID)
 			if err != nil {
@@ -338,6 +363,9 @@ END, ''))`,
 		seenInputs := make(map[string]bool, len(group.SecondaryValues))
 		normalizedSecondaryValues := make([]string, 0, len(group.SecondaryValues))
 		validSecondary := validIssueStatuses
+		if secondaryWorkflow {
+			validSecondary = nil
+		}
 		if secondaryCategory && !legacy {
 			validSecondary = validIssueStatusCategories
 		}
@@ -373,6 +401,8 @@ END, ''))`,
 			secondaryValues:   normalizedSecondaryValues,
 			secondaryFiltered: group.SecondaryValues != nil,
 			secondaryCategory: secondaryCategory,
+			secondaryWorkflow: secondaryWorkflow,
+			workflowStatuses:  workflowStatuses,
 			legacyCategories:  legacy,
 			statusCustomKeys:  customKeys,
 		}
@@ -651,7 +681,30 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		if group.secondaryCategory {
 			secondaryValues = group.categoryValues()
 		}
+		if group.secondaryWorkflow {
+			secondaryValues = append([]string(nil), group.secondaryValues...)
+			for id := range secondaryCounts {
+				if !issueTableContainsString(secondaryValues, id) {
+					secondaryValues = append(secondaryValues, id)
+				}
+			}
+			sort.Strings(secondaryValues)
+		}
 		for _, status := range secondaryValues {
+			if group.secondaryWorkflow {
+				node, exists := group.workflowStatuses[status]
+				context := issueTableGroupContext{}
+				if exists {
+					context.WorkflowStatus = &node
+				}
+				cell, err := (resolvedIssueTableGroup{kind: "workflow_status"}).descriptor(status, secondaryCounts[status], context, nil)
+				if err != nil {
+					return descriptor, err
+				}
+				cell.Key = "compound:" + base64.RawURLEncoding.EncodeToString([]byte(descriptor.Key)) + ":workflow_status:" + status
+				descriptor.SecondaryGroups = append(descriptor.SecondaryGroups, cell)
+				continue
+			}
 			statusCount := secondaryCounts[status]
 			descriptor.SecondaryGroups = append(descriptor.SecondaryGroups, issueTableGroupDescriptorResponse{
 				Key: compoundCellGroupKey(descriptor.Key, status, group.secondaryCategory),
@@ -804,11 +857,17 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		}
 		encodedAndStatus := strings.TrimPrefix(key, prefix)
 		axis := ":status:"
+		if group.secondaryWorkflow {
+			axis = ":workflow_status:"
+		}
 		if group.secondaryCategory {
 			axis = ":status_category:"
 		}
 		encoded, status, ok := strings.Cut(encodedAndStatus, axis)
 		validSecondary := validIssueStatuses
+		if group.secondaryWorkflow {
+			validSecondary = nil
+		}
 		if group.secondaryCategory {
 			validSecondary = group.categoryValues()
 			if normalized, valid := issuestatus.ParseCategory(status); valid && !group.legacyCategories {
@@ -816,6 +875,10 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 			}
 		}
 		_, custom := group.statusCustomKeys[status]
+		if group.secondaryWorkflow && strings.HasPrefix(status, "legacy:") {
+			legacyStatus := strings.TrimPrefix(status, "legacy:")
+			custom = legacyStatus != "" && len(legacyStatus) <= 64
+		}
 		if !ok || (!issueTableContainsString(validSecondary, status) && (group.secondaryCategory || !custom)) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
@@ -828,6 +891,9 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		primaryPredicate, ok := group.primary.predicate(w, string(decoded), addArg)
 		if !ok {
 			return "", false
+		}
+		if group.secondaryWorkflow {
+			return fmt.Sprintf("(%s) AND COALESCE(i.workflow_status_id::text, 'legacy:' || i.status) = %s::text", primaryPredicate, addArg(status)), true
 		}
 		if group.secondaryCategory {
 			return fmt.Sprintf("(%s) AND i.status = ANY(%s::text[])", primaryPredicate, addArg(group.categoryKeysFor(status))), true
@@ -1099,6 +1165,9 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 		// behaves as. In the category case a custom status counts into the cell
 		// of the column it renders in, never a cell of its own. (MUL-6243)
 		secondaryExpr := "i.status"
+		if group.secondaryWorkflow {
+			secondaryExpr = "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)"
+		}
 		if group.secondaryCategory {
 			secondaryExpr = group.categoryExpression(addArg)
 		}
@@ -1135,12 +1204,16 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
     i.parent_issue_id IS NULL AND
     EXISTS (SELECT 1 FROM promoted_parents p WHERE p.id = i.id)
   )`
+				childStatusExpr := "child.status"
+				if group.secondaryWorkflow {
+					childStatusExpr = "COALESCE(child.workflow_status_id::text, 'legacy:' || child.status)"
+				}
 				promotedParentsCTE = fmt.Sprintf(`, promoted_parents AS (
   SELECT DISTINCT child.parent_issue_id AS id
   FROM membership child
   WHERE child.parent_issue_id IS NOT NULL
-    AND child.status = ANY(%s::text[])
-)`, visibleKeysRef)
+    AND %s = ANY(%s::text[])
+)`, childStatusExpr, visibleKeysRef)
 			}
 			groupedCTE = fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*

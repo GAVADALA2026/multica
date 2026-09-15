@@ -204,6 +204,9 @@ export function useUpdateIssue() {
       return api.moveIssue(id, { ...target, ...moveIntent });
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
+      // Project moves select a new initial status and may start work. Wait for
+      // the authoritative result before changing membership or status in cache.
+      if (Object.prototype.hasOwnProperty.call(data, "project_id")) return;
       // suppress_run is a write-time control field, not an Issue column.
       // description_base is merge metadata, while description itself
       // is resolved against that base on the server and therefore is not safe
@@ -216,6 +219,8 @@ export function useUpdateIssue() {
         description_base: _descriptionBase,
         title_base: _titleBase,
         expected_revision: _expectedRevision,
+        expected_transition_id: _expectedTransitionId,
+        expected_workflow_revision: _expectedWorkflowRevision,
         ...patch
       } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
@@ -309,18 +314,12 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
     },
     onSuccess: (serverIssue, vars) => {
-      // Reconcile with the authoritative server entity by patching the one card
-      // in place — NOT by invalidating + refetching the list. The list refetch
-      // is what made a successful move flicker: the optimistic card was already
-      // in the right place, then the refetch replaced the whole column and the
-      // card re-landed. updateIssue returns the full issue and a position update
-      // touches only that row, so a surgical patch is the authoritative
-      // reconcile and is a visual no-op when the optimistic value matched.
-      //
-      // baseIssue = serverIssue: membership moves were already handled
-      // optimistically; against the post-write entity the changed dims come
-      // out false unless the server coerced a different value, so this pass
-      // is the plain surgical patch it always was.
+      // Project moves wait for the server because the destination chooses the
+      // initial status. Other writes have already applied their optimistic patch.
+      const movingProject = Object.prototype.hasOwnProperty.call(vars, "project_id");
+      const baseIssue = movingProject
+        ? qc.getQueryData<Issue>(issueKeys.detail(wsId, vars.id))
+        : serverIssue;
       const {
         suppress_run: _suppressRun,
         description_base: _descriptionBase,
@@ -335,8 +334,8 @@ export function useUpdateIssue() {
       // (clean-room review F3 response-ordering race).
       const { properties: _staleBag, ...reconcilable } = serverIssue;
       const reconcile = applyIssueChange(qc, wsId, serverIssue.id, reconcilable as typeof serverIssue, {
-        changed: issueChangedDims(intent, serverIssue),
-        baseIssue: serverIssue,
+        changed: issueChangedDims(movingProject ? serverIssue : intent, baseIssue),
+        baseIssue,
         // The HTTP response can arrive after a newer WS event. Reconcile the
         // committed snapshot only into projections that have not already
         // advanced beyond it; otherwise an older successful response would
@@ -356,17 +355,13 @@ export function useUpdateIssue() {
       invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
     onSettled: (_data, err, vars, ctx) => {
+      if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+      }
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
-      // The issue's own list + detail caches are reconciled surgically in
-      // onSuccess / onError, so they are deliberately NOT invalidated here — a
-      // full-list refetch on settle is what made drags flicker. Only aggregate
-      // caches that cannot be patched from a single issue are refreshed, plus
-      // the specific list keys the coordinator flagged as drifted (unknown
-      // membership, enter/leave beyond the loaded window, bucket-count drift).
-      // Those stale keys are the surgical replacement for the old blanket
-      // "invalidate myAll on project move" safety net (MUL-3669 / #4548): the
-      // old project's loaded list already had the card removed in onMutate,
-      // and only genuinely undecidable lists refetch here.
+      // Other writes reconcile loaded entities surgically. Refresh aggregate
+      // projections and lists whose membership could not be decided locally.
       invalidateIssueDerivatives(qc, wsId, {
         statusOrProjectChanged:
           vars.status !== undefined ||
@@ -551,6 +546,7 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
+      if (Object.prototype.hasOwnProperty.call(updates, "project_id")) return;
       // Control and description-merge fields are not safe optimistic cache
       // patches. The server resolves description against description_base, so
       // preserve the authoritative raw description (including media markers)
@@ -691,7 +687,11 @@ export function useBatchUpdateIssues() {
     },
     onSettled: (_data, err, _vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
-      // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
+      if (Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+      }
+      // For other writes, do not invalidate issueKeys.list / myAll: the onMutate
       // pass above is a complete surgical reconcile for the loaded bucketed
       // boards, so a full-board refetch on settle would only re-introduce the
       // flicker the single-issue update already removed. Aggregate / grouped

@@ -5869,7 +5869,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// status it inherits, so a custom review gate is excluded for
 				// the same reason In Review is. (MUL-6243)
 				state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
-				if state.AgentOwnsActiveWork() && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				// Workflow execution failure stays on its business status. Retrying
+				// that execution must not become another status-entry trigger.
+				if !t.AutomationExecutionID.Valid && state.AgentOwnsActiveWork() && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {

@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -99,6 +100,35 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	issue := in.Issue
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return IssueRunTrigger{}, false
+	}
+	if (in.IsCreate || in.StatusChanged) && issue.WorkflowID.Valid && issue.WorkflowStatusID.Valid {
+		// Status entry owns dispatch for project workflows and configured
+		// workspace nodes. Keep legacy workspace assignment triggers only when
+		// the node has no entry action. Preview uses this same decision.
+		workflow, err := s.Queries.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID})
+		if err != nil || workflow.ScopeType == "project" {
+			return IssueRunTrigger{}, false
+		}
+		node, err := s.Queries.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+			ID: issue.WorkflowStatusID, WorkflowID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return IssueRunTrigger{}, false
+		}
+		if issueworkflow.LegacyProjection(node) != issue.Status {
+			// Legacy preview overlays the proposed key before a node is pinned.
+			node, err = s.Queries.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+				WorkspaceID: issue.WorkspaceID, WorkflowID: issue.WorkflowID,
+				LegacyStatusKey: pgtype.Text{String: issue.Status, Valid: true},
+			})
+			if err != nil {
+				return IssueRunTrigger{}, false
+			}
+		}
+		policy, err := issueworkflow.DecodeEntryPolicy(node.EntryPolicy)
+		if err != nil || policy.Executor.Type != "none" {
+			return IssueRunTrigger{}, false
+		}
 	}
 	canAccess := probe.CanAccessAgent
 	if canAccess == nil {

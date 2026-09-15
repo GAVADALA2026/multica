@@ -3263,19 +3263,19 @@ type UpdateIssueRequest struct {
 	// it and receive conservative channel-media preservation.
 	DescriptionBase *string `json:"description_base,omitempty"`
 	Status          *string `json:"status"`
-	// WorkflowStatusID is the canonical destination for new clients. It is
-	// required when a project move crosses workflow boundaries. Status remains
-	// the installed-client adapter and cannot be sent in the same request.
-	WorkflowStatusID *string  `json:"workflow_status_id,omitempty"`
-	Priority         *string  `json:"priority"`
-	AssigneeType     *string  `json:"assignee_type"`
-	AssigneeID       *string  `json:"assignee_id"`
-	Position         *float64 `json:"position"`
-	StartDate        *string  `json:"start_date"`
-	DueDate          *string  `json:"due_date"`
-	ParentIssueID    *string  `json:"parent_issue_id"`
-	ProjectID        *string  `json:"project_id"`
-	Stage            *int32   `json:"stage"`
+	// WorkflowStatusID selects a status within the current workflow. An actual
+	// project move always enters the destination workflow's initial status.
+	WorkflowStatusID         *string  `json:"workflow_status_id,omitempty"`
+	ExpectedWorkflowRevision *int64   `json:"expected_workflow_revision,omitempty"`
+	Priority                 *string  `json:"priority"`
+	AssigneeType             *string  `json:"assignee_type"`
+	AssigneeID               *string  `json:"assignee_id"`
+	Position                 *float64 `json:"position"`
+	StartDate                *string  `json:"start_date"`
+	DueDate                  *string  `json:"due_date"`
+	ParentIssueID            *string  `json:"parent_issue_id"`
+	ProjectID                *string  `json:"project_id"`
+	Stage                    *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3377,7 +3377,7 @@ type issueWorkflowBinding struct {
 	WorkflowStatusID pgtype.UUID
 }
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workflowBinding *issueWorkflowBinding, actor issueworkflow.TransitionActor, cause string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workflowBinding *issueWorkflowBinding, actor issueworkflow.TransitionActor, cause string, expectedWorkflowRevision *int64) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3388,6 +3388,15 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	defer tx.Rollback(ctx)
 
 	qtx := h.Queries.WithTx(tx)
+	// Match workflow editing's project-first lock order so the destination's
+	// effective workflow cannot change between preview validation and entry.
+	if _, touched := rawFields["project_id"]; touched && params.ProjectID.Valid {
+		if _, err := qtx.LockProjectForIssueWorkflowApply(ctx, db.LockProjectForIssueWorkflowApplyParams{
+			ProjectID: params.ProjectID, WorkspaceID: workspaceID,
+		}); err != nil {
+			return db.Issue{}, db.Issue{}, false, err
+		}
+	}
 	// This path opens its own transaction, so it carries the archive-race guard
 	// itself rather than going through runWithIssueStatusGuard. The catalog lock
 	// must precede both attachment and issue row locks everywhere. (MUL-6243)
@@ -3410,16 +3419,55 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
 	}
 
-	statusChanges := params.Status.Valid && params.Status.String != current.Status
-	if workflowBinding != nil {
-		statusChanges = statusChanges || workflowBinding.WorkflowID != current.WorkflowID || workflowBinding.WorkflowStatusID != current.WorkflowStatusID
-	}
-	if statusChanges {
-		if err := service.AssertIssueWorkflowWriteAllowed(ctx, qtx, current, actor); err != nil {
+	refreshUntouchedNullableIssueParams(&params, current, rawFields)
+	projectChanged := current.ProjectID != params.ProjectID
+	if projectChanged {
+		workflow, err := issueworkflow.Effective(ctx, qtx, workspaceID, params.ProjectID)
+		if err != nil {
 			return db.Issue{}, current, false, err
+		}
+		workflowBinding = &issueWorkflowBinding{WorkflowID: workflow.ID, WorkflowStatusID: workflow.InitialStatusID}
+	}
+	if !projectChanged && params.Status.Valid && workflowBinding == nil {
+		target, err := service.ResolveIssueWorkflowStatus(ctx, qtx, current, params.Status.String)
+		if err != nil {
+			return db.Issue{}, current, false, err
+		}
+		workflowBinding = &issueWorkflowBinding{WorkflowID: target.WorkflowID, WorkflowStatusID: target.ID}
+	}
+	if workflowBinding != nil {
+		if !projectChanged && current.WorkflowID.Valid && current.WorkflowID != workflowBinding.WorkflowID {
+			return db.Issue{}, current, false, service.ErrIssueTransitionConflict
+		}
+		target, err := qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+			WorkspaceID: workspaceID, WorkflowID: workflowBinding.WorkflowID, ID: workflowBinding.WorkflowStatusID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.Issue{}, current, false, service.ErrIssueTransitionStatusUnavailable
+			}
+			return db.Issue{}, current, false, err
+		}
+		params.Status = pgtype.Text{String: issueworkflow.LegacyProjection(target), Valid: true}
+	}
+	if workflowBinding != nil && expectedWorkflowRevision != nil {
+		// Read the revision after locking the target policy, so a concurrent
+		// policy edit cannot slip between preview validation and status entry.
+		workflow, err := qtx.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+			ID: workflowBinding.WorkflowID, WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return db.Issue{}, current, false, err
+		}
+		if workflow.Revision != *expectedWorkflowRevision {
+			return db.Issue{}, current, false, service.ErrIssueTransitionConflict
 		}
 	}
 
+	statusChanges := projectChanged || (params.Status.Valid && params.Status.String != current.Status)
+	if workflowBinding != nil {
+		statusChanges = statusChanges || workflowBinding.WorkflowID != current.WorkflowID || workflowBinding.WorkflowStatusID != current.WorkflowStatusID
+	}
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
 		return db.Issue{}, current, false, errIssueFieldConflict
 	}
@@ -3457,8 +3505,6 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			Valid:  true,
 		}
 	}
-	refreshUntouchedNullableIssueParams(&params, current, rawFields)
-
 	issue, err := qtx.UpdateIssue(ctx, params)
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
@@ -3472,9 +3518,26 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			return db.Issue{}, current, false, fmt.Errorf("bind workflow status: %w", err)
 		}
 	}
-	issue, _, _, err = issueworkflow.RecordTransition(ctx, qtx, &current, issue, actor, cause)
-	if err != nil {
-		return db.Issue{}, current, false, err
+	var entry service.IssueTransitionResult
+	if statusChanges {
+		// A native node change can keep the same legacy projection. Give that
+		// entry its own revision even when the generic patch was otherwise a no-op.
+		if issue.Revision == current.Revision {
+			issue, err = qtx.UpdateIssueWorkflowStatus(ctx, db.UpdateIssueWorkflowStatusParams{
+				IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, WorkflowStatusID: issue.WorkflowStatusID,
+			})
+			if err != nil {
+				return db.Issue{}, current, false, err
+			}
+		}
+		if projectChanged {
+			cause = "project_moved"
+		}
+		entry, err = service.EnterIssueWorkflowStatus(ctx, qtx, &current, issue, actor, cause)
+		if err != nil {
+			return db.Issue{}, current, false, err
+		}
+		issue = entry.Issue
 	}
 
 	attachmentsChanged := false
@@ -3502,6 +3565,10 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err := tx.Commit(ctx); err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("commit atomic issue update: %w", err)
 	}
+	if h.TaskService != nil {
+		h.TaskService.NotifyWorkflowEntry(ctx, entry)
+	}
+
 	return issue, current, attachmentsChanged, nil
 }
 
@@ -3733,54 +3800,34 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Existing issues stay pinned when a project's default changes. Resolve the
-	// project's effective workflow only for a real cross-project move; an
-	// ordinary status-node transition stays inside the issue's pinned workflow.
-	// Key-based updates of unbound issues let the transition service establish
-	// their binding in its transaction instead of requiring it before the write.
-	projectChangedForWorkflow := params.ProjectID != prevIssue.ProjectID
-	targetWorkflowID := prevIssue.WorkflowID
-	if projectChangedForWorkflow || (!targetWorkflowID.Valid && req.WorkflowStatusID != nil) {
-		effective, workflowErr := issueworkflow.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, params.ProjectID)
-		if workflowErr != nil {
-			slog.Warn("resolve target project workflow failed", append(logger.RequestAttrs(r), "error", workflowErr)...)
-			writeError(w, http.StatusInternalServerError, "failed to resolve target project workflow")
-			return
-		}
-		targetWorkflowID = effective.ID
-	}
-	if projectChangedForWorkflow && prevIssue.WorkflowID.Valid && targetWorkflowID != prevIssue.WorkflowID && req.WorkflowStatusID == nil {
-		writeError(w, http.StatusConflict, "moving across workflows requires workflow_status_id")
+	// Only explicit status changes in the current project need a client-selected
+	// node. Actual project moves resolve the initial node inside the transaction.
+	_, projectTouched := rawFields["project_id"]
+	projectChangedForWorkflow := projectTouched && params.ProjectID != prevIssue.ProjectID
+	var workflowBinding *issueWorkflowBinding
+	if req.ExpectedWorkflowRevision != nil && *req.ExpectedWorkflowRevision < 1 {
+		writeError(w, http.StatusBadRequest, "expected_workflow_revision must be positive")
 		return
 	}
-	var workflowBinding *issueWorkflowBinding
-	if req.WorkflowStatusID != nil {
+	if req.WorkflowStatusID != nil && !projectChangedForWorkflow {
 		statusID, ok := parseUUIDOrBadRequest(w, *req.WorkflowStatusID, "workflow_status_id")
 		if !ok {
 			return
 		}
-		targetStatus, statusErr := h.Queries.GetIssueWorkflowStatusByID(r.Context(), db.GetIssueWorkflowStatusByIDParams{
-			WorkspaceID: prevIssue.WorkspaceID, WorkflowID: targetWorkflowID, ID: statusID,
-		})
-		if statusErr != nil {
-			if errors.Is(statusErr, pgx.ErrNoRows) {
-				writeError(w, http.StatusConflict, "workflow status does not belong to the target workflow")
+		targetWorkflowID := prevIssue.WorkflowID
+		if !targetWorkflowID.Valid {
+			effective, err := issueworkflow.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, params.ProjectID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to resolve target project workflow")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "failed to resolve workflow status")
-			return
+			targetWorkflowID = effective.ID
 		}
-		if targetStatus.ArchivedAt.Valid || !targetStatus.LegacyStatusKey.Valid {
-			writeError(w, http.StatusConflict, "workflow status is unavailable")
-			return
-		}
-		params.Status = pgtype.Text{String: targetStatus.LegacyStatusKey.String, Valid: true}
-		// The workflow row itself is the archive authority. Do not route a
-		// workflow-native write back through the workspace legacy catalog.
+		workflowBinding = &issueWorkflowBinding{WorkflowID: targetWorkflowID, WorkflowStatusID: statusID}
 		statusKeyForGuard = ""
-		workflowBinding = &issueWorkflowBinding{
-			WorkflowID: targetWorkflowID, WorkflowStatusID: targetStatus.ID,
-		}
+	}
+	if projectChangedForWorkflow {
+		statusKeyForGuard = ""
 	}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
@@ -3808,10 +3855,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 || workflowBinding != nil || req.Status != nil {
+	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 || workflowBinding != nil || req.Status != nil || projectTouched {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, workflowBinding, transitionActor, "issue_updated",
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, workflowBinding, transitionActor, "issue_updated", req.ExpectedWorkflowRevision,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -3820,15 +3867,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
 			var innerErr error
 			issue, innerErr = q.UpdateIssue(r.Context(), params)
-			if innerErr == nil && workflowBinding != nil {
-				issue, innerErr = q.BindIssueToWorkflowStatus(r.Context(), db.BindIssueToWorkflowStatusParams{
-					IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-					WorkflowID: workflowBinding.WorkflowID, WorkflowStatusID: workflowBinding.WorkflowStatusID,
-				})
-			}
-			if innerErr == nil {
-				issue, _, _, innerErr = issueworkflow.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "issue_updated")
-			}
 			return innerErr
 		})
 	}
@@ -3851,7 +3889,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
 			return
 		}
-		if errors.Is(err, service.ErrIssueExecutionSuperseded) {
+		if errors.Is(err, service.ErrIssueExecutionSuperseded) || errors.Is(err, service.ErrIssueTransitionConflict) || errors.Is(err, service.ErrIssueTransitionStatusUnavailable) || errors.Is(err, service.ErrIssueEntryPolicyExecutorUnavailable) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
@@ -3867,14 +3905,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-	statusChanged := (req.Status != nil || req.WorkflowStatusID != nil) &&
-		(prevIssue.Status != issue.Status || prevIssue.WorkflowID != issue.WorkflowID || prevIssue.WorkflowStatusID != issue.WorkflowStatusID)
+	statusChanged := prevIssue.LastTransitionID != issue.LastTransitionID
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff
 	// project_id against its own cache, which breaks once an optimistic local
 	// move has overwritten the cached value (MUL-3669 / #4548).
-	_, projectTouched := rawFields["project_id"]
 	projectChanged := projectTouched && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
@@ -3932,11 +3968,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// and it self-cancelled a run that reassigned the issue from inside itself.
 	// Ownership handoff no longer implies interruption; the new assignee's run,
 	// if any, is enqueued by WillEnqueueRun below and runs alongside whatever
-	// was already in flight. No status change — not even → cancelled — cancels
-	// active tasks: a user clicking "cancel" on an issue has no expectation that
-	// it stops in-flight agent runs, so that implicit coupling is gone
-	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
-	// because the tasks' owning issue ceases to exist.
+	// was already in flight. Project moves apply their entry action and supersede
+	// the previous workflow execution inside the transaction above, so skip this
+	// legacy assignee-based dispatch for those moves.
+
 	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:           issue,
@@ -3945,7 +3980,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			StatusChanged:   statusChanged,
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-	); ok && !req.SuppressRun {
+	); ok && !req.SuppressRun && prevIssue.ProjectID == issue.ProjectID {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
@@ -4423,32 +4458,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		batchProjectID = projectUUID
 	}
 
-	if _, movingProjects := rawUpdates["project_id"]; movingProjects {
-		var targetWorkflowID pgtype.UUID
-		for _, id := range req.IssueIDs {
-			issueID, err := util.ParseUUID(id)
-			if err != nil {
-				continue
-			}
-			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsUUID})
-			if err != nil || issue.ProjectID == batchProjectID || !issue.WorkflowID.Valid {
-				continue
-			}
-			if !targetWorkflowID.Valid {
-				target, err := issueworkflow.Effective(r.Context(), h.Queries, wsUUID, batchProjectID)
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "failed to resolve target project workflow")
-					return
-				}
-				targetWorkflowID = target.ID
-			}
-			if issue.WorkflowID != targetWorkflowID {
-				writeError(w, http.StatusConflict, "move issues across workflows individually with an explicit workflow_status_id")
-				return
-			}
-		}
-	}
-
 	updated := 0
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
@@ -4609,13 +4618,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var issue db.Issue
-		if req.Updates.Description != nil || req.Updates.Status != nil {
+		_, projectTouched := rawUpdates["project_id"]
+		if req.Updates.Description != nil || req.Updates.Status != nil || projectTouched {
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, nil, transitionActor, "batch_issue_updated",
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, nil, transitionActor, "batch_issue_updated", nil,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -4624,9 +4634,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
 				var innerErr error
 				issue, innerErr = q.UpdateIssue(r.Context(), params)
-				if innerErr == nil {
-					issue, _, _, innerErr = issueworkflow.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "batch_issue_updated")
-				}
 				return innerErr
 			})
 		}
@@ -4646,9 +4653,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		statusChanged := prevIssue.LastTransitionID != issue.LastTransitionID
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
-		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
+		projectChanged := prevIssue.ProjectID != issue.ProjectID
 
 		updatePayload := map[string]any{
 			"issue":            resp,
@@ -4677,12 +4684,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				StatusChanged:   statusChanged,
 			},
 			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-		); ok && !req.Updates.SuppressRun {
+		); ok && !req.Updates.SuppressRun && !projectChanged {
 			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
-		// No status change — not even → cancelled — cancels active tasks here,
-		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
+		// Project moves already applied entry effects inside their transaction.
 
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage

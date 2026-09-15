@@ -119,10 +119,10 @@ function ChangeForm({
   const workflowQuery = usesEffective ? effectiveQuery : pinnedQuery;
   const executions = useQuery({
     ...issueAutomationExecutionsOptions(wsId, issue.id),
-    enabled: !moving && !!issue.workflow_id,
+    enabled: !!issue.workflow_id,
   });
   const { active } = workflowExecutionState(issue, executions.data ?? []);
-  const executionReady = moving || !issue.workflow_id || executions.isSuccess;
+  const executionReady = !issue.workflow_id || executions.isSuccess;
   const nodes = activeWorkflowStatuses(workflowQuery.data);
   const [selectedId, setSelectedId] = useState<string>();
   const matches = !moving
@@ -144,9 +144,10 @@ function ChangeForm({
       : categoryMatches.length === 1
         ? categoryMatches[0]
         : undefined;
-  const target =
-    nodes.find((node) => node.id === selectedId) ??
-    (selectedId ? undefined : inferred);
+  const target = moving
+    ? nodes.find((node) => node.id === workflowQuery.data?.workflow.initial_status_id)
+    : nodes.find((node) => node.id === selectedId) ??
+      (selectedId ? undefined : inferred);
   const update = useUpdateIssue();
   const transition = useTransitionIssueStatusNode();
   const [pending, setPending] = useState(false);
@@ -157,11 +158,13 @@ function ChangeForm({
     try {
       let result: Issue;
       if (moving || !issue.workflow_id) {
-        const { status: _status, ...rest } = updates;
+        const { status: _status, workflow_status_id: _statusId, ...rest } = updates;
         result = await update.mutateAsync({
           id: issue.id,
           ...rest,
-          workflow_status_id: target.id,
+          ...(moving
+            ? { expected_workflow_revision: workflowQuery.data.workflow.revision }
+            : { workflow_status_id: target.id }),
           expected_revision: issue.revision,
           expected_transition_id: issue.transition_id ?? undefined,
         });
@@ -220,12 +223,20 @@ function ChangeForm({
           </DialogDescription>
         </DialogHeader>
         {workflowQuery.isSuccess ? (
-          <WorkflowNodePicker
-            nodes={nodes}
-            value={target?.id}
-            onChange={(node) => setSelectedId(node.id)}
-            disabled={pending}
-          />
+          moving ? (
+            <p role={target ? undefined : "alert"} className="text-body">
+              {target
+                ? t(($) => $.workflow_selection.move_initial_status, { name: target.name })
+                : t(($) => $.workflow_selection.load_error)}
+            </p>
+          ) : (
+            <WorkflowNodePicker
+              nodes={nodes}
+              value={target?.id}
+              onChange={(node) => setSelectedId(node.id)}
+              disabled={pending}
+            />
+          )
         ) : (
           <p role={workflowQuery.isError ? "alert" : "status"}>
             {workflowQuery.isError
@@ -238,7 +249,7 @@ function ChangeForm({
             {t(($) => $.workflow_selection.retry)}
           </Button>
         )}
-        {!moving && (active || !executionReady) && (
+        {(active || !executionReady) && (
           <p className="text-caption text-muted-foreground">
             {active
               ? t(($) => $.handoff.stops)
@@ -247,7 +258,7 @@ function ChangeForm({
                 : t(($) => $.handoff.loading)}
           </p>
         )}
-        {target && !moving && <WorkflowEntryEffects node={target} />}
+        {target && <WorkflowEntryEffects node={target} />}
         {error && (
           <p role="alert" className="text-caption text-destructive">
             {error}

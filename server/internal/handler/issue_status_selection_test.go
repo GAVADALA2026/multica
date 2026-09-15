@@ -88,13 +88,21 @@ func TestIssueCreationUsesSelectedProjectStatusNodes(t *testing.T) {
 	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest(http.MethodPost, "/api/issues/batch", map[string]any{
 		"issue_ids": []string{parent.ID}, "updates": map[string]any{"workflow_status_id": reviewID},
 	})).Want(http.StatusBadRequest)
+	var batch struct {
+		Updated int `json:"updated"`
+	}
 	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest(http.MethodPost, "/api/issues/batch", map[string]any{
 		"issue_ids": []string{cleared.ID, parent.ID}, "updates": map[string]any{"project_id": nil, "priority": "high"},
-	})).Want(http.StatusConflict)
-	var unchanged IssueResponse
-	testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest(http.MethodGet, "/api/issues/"+cleared.ID, nil), "id", cleared.ID)).Want(http.StatusOK).JSON(&unchanged)
-	if unchanged.Priority == "high" {
-		t.Fatal("rejected cross-workflow batch partially updated an earlier task")
+	})).Want(http.StatusOK).JSON(&batch)
+	if batch.Updated != 2 {
+		t.Fatalf("batch moved %d issues, want 2", batch.Updated)
+	}
+	for _, id := range []string{cleared.ID, parent.ID} {
+		var moved IssueResponse
+		testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest(http.MethodGet, "/api/issues/"+id, nil), "id", id)).Want(http.StatusOK).JSON(&moved)
+		if moved.ProjectID != nil || moved.Priority != "high" || moved.WorkflowID == nil || *moved.WorkflowID != *cleared.WorkflowID {
+			t.Fatalf("cross-workflow batch did not apply the destination: %#v", moved)
+		}
 	}
 
 	originalStorage := testHandler.Storage

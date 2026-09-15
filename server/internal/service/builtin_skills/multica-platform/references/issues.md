@@ -446,9 +446,22 @@ Workflow batch status actions call the dedicated status-node transition endpoint
 for each issue with its own revision and transition cursor. The legacy batch
 update endpoint rejects `workflow_status_id` rather than silently ignoring it.
 
-Moving to another project requires explicitly choosing a status in the destination
-workflow and submitting its node ID together with the project change. A batch
-project move that crosses workflows is rejected before any issue is updated.
+Every actual status entry records its transition and applies the node's entry
+policy in one transaction, including creation, ordinary updates, legacy batch
+updates, and system transitions. Repeating the current node does not run the
+action again; leaving and re-entering it creates a new execution. Entry actions
+do not replace the issue's assignee. `suppress_run` only suppresses legacy
+assignee-triggered runs, not configured entry actions. An unavailable executor
+or failed task insert rolls back the issue update and transition together.
+An execution that fails after commit stays on the current business status;
+retrying it does not create another status entry.
+
+Moving to another project automatically enters the destination effective workflow’s
+initial status and applies its entry action. Submit `project_id`; no status mapping
+is needed. This also applies to batch moves and removing an issue from a project
+(which uses the workspace workflow). Selecting the current project preserves its
+status. Project changes, workflow entry, and superseding the previous entry run
+are atomic per issue. An unavailable executor causes that issue’s move to fail.
 
 CLI creation with `--parent` and `--workflow-status` resolves the status against
 the inherited parent project unless `--project` explicitly selects another one.

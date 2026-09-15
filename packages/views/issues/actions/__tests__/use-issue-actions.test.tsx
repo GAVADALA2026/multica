@@ -164,6 +164,15 @@ beforeEach(() => {
 });
 
 describe("useIssueActions", () => {
+  it("previews project entry even when the incoming issue has no workflow binding", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+    act(() => result.current.updateField({ project_id: "destination" }));
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-workflow-change", {
+      issueId: mockIssue.id, updates: { project_id: "destination" }, options: undefined,
+    });
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
+  });
+
   it("updateField dispatches useUpdateIssue.mutate with the correct payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 

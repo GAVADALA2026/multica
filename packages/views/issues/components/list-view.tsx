@@ -545,7 +545,7 @@ function StatusAccordionItem({
     id: group.id,
     disabled: !dragEnabled,
   });
-  const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
+  const isOver = droppableIsOver && !statusCatalog.entryOf(group.status ?? "")?.archived_at;
 
   const disableSorting = !!sortLabel;
 
@@ -671,7 +671,7 @@ function StatusAccordionItem({
             <StatusHeading status={group.status} count={page.total} />
           ) : null}
         </Accordion.Trigger>
-        {onCreateIssue && !statusCatalog.entryOf(status)?.archived_at &&
+        {onCreateIssue && !statusCatalog.entryOf(group.status ?? "")?.archived_at &&
           (group.workflowStatusId === undefined ||
             group.createData !== undefined) && (
             <div className="pr-2">

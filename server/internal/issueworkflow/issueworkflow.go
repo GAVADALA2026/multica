@@ -215,7 +215,8 @@ type TransitionActor struct {
 
 // RecordTransition appends the immutable transition corresponding to a
 // committed-in-this-transaction issue mutation, then pins its ID on the issue.
-// It performs no work when the legacy status did not change.
+// Runtime writers use service.EnterIssueWorkflowStatus to apply entry effects
+// in the same transaction. Unchanged status, workflow and project are a no-op.
 func RecordTransition(
 	ctx context.Context,
 	q Querier,
@@ -225,7 +226,8 @@ func RecordTransition(
 	cause string,
 ) (db.Issue, db.IssueTransition, bool, error) {
 	if previous != nil && previous.Status == current.Status &&
-		previous.WorkflowID == current.WorkflowID && previous.WorkflowStatusID == current.WorkflowStatusID {
+		previous.WorkflowID == current.WorkflowID && previous.WorkflowStatusID == current.WorkflowStatusID &&
+		previous.ProjectID == current.ProjectID {
 		return current, db.IssueTransition{}, false, nil
 	}
 	if actor.Type == "" {

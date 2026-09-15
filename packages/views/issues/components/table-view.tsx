@@ -1,5 +1,6 @@
 "use client";
 
+import { useSurfaceWorkflow } from "../surface/workflow-context";
 import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
@@ -1370,9 +1371,10 @@ export function TableView({
     t,
   ]);
 
+  const { statuses: workflowStatuses } = useSurfaceWorkflow();
   const serverGroupSpec = useMemo(
-    () => tableGroupSpec(effectiveTableGrouping),
-    [effectiveTableGrouping],
+    () => effectiveTableGrouping === "status" && workflowStatuses ? { kind: "workflow_status" } as const : tableGroupSpec(effectiveTableGrouping),
+    [effectiveTableGrouping, workflowStatuses],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
   // Project group rows carry only a project id; the title comes from the
