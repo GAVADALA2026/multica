@@ -1364,13 +1364,18 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 // Using the bare id would let omp's internal provider priority ranking pick a
 // different backend for the same model id. Provider is kept for UI grouping.
 // The dedup key is the selector when present, falling back to provider/id.
+// Model.Thinking comes from the entry's reasoning metadata — see
+// ompThinkingFromCatalogEntry for the shapes omp uses and why `auto` is
+// excluded.
 func parseOmpModels(data []byte) ([]Model, error) {
 	var wrapper struct {
 		Models []struct {
-			ID       string `json:"id"`
-			Provider string `json:"provider"`
-			Selector string `json:"selector"`
-			Name     string `json:"name"`
+			ID        string          `json:"id"`
+			Provider  string          `json:"provider"`
+			Selector  string          `json:"selector"`
+			Name      string          `json:"name"`
+			Reasoning bool            `json:"reasoning"`
+			Thinking  json.RawMessage `json:"thinking"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
@@ -1404,9 +1409,97 @@ func parseOmpModels(data []byte) ([]Model, error) {
 		if label == "" {
 			label = selector
 		}
-		models = append(models, Model{ID: selector, Label: label, Provider: provider})
+		models = append(models, Model{
+			ID:       selector,
+			Label:    label,
+			Provider: provider,
+			Thinking: ompThinkingFromCatalogEntry(e.Reasoning, e.Thinking),
+		})
 	}
 	return models, nil
+}
+
+// ompReasoningOnlyLevels is the catalog assumed for an omp model that reports
+// `reasoning: true` without any per-level list. It matches what
+// piThinkingFromRPCModel does with an absent thinkingLevelMap.
+var ompReasoningOnlyLevels = []string{"off", "minimal", "low", "medium", "high"}
+
+// ompThinkingFromCatalogEntry maps one `omp models --json` entry's reasoning
+// metadata onto Multica's per-model effort catalog.
+//
+// omp reports its catalog in two shapes, and neither matches pi's
+// `thinkingLevelMap`, so piThinkingFromRPCModel cannot be reused here:
+//
+//	"thinking": ["medium","high","max"]
+//	"thinking": {"mode":"effort","efforts":["medium","high","max"],"defaultLevel":"high",...}
+//
+// The flat array is what `omp models --json` emits (omp 18.2.0, GH #8458); the
+// object is the shape omp's RPC get_available_models answers with. Both are
+// read because those two surfaces have already drifted apart once, and a shape
+// we failed to recognise would hide the picker silently instead of loudly.
+//
+// Advertised levels are intersected with piThinkingLevelOrder rather than
+// forwarded verbatim. omp's --thinking vocabulary also contains `auto` ("omp
+// picks the effort"), which is deliberately not a Multica level: it selects an
+// effort instead of being one, so it means nothing in a per-model catalog and
+// providerThinkingEnums rejects it. Advertising it would only let a user save a
+// value the daemon then drops (MUL-7412).
+//
+// A reasoning-capable model advertising no catalog at all falls back to the
+// rule pi applies in that same situation: everything up to `high`, withholding
+// `xhigh`/`max` because pi requires a model to advertise those explicitly. omp
+// really does emit that shape — see the anthropic entry in TestParseOmpModels.
+func ompThinkingFromCatalogEntry(reasoning bool, raw json.RawMessage) *ModelThinking {
+	efforts, defaultLevel := parseOmpThinkingCatalog(raw)
+	if len(efforts) == 0 {
+		if !reasoning {
+			return nil
+		}
+		efforts = ompReasoningOnlyLevels
+	}
+	advertised := make(map[string]bool, len(efforts))
+	for _, effort := range efforts {
+		advertised[strings.TrimSpace(effort)] = true
+	}
+	levels := make([]ThinkingLevel, 0, len(piThinkingLevelOrder))
+	for _, value := range piThinkingLevelOrder {
+		if advertised[value] {
+			levels = append(levels, ThinkingLevel{Value: value, Label: piThinkingLevelLabels[value]})
+		}
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	thinking := &ModelThinking{SupportedLevels: levels}
+	// Keep a default level only when the model advertises it too, so a stale or
+	// unrecognised token cannot make the picker preselect something the daemon
+	// would drop.
+	if piThinkingSupports(thinking, defaultLevel) {
+		thinking.DefaultLevel = defaultLevel
+	}
+	return thinking
+}
+
+// parseOmpThinkingCatalog reads the advertised effort list out of whichever
+// shape omp used for a model's `thinking` field. An absent or unrecognised
+// shape yields no efforts, which sends the caller to its reasoning-only
+// fallback rather than advertising a guessed catalog.
+func parseOmpThinkingCatalog(raw json.RawMessage) (efforts []string, defaultLevel string) {
+	if len(raw) == 0 {
+		return nil, ""
+	}
+	var flat []string
+	if err := json.Unmarshal(raw, &flat); err == nil {
+		return flat, ""
+	}
+	var object struct {
+		Efforts      []string `json:"efforts"`
+		DefaultLevel string   `json:"defaultLevel"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil {
+		return object.Efforts, strings.TrimSpace(object.DefaultLevel)
+	}
+	return nil, ""
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

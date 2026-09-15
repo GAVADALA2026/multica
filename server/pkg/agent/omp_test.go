@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -489,5 +490,228 @@ func TestOmpAndPiRegisterSideBySide(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// levelValues flattens a ModelThinking's advertised levels for comparison.
+func levelValues(thinking *ModelThinking) []string {
+	if thinking == nil {
+		return nil
+	}
+	out := make([]string, 0, len(thinking.SupportedLevels))
+	for _, level := range thinking.SupportedLevels {
+		out = append(out, level.Value)
+	}
+	return out
+}
+
+// TestOmpThinkingFromCatalogEntry pins the per-model effort catalog omp models
+// advertise. The `auto` cases matter most: omp's own --thinking accepts it, but
+// it selects an effort rather than being one, so it must never reach the picker
+// (providerThinkingEnums rejects it, and the daemon would drop it) — MUL-7412.
+func TestOmpThinkingFromCatalogEntry(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		reasoning    bool
+		thinking     string
+		wantLevels   []string
+		wantDefault  string
+		wantNoPicker bool
+	}{
+		{
+			// The shape `omp models --json` emits (omp 18.2.0, GH #8458).
+			name:       "flat effort array",
+			reasoning:  true,
+			thinking:   `["medium","high","max"]`,
+			wantLevels: []string{"medium", "high", "max"},
+		},
+		{
+			// The shape omp's RPC get_available_models answers with.
+			name:        "effort object with default",
+			reasoning:   true,
+			thinking:    `{"mode":"effort","efforts":["medium","high","max"],"defaultLevel":"high","effortRouting":{"max":"swe-2-max"}}`,
+			wantLevels:  []string{"medium", "high", "max"},
+			wantDefault: "high",
+		},
+		{
+			// A reasoning model with no per-level data degrades to pi's rule for
+			// the same case: up to `high`, never xhigh/max.
+			name:       "reasoning only, no catalog",
+			reasoning:  true,
+			thinking:   ``,
+			wantLevels: []string{"off", "minimal", "low", "medium", "high"},
+		},
+		{
+			name:         "not a reasoning model",
+			reasoning:    false,
+			thinking:     ``,
+			wantNoPicker: true,
+		},
+		{
+			// `auto` is dropped from both shapes rather than offered.
+			name:       "auto is filtered out of the array",
+			reasoning:  true,
+			thinking:   `["medium","high","max","auto"]`,
+			wantLevels: []string{"medium", "high", "max"},
+		},
+		{
+			name:       "auto is filtered out of the object",
+			reasoning:  true,
+			thinking:   `{"mode":"effort","efforts":["auto","high"]}`,
+			wantLevels: []string{"high"},
+		},
+		{
+			// An unrecognised default must not preselect anything: the daemon
+			// would drop a level the model never advertised.
+			name:        "default outside the advertised set is dropped",
+			reasoning:   true,
+			thinking:    `{"efforts":["medium","high"],"defaultLevel":"auto"}`,
+			wantLevels:  []string{"medium", "high"},
+			wantDefault: "",
+		},
+		{
+			// Canonical order, not the order omp happened to list.
+			name:       "levels are returned in canonical order",
+			reasoning:  true,
+			thinking:   `["max","low","high"]`,
+			wantLevels: []string{"low", "high", "max"},
+		},
+		{
+			// A shape we do not understand must not silently hide the picker for
+			// a model omp says can reason.
+			name:       "unknown shape falls back to reasoning",
+			reasoning:  true,
+			thinking:   `"effort"`,
+			wantLevels: []string{"off", "minimal", "low", "medium", "high"},
+		},
+		{
+			// Only tokens Multica knows survive, so a future omp level cannot
+			// reach the picker before the server's enum accepts it.
+			name:       "unknown tokens are dropped",
+			reasoning:  true,
+			thinking:   `["medium","ultra","hyper"]`,
+			wantLevels: []string{"medium"},
+		},
+		{
+			name:         "reasoning model advertising nothing usable has no picker",
+			reasoning:    false,
+			thinking:     `["ultra"]`,
+			wantNoPicker: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ompThinkingFromCatalogEntry(tc.reasoning, []byte(tc.thinking))
+			if tc.wantNoPicker {
+				if got != nil {
+					t.Fatalf("ompThinkingFromCatalogEntry = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("ompThinkingFromCatalogEntry = nil, want levels %v", tc.wantLevels)
+			}
+			if values := levelValues(got); !slices.Equal(values, tc.wantLevels) {
+				t.Errorf("levels = %v, want %v", values, tc.wantLevels)
+			}
+			if got.DefaultLevel != tc.wantDefault {
+				t.Errorf("DefaultLevel = %q, want %q", got.DefaultLevel, tc.wantDefault)
+			}
+			// Every advertised level must carry a label, or the picker renders a
+			// blank row.
+			for _, level := range got.SupportedLevels {
+				if level.Label == "" {
+					t.Errorf("level %q has an empty label", level.Value)
+				}
+			}
+		})
+	}
+}
+
+// TestParseOmpModelsCarriesThinkingCatalog is the end-to-end catalog assertion:
+// a real `omp models --json` payload must reach Model.Thinking, because that is
+// what the picker renders and what the daemon's per-model guard validates
+// against before injecting --thinking (MUL-7412).
+func TestParseOmpModelsCarriesThinkingCatalog(t *testing.T) {
+	t.Parallel()
+	sample := `{"models":[` +
+		`{"provider":"devin","id":"swe-2","selector":"devin/swe-2","name":"SWE-2","reasoning":true,"thinking":["medium","high","max"]},` +
+		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Sonnet 5","reasoning":true},` +
+		`{"provider":"openai","id":"gpt-5","selector":"openai/gpt-5","name":"GPT-5"}` +
+		`]}`
+	models, err := parseOmpModels([]byte(sample))
+	if err != nil {
+		t.Fatalf("parseOmpModels: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(models))
+	}
+	if got := levelValues(models[0].Thinking); !slices.Equal(got, []string{"medium", "high", "max"}) {
+		t.Errorf("devin/swe-2 levels = %v, want [medium high max]", got)
+	}
+	// reasoning without a per-level list: pi's conservative default.
+	if got := levelValues(models[1].Thinking); !slices.Equal(got, []string{"off", "minimal", "low", "medium", "high"}) {
+		t.Errorf("anthropic/claude-sonnet-5 levels = %v, want off..high", got)
+	}
+	// No reasoning at all: no picker, rather than an inert one.
+	if models[2].Thinking != nil {
+		t.Errorf("openai/gpt-5 Thinking = %+v, want nil", models[2].Thinking)
+	}
+}
+
+// TestOmpAdvertisedLevelsArePersistable pins the catalog → API contract for omp:
+// every level discovery can advertise must survive the server's Create/Update
+// enum gate. Otherwise the picker offers a level the server 400s on save, which
+// is the mirror image of the MUL-7412 defect.
+func TestOmpAdvertisedLevelsArePersistable(t *testing.T) {
+	t.Parallel()
+	for _, value := range piThinkingLevelOrder {
+		if !IsKnownThinkingValue("omp", value) {
+			t.Errorf("omp advertises %q but the server enum rejects it", value)
+		}
+	}
+	if IsKnownThinkingValue("omp", "auto") {
+		t.Error("omp must not accept `auto`: it is deliberately not exposed (MUL-7412)")
+	}
+}
+
+// TestValidateThinkingLevelOmpEmptyModel covers the omp agent that pins no
+// model. omp's catalog flags no Default entry, so without the opencode-style
+// fallback the daemon's guard would fail such an agent closed and silently drop
+// its effort at every launch — the same user-visible defect as MUL-7412, just
+// one layer down.
+func TestValidateThinkingLevelOmpEmptyModel(t *testing.T) {
+	t.Parallel()
+	load := func() (Catalog, error) {
+		return Catalog{Models: []Model{
+			{ID: "devin/swe-2", Label: "SWE-2", Provider: "devin",
+				Thinking: ompThinkingFromCatalogEntry(true, []byte(`["medium","high","max"]`))},
+		}}, nil
+	}
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},     // "use the runtime default"
+		{value: "max", want: true},  // advertised by an omp model
+		{value: "off", want: false}, // advertised by none
+	} {
+		got, err := ValidateThinkingLevelWith(load, "omp", "", tc.value)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevelWith(omp, \"\", %q): %v", tc.value, err)
+		}
+		if got != tc.want {
+			t.Errorf("ValidateThinkingLevelWith(omp, \"\", %q) = %v, want %v", tc.value, got, tc.want)
+		}
+	}
+	// A pinned model still resolves against that model's own catalog.
+	got, err := ValidateThinkingLevelWith(load, "omp", "devin/swe-2", "max")
+	if err != nil {
+		t.Fatalf("ValidateThinkingLevelWith(omp, devin/swe-2, max): %v", err)
+	}
+	if !got {
+		t.Error("ValidateThinkingLevelWith(omp, devin/swe-2, max) = false, want true")
 	}
 }

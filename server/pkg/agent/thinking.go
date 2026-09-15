@@ -646,8 +646,8 @@ func catalogLoader(ctx context.Context, providerType string, cmd Command) func()
 //   - other providers: empty model resolves to the catalog's Default entry
 //     so a default-model task with a valid thinking_level isn't misjudged as
 //     "unknown model → reject" (the misjudgement flagged in an earlier
-//     review). opencode has no single default, so it accepts a level any
-//     advertised model supports.
+//     review). opencode and omp have no single default, so they accept a
+//     level any advertised model supports.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -698,7 +698,13 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			}
 		}
 		if target == "" {
-			if providerType == "opencode" {
+			// opencode has no single default model, and omp's `models --json`
+			// catalog carries no default marker at all, so neither can resolve an
+			// empty model to one entry. Accept a level any advertised model
+			// supports rather than failing closed: otherwise an omp agent that
+			// pins no model has its effort silently dropped at every launch,
+			// which is the defect MUL-7412 set out to fix.
+			if providerType == "opencode" || providerType == "omp" {
 				return anyModelSupportsThinkingValue(models, value), nil
 			}
 			return false, nil
@@ -824,6 +830,20 @@ var providerThinkingEnums = map[string]map[string]bool{
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
+	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each
+	// model's advertised efforts before execution. `auto` is deliberately absent
+	// even though omp's --thinking accepts it — see ompThinkingFromCatalogEntry
+	// (MUL-7412).
+	"omp": {
 		"off":     true,
 		"minimal": true,
 		"low":     true,
