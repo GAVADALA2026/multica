@@ -20,9 +20,38 @@ in the same namespace can also connect. Host-networked containers share the
 host loopback namespace. This API is never mounted on the public router.
 Avoid placing credentials or user content in job parameters or logs.
 
-The following requests are run **inside the target API container**, using its
-configured port. Merely enabling the listener does not create or advance a job.
+The backend image includes `/app/maintenance`, a standalone Go HTTP client.
+It needs no Python, curl, source checkout, or database credentials. It only
+connects to loopback, ignores HTTP proxy variables, and refuses redirects.
+Merely enabling the listener does not create or advance a job.
 No production execution is part of submitting this PR.
+
+Enable the listener using the deployment's existing configuration/release flow:
+
+- Helm: set `backend.config.maintenancePort: "6061"` in the release values.
+  The ConfigMap supplies `MAINTENANCE_PORT`; its checksum rolls the backend.
+  Neither the Service nor the container's published ports gains a maintenance port.
+- Compose: set `MAINTENANCE_PORT=6061` in the deployment `.env`, then recreate
+  the backend with `docker compose -f docker-compose.selfhost.yml up -d backend`.
+  The maintenance port is not published to the host.
+
+Run every command below in the **target backend container**. For example:
+
+```bash
+# Compose; omit -T only when an interactive terminal is desired.
+docker compose -f docker-compose.selfhost.yml exec -T backend /app/maintenance status --job JOB_UUID
+# Kubernetes; select a backend pod from the intended release/namespace.
+kubectl exec -n NAMESPACE POD -c backend -- /app/maintenance status --job JOB_UUID
+```
+
+Both forms inherit `MAINTENANCE_PORT` from the container. `--port 6061` can
+explicitly select another configured loopback port. Use `create --help` or
+`run --help` to check that the deployed image includes the command. A successful
+`status` or `create` request confirms the listener is reachable; a connection
+error means configuration/listener startup must be checked before continuing.
+No public API token or kubectl port-forward is required. Container exec is a
+privileged operational capability. Keep the attached exec session open until
+the command returns; this is not a background service.
 
 ## Category backfill prerequisites
 
@@ -45,43 +74,62 @@ No production execution is part of submitting this PR.
 
 ## Dry-run, then apply
 
-Create a dry-run record (dry-run is also the default when omitted):
+The driver requires explicit batch size, delay and both SQL timeouts for
+**create and configure**, including dry-runs. The following values are an
+example for a monitored canary, not production defaults or a throughput promise.
+Select them against the target database's latency/lock/replica-lag budgets.
+Commands are shown without the container-exec prefix for readability:
 
 ```bash
-curl --fail-with-body --noproxy '*' http://127.0.0.1:6061/maintenance/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{"job_type":"issue_status_category","job_version":1,"scope_key":"database","idempotency_key":"status-category-v1-check-001","dry_run":true,"options":{"batch_size":500,"delay_ms":100,"lock_timeout_ms":500,"statement_timeout_ms":3000},"parameters":{}}'
+/app/maintenance create --idempotency-key status-category-v1-check-001 \
+  --batch-size 500 --delay-ms 100 --lock-timeout-ms 500 --statement-timeout-ms 3000
 ```
 
-Keep the returned `job.id`. Dry-run persists its own progress/report but never
-changes category data. Each advance scans at most the configured page size.
-Run one canary batch, inspect the response and metrics, then continue:
+Keep the returned `id`. Creation defaults to dry-run; dry-run persists its
+progress/report but never changes category data. One command can drive the
+whole survey, with each HTTP request still advancing only one short transaction:
 
 ```bash
-python3 scripts/maintenance-job.py --port 6061 --job JOB_UUID --max-batches 1
-python3 scripts/maintenance-job.py --port 6061 --job JOB_UUID --max-batches 100 --max-seconds 300
+# Canary: exits 2 (incomplete) unless this one batch completes the job.
+/app/maintenance run --job JOB_UUID --max-batches 1 --max-seconds 30
+# After checking canary metrics, run a bounded window automatically.
+/app/maintenance run --job JOB_UUID --max-batches 3000 --max-seconds 1800
+/app/maintenance status --job JOB_UUID
 ```
 
-The helper is optional and uses Python's standard library. If Python or the
-checkout is absent in the image, invoke the same endpoints with curl from the
-container's admin shell. A batch invocation is:
+For 600,000 rows at batch size 500, a dry-run needs about 1,201 advances;
+apply plus verification needs about 2,402, including end-of-pass detection.
+The 3,000-batch/1,800-second example has headroom for that row count but is
+still a hard stop. At a 100ms batch delay, waiting alone is about 240 seconds
+for apply plus verification, before database and HTTP time. A smaller batch,
+more rows, contention, or retries can exceed either budget. Re-run `status`,
+inspect metrics, and explicitly start another bounded `run` if incomplete.
+No one needs to invoke thousands of curl commands manually.
+
+`run` writes the observed job JSON after each advance and exits:
+
+- **0:** the persisted job is `completed` (for dry-run, only the survey completed).
+- **2:** incomplete because either batch or elapsed-time budget ran out.
+- **1:** invalid arguments, cancellation, a paused/cancelled job, or an API error.
+
+Time includes requests, delay and retries; sleeps and requests are cancellable.
+A timeout or transport error can leave a final commit's acknowledgement unknown.
+Read `status` before continuing; do not interpret incomplete/error as rollback.
+Keep stdout and stderr in the operator session log. Process exit never restarts
+itself or schedules later work.
+
+Once dry-run is completed, create a **new** apply record with a new key:
 
 ```bash
-curl --fail-with-body --noproxy '*' http://127.0.0.1:6061/maintenance/jobs/JOB_UUID/advance \
-  -H 'Content-Type: application/json' -d '{"revision":0}'
+/app/maintenance create --idempotency-key status-category-v1-apply-001 \
+  --apply --parameters '{"writers_upgraded":true}' \
+  --batch-size 500 --delay-ms 100 --lock-timeout-ms 500 --statement-timeout-ms 3000
 ```
 
-Use the current returned revision for the next intentional batch. Retry an
-ambiguous request with its **original** revision. A stale revision returns 409
-with current state and performs no work. GET
-`/maintenance/jobs/JOB_UUID` reads the primary DB and is always safe to retry.
-429 means the persisted `next_allowed_at` has not elapsed. 409 without a job
-means another request currently owns the row lock; back off rather than queue.
-
-Once dry-run is completed, create a new record using a new idempotency key,
-`"dry_run":false`, and `"parameters":{"writers_upgraded":true}`. Repeat the
-canary and bounded advances. The initial options are conservative starting
-values for testing, not environment-specific production guarantees.
+Use the batch/delay/timeouts selected from the dry-run and monitored apply
+canary. Run one batch first, check the metrics, then continue with an explicit
+budget as above. Dry-run cannot measure update WAL/lock impact; the apply
+canary is required too. Tuning a paused record preserves the cursor.
 
 Creating with the same idempotency key and identical normalized parameters
 returns the original job. Reusing that key with different input conflicts.
@@ -92,22 +140,35 @@ overlapping scopes must implement an additional conflict guard.
 
 ## Pause, tune, resume, failures
 
-Stopping calls stops progress. POST `/pause`, `/resume`, or `/cancel` under
-the job URL with `{"revision":CURRENT_REVISION}` changes durable state across
-all replicas. These operations may return busy while a short batch holds the
-job row; retry after it finishes. Cancellation preserves the already committed
-data and audit record; it does not reverse a backfill.
+Stopping calls stops progress. Query `status`, then use its revision for an
+intentional mutation. These operations may return busy while a short batch
+holds the job row; query/retry after it finishes. A stale revision performs no
+work. Each successful mutation returns the new revision:
 
-While paused, POST `/configure` with:
-
-```json
-{"revision":3,"options":{"batch_size":100,"delay_ms":1000,"lock_timeout_ms":250,"statement_timeout_ms":2000}}
+```bash
+/app/maintenance pause --job JOB_UUID --revision CURRENT_REVISION
+/app/maintenance configure --job JOB_UUID --revision PAUSED_REVISION \
+  --batch-size 100 --delay-ms 1000 --lock-timeout-ms 250 --statement-timeout-ms 2000
+/app/maintenance resume --job JOB_UUID --revision CONFIGURED_REVISION
+/app/maintenance run --job JOB_UUID --max-batches 3000 --max-seconds 1800
+# To stop permanently, using the latest revision:
+/app/maintenance cancel --job JOB_UUID --revision CURRENT_REVISION
 ```
 
-This replaces operational limits, preserving checkpoint and immutable task
-parameters. Resume with the new revision. Limits: batch 1–5000, delay 1–60000ms,
-and 1 <= lock timeout <= statement timeout <= 5000ms. Omitted/zero limits use
-defaults. Increasing/decreasing limits cannot erase an existing delay.
+Cancellation preserves already committed data and the global audit record;
+it does not reverse a backfill. Configuration replaces operational limits,
+preserving checkpoint and immutable parameters. Limits: batch 1–5000,
+delay 1–60000ms, and 1 <= lock timeout <= statement timeout <= 5000ms.
+Increasing/decreasing limits cannot erase an existing delay. The raw HTTP API
+retains default normalization for omitted/zero limits; operational runs should
+use the packaged driver, which requires explicit values.
+
+The underlying routes remain `POST /maintenance/jobs`,
+`GET /maintenance/jobs/{id}`, and `POST /maintenance/jobs/{id}/{action}`.
+Mutations carry `{"revision":N}`; configure also carries `options`.
+The driver retries an ambiguous advance using its **original** revision.
+409 with a changed revision acknowledges current state without advancing again;
+429 respects the database delay; 409 without a job retries busy with backoff.
 
 Each batch locks the maintenance row NOWAIT, scans an indexed ID page, updates
 only still-legacy categories from their current values, and commits data,
@@ -117,11 +178,11 @@ update events or agent runs are emitted. It does not use SKIP LOCKED or OFFSET.
 
 On SQL failure the batch savepoint rolls back all data changes. The outer
 transaction records a paused state and error without advancing the checkpoint.
-Timeout/deadlock/serialization errors are marked retryable; the helper retries
+Timeout/deadlock/serialization errors are marked retryable; the driver retries
 with capped exponential backoff (default 3, configurable up to 10), using the
-new revision to resume that failed batch. Other errors stop the helper.
+new revision to resume that failed batch. Other errors stop the driver.
 A previously paused job is not automatically resumed without `--resume`.
-There is no automatic retry after process exit. The helper has batch and wall
+There is no automatic retry after process exit. The driver has batch and wall
 time budgets; Ctrl-C stops driving requests.
 
 If the connection/container disappears before commit, data and progress both
