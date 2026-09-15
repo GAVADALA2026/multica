@@ -304,16 +304,18 @@ var briefStatusCategoryOrder = issuestatus.Categories()
 // workspace's catalog, grouped by lifecycle category. Special workflow rules
 // still name fixed built-in keys; a custom status inherits only lifecycle.
 //
-// Each line leads with the category name as PLAIN TEXT, not a code token. A
-// lifecycle category is not a value `multica issue status` accepts — the four
-// names are reserved and Resolve refuses them — so backticking it the way the
-// keys beside it are backticked invited `multica issue status <id> started`,
-// which is a 400 (MUL-7379). Only settable keys are backticked here.
+// Each line leads with the category name as PLAIN TEXT, not a code token.
+// Three of the four category names — unstarted, started, closed — are not
+// status keys at all: ValidateKey reserves them, so no catalog row can hold
+// one, and Resolve returns ErrUnknownStatus. `done` is the exception, being
+// both a lifecycle category and a built-in key. Backticking the group label
+// the way the settable keys beside it are backticked therefore invited
+// `multica issue status <id> started`, which is a 400, so only keys are
+// backticked here (MUL-7379).
 //
-// Name and
-// description ride along because instructions and users refer to statuses by
-// display name ("move it to Human Review"), and the description is the
-// admin's disambiguator when a category holds more than one status.
+// Name and description ride along because instructions and users refer to
+// statuses by display name ("move it to Human Review"), and the description is
+// the admin's disambiguator when a category holds more than one status.
 //
 // Name/description are user-authored: they pass through
 // sanitizeNameForBriefMarkdown so a crafted status name cannot inject
