@@ -5704,7 +5704,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
@@ -5717,6 +5717,8 @@ WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
   AND recovery.recovery_settled_at IS NULL
+  -- A deleted recovery signal is withdrawn, even when replies keep its row.
+  AND recovery.deleted_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'
@@ -5726,7 +5728,18 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  -- Match canDispatchDelegatedFailureRecovery: lifecycle permits recovery only
+  -- for open work; parking belongs exclusively to the fixed Backlog status.
+  -- Built-ins resolve without catalog rows; unknown custom states stay pending.
+  AND source_issue.status <> 'backlog'
+  AND CASE
+      WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
+      WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
+      WHEN source_issue.status = 'done' THEN 'done'
+      WHEN source_issue.status = 'cancelled' THEN 'closed'
+      WHEN source_issue.status = 'triage' THEN 'triage'
+      ELSE issue_status_category(source_status.category)
+  END IN ('unstarted', 'started')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
@@ -5775,7 +5788,8 @@ LIMIT $1
 // that one condition is recorded as durable state instead of being re-proven
 // through four joins and two NOT EXISTS subqueries on every tick. The predicate
 // of idx_comment_delegated_failure_unsettled matches the first four conditions,
-// so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
+// narrowing the scan to unsettled signals. Reversible eligibility must still
+// be checked before LIMIT so paused signals cannot starve executable ones.
 func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, maxPerTick int32) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listPendingDelegatedFailureRecoveries, maxPerTick)
 	if err != nil {
@@ -5804,6 +5818,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.ViaPluginID,
 			&i.Revision,
 			&i.RecoverySettledAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
