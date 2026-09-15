@@ -506,25 +506,21 @@ function Workbench({
           <div className="workspace-heading-left">
             {panels.leftCollapsed && leftPanelToggle}
             <div>
-              <div className="workspace-breadcrumb">
-                <a href="#/overview">
-                  {t(($) => $.system.navigation.overview)}
-                </a>
-                {"module" in route && (
-                  <>
-                    <ChevronRight />
-                    <a href={pageHref(route.module.id)}>
-                      {t(($) => $.system.modules[route.module.id])}
-                    </a>
-                  </>
-                )}
-                {route.kind === "page" && (
-                  <>
-                    <ChevronRight />
-                    <span>{title}</span>
-                  </>
-                )}
-              </div>
+              {route.kind !== "overview" && (
+                <div className="workspace-breadcrumb">
+                  <a href="#/overview">
+                    {t(($) => $.system.navigation.overview)}
+                  </a>
+                  {route.kind === "page" && (
+                    <>
+                      <ChevronRight />
+                      <a href={pageHref(route.module.id)}>
+                        {t(($) => $.system.modules[route.module.id])}
+                      </a>
+                    </>
+                  )}
+                </div>
+              )}
               <h1>{title}</h1>
             </div>
           </div>
