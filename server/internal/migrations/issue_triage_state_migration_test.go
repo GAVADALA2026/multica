@@ -7,7 +7,7 @@ import (
 
 // TestIssueTriageStateMigration pins the lock shape of the Triage column: 483
 // registers the CHECK without validating it, so its ACCESS EXCLUSIVE lock never
-// covers a scan of the issue table, and 485 runs that scan afterwards under
+// covers a scan of the issue table, and 489 runs that scan afterwards under
 // SHARE UPDATE EXCLUSIVE, which readers and writers pass straight through.
 // Skipping the scan is only acceptable while both halves still reject an
 // unknown triage_state on every write, so each step asserts that too.
@@ -35,21 +35,21 @@ func TestIssueTriageStateMigration(t *testing.T) {
 	}
 	s.assertTriageStateEnforced(t, ctx, "483")
 
-	applyMigrationFile(t, ctx, s.pool, "485_issue_triage_state_validate.up.sql")
+	applyMigrationFile(t, ctx, s.pool, "489_issue_triage_state_validate.up.sql")
 
 	if !s.triageStateValidated(t, ctx) {
-		t.Error("485 left the CHECK NOT VALID")
+		t.Error("489 left the CHECK NOT VALID")
 	}
-	s.assertTriageStateEnforced(t, ctx, "485")
+	s.assertTriageStateEnforced(t, ctx, "489")
 
 	// Rolling back the validation cannot restore a validated constraint, so it
 	// has to leave the state 483 produced rather than no constraint at all.
-	applyMigrationFile(t, ctx, s.pool, "485_issue_triage_state_validate.down.sql")
+	applyMigrationFile(t, ctx, s.pool, "489_issue_triage_state_validate.down.sql")
 
 	if s.triageStateValidated(t, ctx) {
-		t.Error("485 down left the CHECK validated")
+		t.Error("489 down left the CHECK validated")
 	}
-	s.assertTriageStateEnforced(t, ctx, "485 down")
+	s.assertTriageStateEnforced(t, ctx, "489 down")
 
 	applyMigrationFile(t, ctx, s.pool, "483_issue_triage_state.down.sql")
 
