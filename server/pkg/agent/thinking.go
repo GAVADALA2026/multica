@@ -646,8 +646,11 @@ func catalogLoader(ctx context.Context, providerType string, cmd Command) func()
 //   - other providers: empty model resolves to the catalog's Default entry
 //     so a default-model task with a valid thinking_level isn't misjudged as
 //     "unknown model → reject" (the misjudgement flagged in an earlier
-//     review). opencode and omp have no single default, so they accept a
-//     level any advertised model supports.
+//     review). opencode has no single default, so it accepts a level any
+//     advertised model supports.
+//   - omp: fails closed as well. Its catalog marks no default and omp
+//     clamps the level to whichever model its own default role resolves to,
+//     so a level validated against another entry is not the one that runs.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -698,13 +701,18 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			}
 		}
 		if target == "" {
-			// opencode has no single default model, and omp's `models --json`
-			// catalog carries no default marker at all, so neither can resolve an
-			// empty model to one entry. Accept a level any advertised model
-			// supports rather than failing closed: otherwise an omp agent that
-			// pins no model has its effort silently dropped at every launch,
-			// which is the defect MUL-7412 set out to fix.
-			if providerType == "opencode" || providerType == "omp" {
+			// opencode has no single default model, so it accepts a level any
+			// advertised model supports.
+			//
+			// omp deliberately does NOT join it. Its `models --json` catalog marks
+			// no default at all and sorts by provider/id, so no entry here is the
+			// one that would run; at task time omp resolves its own default role
+			// model and then clamps the requested level to what THAT model
+			// supports. Passing a level because some other entry advertises it
+			// would let a user save `max` and silently run at whatever the real
+			// default tops out at — the mismatch MUL-7412 exists to remove. An omp
+			// agent must pin a model to carry an effort.
+			if providerType == "opencode" {
 				return anyModelSupportsThinkingValue(models, value), nil
 			}
 			return false, nil

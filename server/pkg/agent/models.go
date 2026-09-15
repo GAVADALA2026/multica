@@ -1364,9 +1364,8 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 // Using the bare id would let omp's internal provider priority ranking pick a
 // different backend for the same model id. Provider is kept for UI grouping.
 // The dedup key is the selector when present, falling back to provider/id.
-// Model.Thinking comes from the entry's reasoning metadata — see
-// ompThinkingFromCatalogEntry for the shapes omp uses and why `auto` is
-// excluded.
+// Model.Thinking comes from the entry's `reasoning`/`thinking` fields — see
+// ompThinkingFromCatalogEntry for omp's own rules about what those mean.
 func parseOmpModels(data []byte) ([]Model, error) {
 	var wrapper struct {
 		Models []struct {
@@ -1419,46 +1418,38 @@ func parseOmpModels(data []byte) ([]Model, error) {
 	return models, nil
 }
 
-// ompReasoningOnlyLevels is the catalog assumed for an omp model that reports
-// `reasoning: true` without any per-level list. It matches what
-// piThinkingFromRPCModel does with an absent thinkingLevelMap.
-var ompReasoningOnlyLevels = []string{"off", "minimal", "low", "medium", "high"}
-
 // ompThinkingFromCatalogEntry maps one `omp models --json` entry's reasoning
 // metadata onto Multica's per-model effort catalog.
 //
-// omp reports its catalog in two shapes, and neither matches pi's
-// `thinkingLevelMap`, so piThinkingFromRPCModel cannot be reused here:
+// The rules are omp's own, verified against can1357/oh-my-pi v18.2.0:
 //
-//	"thinking": ["medium","high","max"]
-//	"thinking": {"mode":"effort","efforts":["medium","high","max"],"defaultLevel":"high",...}
+//   - `models --json` emits `thinking` as a concrete effort array or `null`,
+//     never an object — see ModelJson/toModelJson in cli/models-cli.ts.
+//   - omp's Effort vocabulary is minimal|low|medium|high|xhigh|max. `off` is
+//     NOT an effort and so never appears in that array (catalog/src/effort.ts).
+//   - `reasoning: true` with `thinking: null` means "reasons, but exposes no
+//     controllable effort dial": getSupportedEfforts documents that exact case.
+//     Inferring efforts there would offer levels omp then clamps away, which is
+//     the silent mismatch MUL-7412 exists to remove.
+//   - `off` is honoured for any model whatever its effort array, because
+//     resolveThinkingLevelForModel returns it before clamping runs
+//     (coding-agent/src/thinking.ts).
 //
-// The flat array is what `omp models --json` emits (omp 18.2.0, GH #8458); the
-// object is the shape omp's RPC get_available_models answers with. Both are
-// read because those two surfaces have already drifted apart once, and a shape
-// we failed to recognise would hide the picker silently instead of loudly.
+// So a reasoning model gets `off` plus exactly the efforts the catalog
+// advertised, and nothing inferred. A non-reasoning model gets no picker at
+// all, matching how Multica hides pi's inert `off`-only control.
 //
-// Advertised levels are intersected with piThinkingLevelOrder rather than
-// forwarded verbatim. omp's --thinking vocabulary also contains `auto` ("omp
-// picks the effort"), which is deliberately not a Multica level: it selects an
-// effort instead of being one, so it means nothing in a per-model catalog and
-// providerThinkingEnums rejects it. Advertising it would only let a user save a
-// value the daemon then drops (MUL-7412).
-//
-// A reasoning-capable model advertising no catalog at all falls back to the
-// rule pi applies in that same situation: everything up to `high`, withholding
-// `xhigh`/`max` because pi requires a model to advertise those explicitly. omp
-// really does emit that shape — see the anthropic entry in TestParseOmpModels.
+// `auto` is deliberately excluded: omp keeps AUTO_THINKING as a session-level
+// sentinel that is explicitly never an Effort or ThinkingLevel and is resolved
+// per turn, so it is not a per-model capability, and providerThinkingEnums
+// rejects it (MUL-7412).
 func ompThinkingFromCatalogEntry(reasoning bool, raw json.RawMessage) *ModelThinking {
-	efforts, defaultLevel := parseOmpThinkingCatalog(raw)
-	if len(efforts) == 0 {
-		if !reasoning {
-			return nil
-		}
-		efforts = ompReasoningOnlyLevels
+	if !reasoning {
+		return nil
 	}
-	advertised := make(map[string]bool, len(efforts))
-	for _, effort := range efforts {
+	// `off` is always available; the catalog only ever adds efforts on top.
+	advertised := map[string]bool{"off": true}
+	for _, effort := range parseOmpEfforts(raw) {
 		advertised[strings.TrimSpace(effort)] = true
 	}
 	levels := make([]ThinkingLevel, 0, len(piThinkingLevelOrder))
@@ -1467,39 +1458,22 @@ func ompThinkingFromCatalogEntry(reasoning bool, raw json.RawMessage) *ModelThin
 			levels = append(levels, ThinkingLevel{Value: value, Label: piThinkingLevelLabels[value]})
 		}
 	}
-	if len(levels) == 0 {
-		return nil
-	}
-	thinking := &ModelThinking{SupportedLevels: levels}
-	// Keep a default level only when the model advertises it too, so a stale or
-	// unrecognised token cannot make the picker preselect something the daemon
-	// would drop.
-	if piThinkingSupports(thinking, defaultLevel) {
-		thinking.DefaultLevel = defaultLevel
-	}
-	return thinking
+	return &ModelThinking{SupportedLevels: levels}
 }
 
-// parseOmpThinkingCatalog reads the advertised effort list out of whichever
-// shape omp used for a model's `thinking` field. An absent or unrecognised
-// shape yields no efforts, which sends the caller to its reasoning-only
-// fallback rather than advertising a guessed catalog.
-func parseOmpThinkingCatalog(raw json.RawMessage) (efforts []string, defaultLevel string) {
+// parseOmpEfforts reads the effort array out of a catalog entry's `thinking`
+// field. An absent field, `null`, and any shape that is not an array of strings
+// all yield no efforts: a payload we cannot read is not evidence that the model
+// supports anything.
+func parseOmpEfforts(raw json.RawMessage) []string {
 	if len(raw) == 0 {
-		return nil, ""
+		return nil
 	}
-	var flat []string
-	if err := json.Unmarshal(raw, &flat); err == nil {
-		return flat, ""
+	var efforts []string
+	if err := json.Unmarshal(raw, &efforts); err != nil {
+		return nil
 	}
-	var object struct {
-		Efforts      []string `json:"efforts"`
-		DefaultLevel string   `json:"defaultLevel"`
-	}
-	if err := json.Unmarshal(raw, &object); err == nil {
-		return object.Efforts, strings.TrimSpace(object.DefaultLevel)
-	}
-	return nil, ""
+	return efforts
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

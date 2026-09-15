@@ -505,10 +505,12 @@ func levelValues(thinking *ModelThinking) []string {
 	return out
 }
 
-// TestOmpThinkingFromCatalogEntry pins the per-model effort catalog omp models
-// advertise. The `auto` cases matter most: omp's own --thinking accepts it, but
-// it selects an effort rather than being one, so it must never reach the picker
-// (providerThinkingEnums rejects it, and the daemon would drop it) — MUL-7412.
+// TestOmpThinkingFromCatalogEntry pins omp's own rules for what a catalog entry
+// means, verified against can1357/oh-my-pi v18.2.0. Two of them are easy to get
+// backwards, and both produce the silent mismatch MUL-7412 exists to remove:
+// `reasoning: true` with no effort array means "no controllable dial" (not
+// "assume the usual levels"), and `off` is honoured for every reasoning model
+// even though it is never a member of the effort array.
 func TestOmpThinkingFromCatalogEntry(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -516,88 +518,82 @@ func TestOmpThinkingFromCatalogEntry(t *testing.T) {
 		reasoning    bool
 		thinking     string
 		wantLevels   []string
-		wantDefault  string
 		wantNoPicker bool
 	}{
 		{
-			// The shape `omp models --json` emits (omp 18.2.0, GH #8458).
-			name:       "flat effort array",
+			// The reporter's model in GH #8458. `off` is added on top: omp's
+			// resolveThinkingLevelForModel returns it before clamping runs, so it
+			// really is selectable even though the array never lists it.
+			name:       "advertised efforts, plus off",
 			reasoning:  true,
 			thinking:   `["medium","high","max"]`,
-			wantLevels: []string{"medium", "high", "max"},
+			wantLevels: []string{"off", "medium", "high", "max"},
 		},
 		{
-			// The shape omp's RPC get_available_models answers with.
-			name:        "effort object with default",
-			reasoning:   true,
-			thinking:    `{"mode":"effort","efforts":["medium","high","max"],"defaultLevel":"high","effortRouting":{"max":"swe-2-max"}}`,
-			wantLevels:  []string{"medium", "high", "max"},
-			wantDefault: "high",
+			// getSupportedEfforts defines this as "reasons, no controllable effort
+			// surface". Inferring low/medium/high here would offer levels omp then
+			// clamps away.
+			name:       "reasoning with null thinking offers only off",
+			reasoning:  true,
+			thinking:   `null`,
+			wantLevels: []string{"off"},
 		},
 		{
-			// A reasoning model with no per-level data degrades to pi's rule for
-			// the same case: up to `high`, never xhigh/max.
-			name:       "reasoning only, no catalog",
+			name:       "reasoning with absent thinking offers only off",
 			reasoning:  true,
 			thinking:   ``,
-			wantLevels: []string{"off", "minimal", "low", "medium", "high"},
+			wantLevels: []string{"off"},
 		},
 		{
-			name:         "not a reasoning model",
+			name:       "reasoning with an empty array offers only off",
+			reasoning:  true,
+			thinking:   `[]`,
+			wantLevels: []string{"off"},
+		},
+		{
+			// No reasoning at all: an off-only control would be inert, so Multica
+			// hides the picker exactly as it does for pi.
+			name:         "not a reasoning model has no picker",
 			reasoning:    false,
 			thinking:     ``,
 			wantNoPicker: true,
 		},
 		{
-			// `auto` is dropped from both shapes rather than offered.
-			name:       "auto is filtered out of the array",
-			reasoning:  true,
-			thinking:   `["medium","high","max","auto"]`,
-			wantLevels: []string{"medium", "high", "max"},
+			name:         "not a reasoning model stays hidden even with efforts listed",
+			reasoning:    false,
+			thinking:     `["high"]`,
+			wantNoPicker: true,
 		},
 		{
-			name:       "auto is filtered out of the object",
+			// omp keeps `auto` as a session-level sentinel, never a per-model
+			// effort, so it must not reach the picker.
+			name:       "auto is never offered",
 			reasoning:  true,
-			thinking:   `{"mode":"effort","efforts":["auto","high"]}`,
-			wantLevels: []string{"high"},
-		},
-		{
-			// An unrecognised default must not preselect anything: the daemon
-			// would drop a level the model never advertised.
-			name:        "default outside the advertised set is dropped",
-			reasoning:   true,
-			thinking:    `{"efforts":["medium","high"],"defaultLevel":"auto"}`,
-			wantLevels:  []string{"medium", "high"},
-			wantDefault: "",
+			thinking:   `["medium","high","auto"]`,
+			wantLevels: []string{"off", "medium", "high"},
 		},
 		{
 			// Canonical order, not the order omp happened to list.
-			name:       "levels are returned in canonical order",
+			name:       "levels come back in canonical order",
 			reasoning:  true,
 			thinking:   `["max","low","high"]`,
-			wantLevels: []string{"low", "high", "max"},
+			wantLevels: []string{"off", "low", "high", "max"},
 		},
 		{
-			// A shape we do not understand must not silently hide the picker for
-			// a model omp says can reason.
-			name:       "unknown shape falls back to reasoning",
-			reasoning:  true,
-			thinking:   `"effort"`,
-			wantLevels: []string{"off", "minimal", "low", "medium", "high"},
-		},
-		{
-			// Only tokens Multica knows survive, so a future omp level cannot
+			// Only tokens Multica knows survive, so a future omp effort cannot
 			// reach the picker before the server's enum accepts it.
 			name:       "unknown tokens are dropped",
 			reasoning:  true,
 			thinking:   `["medium","ultra","hyper"]`,
-			wantLevels: []string{"medium"},
+			wantLevels: []string{"off", "medium"},
 		},
 		{
-			name:         "reasoning model advertising nothing usable has no picker",
-			reasoning:    false,
-			thinking:     `["ultra"]`,
-			wantNoPicker: true,
+			// `models --json` never emits an object. If one ever appears it is not
+			// evidence of support: fall back to off-only rather than mining it.
+			name:       "an unreadable shape proves nothing",
+			reasoning:  true,
+			thinking:   `{"mode":"effort","efforts":["medium","high","max"]}`,
+			wantLevels: []string{"off"},
 		},
 	}
 	for _, tc := range tests {
@@ -616,11 +612,11 @@ func TestOmpThinkingFromCatalogEntry(t *testing.T) {
 			if values := levelValues(got); !slices.Equal(values, tc.wantLevels) {
 				t.Errorf("levels = %v, want %v", values, tc.wantLevels)
 			}
-			if got.DefaultLevel != tc.wantDefault {
-				t.Errorf("DefaultLevel = %q, want %q", got.DefaultLevel, tc.wantDefault)
+			// omp's `models --json` carries no default level, so we must never
+			// invent one for the picker to preselect.
+			if got.DefaultLevel != "" {
+				t.Errorf("DefaultLevel = %q, want empty", got.DefaultLevel)
 			}
-			// Every advertised level must carry a label, or the picker renders a
-			// blank row.
 			for _, level := range got.SupportedLevels {
 				if level.Label == "" {
 					t.Errorf("level %q has an empty label", level.Value)
@@ -638,8 +634,8 @@ func TestParseOmpModelsCarriesThinkingCatalog(t *testing.T) {
 	t.Parallel()
 	sample := `{"models":[` +
 		`{"provider":"devin","id":"swe-2","selector":"devin/swe-2","name":"SWE-2","reasoning":true,"thinking":["medium","high","max"]},` +
-		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Sonnet 5","reasoning":true},` +
-		`{"provider":"openai","id":"gpt-5","selector":"openai/gpt-5","name":"GPT-5"}` +
+		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Sonnet 5","reasoning":true,"thinking":null},` +
+		`{"provider":"openai","id":"gpt-5","selector":"openai/gpt-5","name":"GPT-5","reasoning":false,"thinking":null}` +
 		`]}`
 	models, err := parseOmpModels([]byte(sample))
 	if err != nil {
@@ -648,12 +644,12 @@ func TestParseOmpModelsCarriesThinkingCatalog(t *testing.T) {
 	if len(models) != 3 {
 		t.Fatalf("expected 3 models, got %d", len(models))
 	}
-	if got := levelValues(models[0].Thinking); !slices.Equal(got, []string{"medium", "high", "max"}) {
-		t.Errorf("devin/swe-2 levels = %v, want [medium high max]", got)
+	if got := levelValues(models[0].Thinking); !slices.Equal(got, []string{"off", "medium", "high", "max"}) {
+		t.Errorf("devin/swe-2 levels = %v, want [off medium high max]", got)
 	}
-	// reasoning without a per-level list: pi's conservative default.
-	if got := levelValues(models[1].Thinking); !slices.Equal(got, []string{"off", "minimal", "low", "medium", "high"}) {
-		t.Errorf("anthropic/claude-sonnet-5 levels = %v, want off..high", got)
+	// Reasons, but omp exposes no effort dial for it: off only, nothing inferred.
+	if got := levelValues(models[1].Thinking); !slices.Equal(got, []string{"off"}) {
+		t.Errorf("anthropic/claude-sonnet-5 levels = %v, want [off]", got)
 	}
 	// No reasoning at all: no picker, rather than an inert one.
 	if models[2].Thinking != nil {
@@ -677,26 +673,31 @@ func TestOmpAdvertisedLevelsArePersistable(t *testing.T) {
 	}
 }
 
-// TestValidateThinkingLevelOmpEmptyModel covers the omp agent that pins no
-// model. omp's catalog flags no Default entry, so without the opencode-style
-// fallback the daemon's guard would fail such an agent closed and silently drop
-// its effort at every launch — the same user-visible defect as MUL-7412, just
-// one layer down.
+// TestValidateThinkingLevelOmpEmptyModel pins the omp agent that pins no model:
+// the level must fail closed. omp's catalog marks no default entry, and at task
+// time omp resolves its own default role model and clamps the level to what
+// THAT model supports — so passing a level because some other catalog entry
+// advertises it would let a user save `max` and silently run lower, which is
+// the mismatch MUL-7412 exists to remove.
 func TestValidateThinkingLevelOmpEmptyModel(t *testing.T) {
 	t.Parallel()
 	load := func() (Catalog, error) {
 		return Catalog{Models: []Model{
 			{ID: "devin/swe-2", Label: "SWE-2", Provider: "devin",
 				Thinking: ompThinkingFromCatalogEntry(true, []byte(`["medium","high","max"]`))},
+			{ID: "anthropic/claude-sonnet-5", Label: "Sonnet 5", Provider: "anthropic",
+				Thinking: ompThinkingFromCatalogEntry(true, []byte(`null`))},
 		}}, nil
 	}
 	for _, tc := range []struct {
 		value string
 		want  bool
 	}{
-		{value: "", want: true},     // "use the runtime default"
-		{value: "max", want: true},  // advertised by an omp model
-		{value: "off", want: false}, // advertised by none
+		{value: "", want: true}, // "use the runtime default" is always fine
+		// Advertised by devin/swe-2, but that is not necessarily the model omp
+		// will run, so an unpinned agent must not carry it.
+		{value: "max", want: false},
+		{value: "off", want: false},
 	} {
 		got, err := ValidateThinkingLevelWith(load, "omp", "", tc.value)
 		if err != nil {
@@ -707,11 +708,24 @@ func TestValidateThinkingLevelOmpEmptyModel(t *testing.T) {
 		}
 	}
 	// A pinned model still resolves against that model's own catalog.
-	got, err := ValidateThinkingLevelWith(load, "omp", "devin/swe-2", "max")
-	if err != nil {
-		t.Fatalf("ValidateThinkingLevelWith(omp, devin/swe-2, max): %v", err)
-	}
-	if !got {
-		t.Error("ValidateThinkingLevelWith(omp, devin/swe-2, max) = false, want true")
+	for _, tc := range []struct {
+		model string
+		value string
+		want  bool
+	}{
+		{model: "devin/swe-2", value: "max", want: true},
+		{model: "devin/swe-2", value: "off", want: true},
+		{model: "devin/swe-2", value: "low", want: false},
+		// Reasons with no effort dial: off is real, a concrete effort is not.
+		{model: "anthropic/claude-sonnet-5", value: "off", want: true},
+		{model: "anthropic/claude-sonnet-5", value: "high", want: false},
+	} {
+		got, err := ValidateThinkingLevelWith(load, "omp", tc.model, tc.value)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevelWith(omp, %q, %q): %v", tc.model, tc.value, err)
+		}
+		if got != tc.want {
+			t.Errorf("ValidateThinkingLevelWith(omp, %q, %q) = %v, want %v", tc.model, tc.value, got, tc.want)
+		}
 	}
 }
