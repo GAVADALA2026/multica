@@ -729,7 +729,8 @@ describe("BillingTab", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders authoritative subscription seat facts", () => {
+  it("renders authoritative subscription seat facts and opens their calculation help", async () => {
+    const user = userEvent.setup();
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
@@ -764,6 +765,16 @@ describe("BillingTab", () => {
     expect(screen.getByText("0 seats")).toBeInTheDocument();
     expect(screen.getByText(/4 seats from Feb 1, 2030/)).toBeInTheDocument();
     expect(screen.getAllByText("4 members")).toHaveLength(1);
+    expect(screen.getByText("Available seats").closest("summary")).toBeNull();
+    const formula = "Purchased seats minus members and reserved invitations.";
+    expect(screen.queryByText(formula)).not.toBeInTheDocument();
+    const help = screen.getByRole("button", { name: "How available seats are calculated" });
+    help.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(formula)).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText(formula)).not.toBeInTheDocument());
+    expect(help).toHaveFocus();
   });
 
   it("quotes and confirms an additive seat purchase", async () => {

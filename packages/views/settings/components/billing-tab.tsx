@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CreditCard,
   ExternalLink,
+  Info,
   Loader2,
   Plus,
   RefreshCw,
@@ -56,6 +57,12 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import {
   Progress,
   ProgressLabel,
@@ -1438,14 +1445,27 @@ function BillingTabContent() {
             </SettingsRow>
             <SettingsRow
               label={
-                <details>
-                  <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
-                    {t(($) => $.workspace.seats.available)}
-                  </summary>
-                  <p className="mt-1 text-caption font-normal text-muted-foreground">
-                    {t(($) => $.workspace.seats.available_description)}
-                  </p>
-                </details>
+                <div className="flex items-center gap-1.5">
+                  <span>{t(($) => $.workspace.seats.available)}</span>
+                  <Popover>
+                    <PopoverTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={t(($) => $.workspace.seats.available_help)}
+                        >
+                          <Info className="size-3.5" />
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="start">
+                      <PopoverDescription>
+                        {t(($) => $.workspace.seats.available_description)}
+                      </PopoverDescription>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               }
             >
               {summaryQuery.isPending ? (

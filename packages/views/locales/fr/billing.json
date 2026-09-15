@@ -207,7 +207,8 @@
       "members_over_capacity_title": "Les membres dépassent le nombre de sièges achetés",
       "members_over_capacity_description": "Cet espace de travail compte {{actual}} membres mais seulement {{purchased}} sièges achetés. Ajoutez suffisamment de sièges ou retirez des membres avant d'envoyer de nouvelles invitations.",
       "occupancy_over_capacity_description": "Cet espace de travail occupe {{occupied}} des {{purchased}} sièges achetés ({{members}} membres et {{reserved}} invitations en attente). Ajoutez des sièges, retirez un membre ou révoquez une invitation en attente avant d'inviter quelqu'un d'autre.",
-      "updated": "Achat de sièges soumis"
+      "updated": "Achat de sièges soumis",
+      "available_help": "Calcul des sièges disponibles"
     },
     "seat_purchase": {
       "title": "Ajouter des sièges",

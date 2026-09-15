@@ -3067,7 +3067,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         lastName: "성",
         businessEmail: "비즈니스 이메일",
         businessEmailHint:
-          "회사 이메일을 사용하세요.",
+          "회사 이메일을 사용하세요. Gmail, Outlook 등 개인 이메일은 사용할 수 없습니다.",
         companyName: "회사명",
         companySize: "회사 규모",
         countryRegion: "국가 / 지역",

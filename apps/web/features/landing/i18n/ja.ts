@@ -3046,7 +3046,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         lastName: "姓",
         businessEmail: "ビジネスメール",
         businessEmailHint:
-          "会社のメールアドレスを使用してください。",
+          "会社のメールアドレスを使用してください。Gmail、Outlook などの個人用メールは受け付けていません。",
         companyName: "会社名",
         companySize: "会社規模",
         countryRegion: "国 / 地域",

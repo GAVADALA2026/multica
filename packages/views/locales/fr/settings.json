@@ -787,7 +787,6 @@
     "feature_co_author_description_prefix": "Ajouter",
     "feature_co_author_description_suffix": "aux commits rédigés par des agents.",
     "feature_auto_link_label": "Lier automatiquement tâches et PR",
-    "feature_auto_link_description": "Associez les PR à l’aide des identifiants de tâche.",
     "section_repositories": "Dépôts",
     "repositories_shortcut_label": "Les URL de dépôts se trouvent dans l'onglet Dépôts",
     "repositories_shortcut_link": "Gérer les dépôts →",

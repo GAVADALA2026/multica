@@ -207,7 +207,8 @@
       "members_over_capacity_title": "Members exceed purchased seats",
       "members_over_capacity_description": "This workspace has {{actual}} members but only {{purchased}} purchased seats. Add enough seats or remove members before sending more invitations.",
       "occupancy_over_capacity_description": "This workspace occupies {{occupied}} of {{purchased}} purchased seats ({{members}} members and {{reserved}} pending invitations). Add seats, remove a member, or revoke a pending invitation before inviting someone else.",
-      "updated": "Seat purchase submitted"
+      "updated": "Seat purchase submitted",
+      "available_help": "How available seats are calculated"
     },
     "seat_purchase": {
       "title": "Add seats",

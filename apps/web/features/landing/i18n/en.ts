@@ -3545,7 +3545,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       lastName: "Last name",
       businessEmail: "Business email",
       businessEmailHint:
-        "Company email required.",
+        "Use a company email. Gmail, Outlook, and other personal email providers aren't accepted.",
       companyName: "Company name",
       companySize: "Company size",
       countryRegion: "Country / Region",

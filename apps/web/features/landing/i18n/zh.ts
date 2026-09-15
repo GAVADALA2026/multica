@@ -3540,7 +3540,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       lastName: "姓",
       businessEmail: "企业邮箱",
       businessEmailHint:
-        "请使用公司邮箱。",
+        "请使用公司邮箱，不接受 Gmail、Outlook 等个人邮箱。",
       companyName: "公司名称",
       companySize: "公司规模",
       countryRegion: "国家 / 地区",

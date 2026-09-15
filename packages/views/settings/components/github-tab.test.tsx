@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -143,6 +143,19 @@ function resetFixtures() {
 
 describe("GitHubTab", () => {
   beforeEach(resetFixtures);
+
+  it.each([false, true])("keeps matching and close rules beside auto-link when connected=%s", (connected) => {
+    installationsRef.current.installations = connected
+      ? [{ id: "inst-1", account_login: "acme" }]
+      : [];
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", { name: /Auto-link issues and PRs/i });
+    const row = within(toggle.parentElement!);
+    expect(row.getByText(/is in its branch name or title, or its body says Closes MUL-123/)).toBeTruthy();
+    expect(row.getByText("Done")).toBeTruthy();
+    expect(screen.getAllByText("MUL-123")).toHaveLength(1);
+  });
 
   it("offers the master switch without a separate turn-off callout", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
