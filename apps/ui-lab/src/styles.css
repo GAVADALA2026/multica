@@ -2223,3 +2223,42 @@ body {
     padding-inline: 6px;
   }
 }
+
+/* Panel actions sit with the panel they control; restore actions stay on the same side. */
+.lab-nav {
+  padding-top: 0;
+}
+.lab-nav-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 46px;
+  flex-shrink: 0;
+  padding-left: 10px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.lab-nav .catalog-navigation {
+  padding-top: 16px;
+}
+.workspace-heading-left,
+.workspace-heading-actions,
+.property-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-heading-left {
+  min-width: 0;
+}
+.workspace-heading-actions,
+.property-header-actions {
+  flex-shrink: 0;
+}
+.property-header-actions {
+  gap: 4px;
+}

@@ -69,6 +69,7 @@ function PropertySection({
 }
 
 export function Inspector({
+  panelAction,
   scene,
   theme,
   draft,
@@ -85,6 +86,7 @@ export function Inspector({
   onColorCancel,
   onExport,
 }: {
+  panelAction?: ReactNode;
   scene: Scene;
   theme: Theme;
   draft: Draft;
@@ -280,16 +282,19 @@ export function Inspector({
               {count > 0 && <span className="property-count">{count}</span>}
             </TabsTrigger>
           </TabsList>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t(($) => $.inspector.changes.reset)}
-            title={t(($) => $.inspector.changes.resetTitle)}
-            disabled={!count}
-            onClick={() => onEdit({ light: {}, dark: {}, shared: {} })}
-          >
-            <RotateCcw />
-          </Button>
+          <div className="property-header-actions">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t(($) => $.inspector.changes.reset)}
+              title={t(($) => $.inspector.changes.resetTitle)}
+              disabled={!count}
+              onClick={() => onEdit({ light: {}, dark: {}, shared: {} })}
+            >
+              <RotateCcw />
+            </Button>
+            {panelAction}
+          </div>
         </div>
         <TabsContent value="design" className="property-tab-panel">
           {scene === "colors" ? (

@@ -207,7 +207,8 @@ pairs only: placeholders, tab indicators, focus-ring geometry and complete WCAG
 compliance still need separate review. Current source colors may fail; the
 checker reports failures without silently changing production tokens.
 
-Use the header panel icons to collapse either sidebar independently. Desktop
+Use each sidebar’s header icon to collapse it; restore icons appear on the
+corresponding side of the canvas heading. Desktop
 panel preferences persist across routes and reloads, separately from design
 drafts. On narrow screens the left toggle opens the navigation drawer; the
-right toggle shows or hides the property panel below the preview.
+right panel closes from its own header and reopens from the canvas heading.

@@ -352,6 +352,63 @@ function Workbench({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice({ key: "exported" });
   };
+  const leftPanelToggleRef = useRef<HTMLButtonElement>(null);
+  const rightPanelToggleRef = useRef<HTMLButtonElement>(null);
+  const leftPanelToggle = (
+    <Button
+      ref={leftPanelToggleRef}
+      className="desktop-nav-toggle"
+      size="icon-sm"
+      variant="ghost"
+      aria-label={t(
+        ($) =>
+          $.lab.panels[panels.leftCollapsed ? "expandLeft" : "collapseLeft"],
+      )}
+      title={t(
+        ($) =>
+          $.lab.panels[panels.leftCollapsed ? "expandLeft" : "collapseLeft"],
+      )}
+      aria-expanded={!panels.leftCollapsed}
+      aria-controls="lab-navigation"
+      onClick={() => {
+        setPanels((current) => ({
+          ...current,
+          leftCollapsed: !current.leftCollapsed,
+        }));
+        requestAnimationFrame(() => leftPanelToggleRef.current?.focus());
+      }}
+    >
+      {panels.leftCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+    </Button>
+  );
+  const rightPanelToggle = (
+    <Button
+      ref={rightPanelToggleRef}
+      size="icon-sm"
+      variant="ghost"
+      aria-label={t(
+        ($) =>
+          $.lab.panels[panels.rightCollapsed ? "expandRight" : "collapseRight"],
+      )}
+      title={t(
+        ($) =>
+          $.lab.panels[panels.rightCollapsed ? "expandRight" : "collapseRight"],
+      )}
+      aria-expanded={!panels.rightCollapsed}
+      aria-controls="lab-inspector-panel"
+      onClick={() => {
+        setColorPreview(null);
+        setNumberPreview(null);
+        setPanels((current) => ({
+          ...current,
+          rightCollapsed: !current.rightCollapsed,
+        }));
+        requestAnimationFrame(() => rightPanelToggleRef.current?.focus());
+      }}
+    >
+      {panels.rightCollapsed ? <PanelRightOpen /> : <PanelRightClose />}
+    </Button>
+  );
   return (
     <div
       className={`lab-shell ${scene ? "" : "catalog-shell"} ${panels.leftCollapsed ? "nav-collapsed" : ""} ${panels.rightCollapsed ? "inspector-collapsed" : ""}`}
@@ -367,33 +424,6 @@ function Workbench({
           onClick={() => setNavOpen(!navOpen)}
         >
           <PanelLeft />
-        </Button>
-        <Button
-          className="desktop-nav-toggle"
-          size="icon"
-          variant="ghost"
-          aria-label={t(
-            ($) =>
-              $.lab.panels[
-                panels.leftCollapsed ? "expandLeft" : "collapseLeft"
-              ],
-          )}
-          title={t(
-            ($) =>
-              $.lab.panels[
-                panels.leftCollapsed ? "expandLeft" : "collapseLeft"
-              ],
-          )}
-          aria-expanded={!panels.leftCollapsed}
-          aria-controls="lab-navigation"
-          onClick={() =>
-            setPanels((current) => ({
-              ...current,
-              leftCollapsed: !current.leftCollapsed,
-            }))
-          }
-        >
-          {panels.leftCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
         </Button>
         <a className="lab-brand" href="#/overview" aria-label="Multica UI Lab">
           <span className="logo-mark">
@@ -459,95 +489,77 @@ function Workbench({
             <Code2 />
             <span>{t(($) => $.lab.actions.export)}</span>
           </Button>
-          {scene && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={t(
-                ($) =>
-                  $.lab.panels[
-                    panels.rightCollapsed ? "expandRight" : "collapseRight"
-                  ],
-              )}
-              title={t(
-                ($) =>
-                  $.lab.panels[
-                    panels.rightCollapsed ? "expandRight" : "collapseRight"
-                  ],
-              )}
-              aria-expanded={!panels.rightCollapsed}
-              aria-controls="lab-inspector-panel"
-              onClick={() => {
-                setColorPreview(null);
-                setNumberPreview(null);
-                setPanels((current) => ({
-                  ...current,
-                  rightCollapsed: !current.rightCollapsed,
-                }));
-              }}
-            >
-              {panels.rightCollapsed ? <PanelRightOpen /> : <PanelRightClose />}
-            </Button>
-          )}
         </div>
       </header>
       <aside
         id="lab-navigation"
         className={`lab-nav ${navOpen ? "nav-open" : ""}`}
       >
+        <div className="lab-nav-header">
+          <span>{t(($) => $.system.navigation.title)}</span>
+          {!panels.leftCollapsed && leftPanelToggle}
+        </div>
         <CatalogNavigation route={route} onNavigate={() => setNavOpen(false)} />
       </aside>
       <main className="lab-main">
         <div className="workspace-heading">
-          <div>
-            <div className="workspace-breadcrumb">
-              <a href="#/overview">{t(($) => $.system.navigation.overview)}</a>
-              {"module" in route && (
-                <>
-                  <ChevronRight />
-                  <a href={pageHref(route.module.id)}>
-                    {t(($) => $.system.modules[route.module.id])}
-                  </a>
-                </>
-              )}
-              {route.kind === "page" && (
-                <>
-                  <ChevronRight />
-                  <span>{title}</span>
-                </>
-              )}
+          <div className="workspace-heading-left">
+            {panels.leftCollapsed && leftPanelToggle}
+            <div>
+              <div className="workspace-breadcrumb">
+                <a href="#/overview">
+                  {t(($) => $.system.navigation.overview)}
+                </a>
+                {"module" in route && (
+                  <>
+                    <ChevronRight />
+                    <a href={pageHref(route.module.id)}>
+                      {t(($) => $.system.modules[route.module.id])}
+                    </a>
+                  </>
+                )}
+                {route.kind === "page" && (
+                  <>
+                    <ChevronRight />
+                    <span>{title}</span>
+                  </>
+                )}
+              </div>
+              <h1>{title}</h1>
             </div>
-            <h1>{title}</h1>
           </div>
           {scene && (
-            <div
-              className="theme-toggle"
-              aria-label={t(($) => $.lab.theme.label)}
-            >
-              <Button
-                variant={theme === "light" ? "secondary" : "ghost"}
-                size="icon"
-                aria-label={t(($) => $.lab.theme.lightLabel)}
-                aria-pressed={theme === "light"}
-                onClick={() => {
-                  setColorPreview(null);
-                  setTheme("light");
-                }}
+            <div className="workspace-heading-actions">
+              <div
+                className="theme-toggle"
+                aria-label={t(($) => $.lab.theme.label)}
               >
-                <Sun />
-              </Button>
-              <Button
-                variant={theme === "dark" ? "secondary" : "ghost"}
-                size="icon"
-                aria-label={t(($) => $.lab.theme.darkLabel)}
-                aria-pressed={theme === "dark"}
-                onClick={() => {
-                  setColorPreview(null);
-                  setTheme("dark");
-                }}
-              >
-                <Moon />
-              </Button>
+                <Button
+                  variant={theme === "light" ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-label={t(($) => $.lab.theme.lightLabel)}
+                  aria-pressed={theme === "light"}
+                  onClick={() => {
+                    setColorPreview(null);
+                    setTheme("light");
+                  }}
+                >
+                  <Sun />
+                </Button>
+                <Button
+                  variant={theme === "dark" ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-label={t(($) => $.lab.theme.darkLabel)}
+                  aria-pressed={theme === "dark"}
+                  onClick={() => {
+                    setColorPreview(null);
+                    setTheme("dark");
+                  }}
+                >
+                  <Moon />
+                </Button>
+              </div>
+              {panels.rightCollapsed && rightPanelToggle}
             </div>
           )}
         </div>
@@ -698,6 +710,7 @@ function Workbench({
         >
           {!panels.rightCollapsed && (
             <Inspector
+              panelAction={rightPanelToggle}
               scene={scene}
               theme={theme}
               draft={draft}
