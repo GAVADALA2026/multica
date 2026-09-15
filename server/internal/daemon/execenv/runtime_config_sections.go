@@ -303,7 +303,14 @@ var briefStatusCategoryOrder = issuestatus.Categories()
 // With custom statuses it replaces the seven-value enumeration with the
 // workspace's catalog, grouped by lifecycle category. Special workflow rules
 // still name fixed built-in keys; a custom status inherits only lifecycle.
-// Each line leads with the category key, then the statuses inside it. Name and
+//
+// Each line leads with the category name as PLAIN TEXT, not a code token. A
+// lifecycle category is not a value `multica issue status` accepts — the four
+// names are reserved and Resolve refuses them — so backticking it the way the
+// keys beside it are backticked invited `multica issue status <id> started`,
+// which is a 400 (MUL-7379). Only settable keys are backticked here.
+//
+// Name and
 // description ride along because instructions and users refer to statuses by
 // display name ("move it to Human Review"), and the description is the
 // admin's disambiguator when a category holds more than one status.
@@ -334,7 +341,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. Available statuses by lifecycle category:\n")
 	for _, category := range briefStatusCategoryOrder {
 		customs := byCategory[category]
-		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
+		fmt.Fprintf(b, "  - %s category: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
 		for _, s := range customs {
 			name := sanitizeNameForBriefMarkdown(s.Name)
 			desc := sanitizeNameForBriefMarkdown(s.Description)
