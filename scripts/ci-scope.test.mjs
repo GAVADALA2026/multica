@@ -23,6 +23,7 @@ for (const [name, files, selected] of [
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
   ["agent process code", ["server/pkg/agent/cursor_background.go"], ["backend", "runtime"]],
   ["daemon dependency", ["server/internal/skill/service.go"], ["backend", "runtime"]],
+  ["native test compilation dependency", ["server/pkg/db/generated/issues.sql.go"], ["backend", "sqlc", "runtime"]],
   ["Go dependencies", ["server/go.mod", "server/go.sum"], ["backend", "runtime"]],
   ["Helm only", ["deploy/helm/multica/templates/deployment.yaml"], ["scripts"]],
   ["container entrypoint", ["docker/entrypoint.sh"], ["scripts"]],
@@ -37,6 +38,7 @@ for (const [name, files, selected] of [
   ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality"]],
   ["package patch", ["patches/example.patch"], ["frontend", "quality"]],
   ["radius policy", ["scripts/check-ui-radius-tokens.mjs"], ["quality"]],
+  ["shared quality action", [".github/actions/frontend-quality/action.yml"], ["frontend", "quality"]],
   ["new bitmap", ["apps/web/public/hero.png"], ["frontend", "quality", "images"]],
   ["mixed docs and migration", ["apps/docs/content/guide.mdx", "server/migrations/999_example.up.sql"], ["quality", "backend", "sqlc"]],
   ["CI configuration", [".github/ci-paths.json"], Object.keys(filters)],
@@ -47,13 +49,16 @@ for (const [name, files, selected] of [
       assert.equal(outputs.full, "false");
       assert.deepEqual(Object.keys(filters).filter((scope) => outputs[scope] === "true").sort(),
         [...selected].sort());
+      assert.equal(outputs.quality_only, String(selected.includes("quality") && !selected.includes("frontend")));
     }
   });
 }
 
 test("scheduled and manual runs select every scope without a path-filter result", () => {
   for (const event of ["schedule", "workflow_dispatch"]) {
-    assert.ok(Object.values(decideScopes(event, {})).every((value) => value === "true"));
+    const { quality_only, ...scopes } = decideScopes(event, {});
+    assert.ok(Object.values(scopes).every((value) => value === "true"));
+    assert.equal(quality_only, "false", "the full frontend build owns quality checks");
   }
 });
 
@@ -113,6 +118,99 @@ test("adding a dependency without checking it cannot silently pass", () => {
   const input = needs();
   input.extra = { result: "failure" };
   assert.throws(() => checkGate(input, mapping), /Unchecked dependency/);
+});
+
+// Read the production wiring without installing workspace dependencies in the
+// lightweight changes job. These fields deliberately use single-line syntax;
+// unsupported formatting fails the assertions instead of being silently ignored.
+const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const jobSource = workflow.slice(workflow.indexOf("\njobs:\n") + "\njobs:\n".length);
+const headings = [...jobSource.matchAll(/^  ([\w-]+):$/gm)];
+const jobs = Object.fromEntries(headings.map((match, index) => [
+  match[1], jobSource.slice(match.index, headings[index + 1]?.index),
+]));
+function field(source, pattern) {
+  const match = source.match(pattern);
+  assert.ok(match, `Missing production field: ${pattern}`);
+  return match[1];
+}
+function productionMapping(gate) {
+  return JSON.parse(field(jobs[gate], /^          JOB_SCOPES: '(.+)'$/m));
+}
+function productionNeeds(gate, outputs) {
+  const dependencies = field(jobs[gate], /^    needs: \[(.+)\]$/m).split(", ");
+  return Object.fromEntries(dependencies.map((job) => {
+    if (job === "changes") return [job, { result: "success", outputs }];
+    const scope = field(jobs[job], /^    if: \$\{\{ needs\.changes\.outputs\.(\w+) == 'true' \}\}$/m);
+    return [job, { result: outputs[scope] === "true" ? "success" : "skipped" }];
+  }));
+}
+
+for (const gate of ["frontend", "backend"]) {
+  test(`production ${gate} gate matches every dependency, condition and scope output`, () => {
+    const mapping = productionMapping(gate);
+    assert.match(jobs[gate], /^    if: \$\{\{ !cancelled\(\) \}\}$/m);
+    assert.match(jobs[gate], /^          NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}$/m);
+    assert.match(jobs[gate], /^        run: node scripts\/ci-scope\.mjs gate$/m);
+    for (const scope of Object.values(mapping)) {
+      assert.ok(jobs.changes.includes(`      ${scope}: \${{ steps.decide.outputs.${scope} }}`));
+    }
+    const scopes = Object.keys(filters);
+    // Exercise mixed scopes too: installers and quality may run without the
+    // corresponding product backend/frontend suite being selected.
+    for (let mask = 0; mask < 2 ** scopes.length; mask++) {
+      const filtered = Object.fromEntries(scopes.map((scope, bit) => [scope, String(Boolean(mask & (1 << bit)))]));
+      const outputs = decideScopes("pull_request", filtered);
+      checkGate(productionNeeds(gate, outputs), mapping);
+    }
+    for (const event of ["schedule", "workflow_dispatch"]) {
+      checkGate(productionNeeds(gate, decideScopes(event, {})), mapping);
+    }
+  });
+
+  test(`production ${gate} gate rejects unsuccessful or missing selected jobs`, () => {
+    const mapping = productionMapping(gate);
+    for (const job of Object.keys(mapping)) {
+      // A docs-only run selects the standalone quality runner; a full run
+      // selects every other dependency, including the installer matrix.
+      const outputs = job === "frontend-quality"
+        ? decideScopes("pull_request", filterFiles(["apps/docs/content/guide.mdx"]))
+        : decideScopes("workflow_dispatch", {});
+      for (const result of ["failure", "cancelled", "skipped", undefined]) {
+        const input = productionNeeds(gate, outputs);
+        assert.equal(input[job].result, "success");
+        if (result === undefined) delete input[job];
+        else input[job].result = result;
+        assert.throws(() => checkGate(input, mapping), new RegExp(job));
+      }
+    }
+  });
+}
+
+test("the backend gate owns the three-platform installer matrix", () => {
+  assert.equal(productionMapping("backend").installer, "installer");
+  assert.match(jobs.installer, /^        os: \[ubuntu-latest, macos-latest, windows-latest\]$/m);
+  assert.doesNotMatch(jobs.installer, /continue-on-error:/);
+});
+
+test("quality checks have exactly one runner and reuse the product build install", () => {
+  const invocation = "uses: ./.github/actions/frontend-quality";
+  const owners = Object.entries(jobs).filter(([, source]) => source.includes(invocation)).map(([job]) => job);
+  assert.deepEqual(owners.sort(), ["frontend-build", "frontend-quality"]);
+  assert.equal(productionMapping("frontend")["frontend-quality"], "quality_only");
+  assert.match(jobs["frontend-build"], /      - name: Check frontend quality\n        uses: \.\/\.github\/actions\/frontend-quality\n/);
+  for (const frontend of ["true", "false"]) {
+    for (const quality of ["true", "false"]) {
+      const outputs = decideScopes("pull_request", { ...filterFiles([]), frontend, quality });
+      const results = productionNeeds("frontend", outputs);
+      const runners = owners.filter((job) => results[job].result === "success");
+      assert.equal(runners.length, frontend === "true" || quality === "true" ? 1 : 0);
+    }
+  }
+  const action = readFileSync(new URL("../.github/actions/frontend-quality/action.yml", import.meta.url), "utf8");
+  assert.match(action, /run: pnpm knip/);
+  assert.match(action, /continue-on-error: true/);
+  assert.doesNotMatch(action, /pnpm install/);
 });
 
 test("the CLI writes real Actions outputs and exits nonzero on a failed gate", (t) => {

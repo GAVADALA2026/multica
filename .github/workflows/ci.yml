@@ -68,6 +68,7 @@ jobs:
       sqlc: ${{ steps.decide.outputs.sqlc }}
       runtime: ${{ steps.decide.outputs.runtime }}
       quality: ${{ steps.decide.outputs.quality }}
+      quality_only: ${{ steps.decide.outputs.quality_only }}
       scripts: ${{ steps.decide.outputs.scripts }}
       installer: ${{ steps.decide.outputs.installer }}
       images: ${{ steps.decide.outputs.images }}
@@ -89,7 +90,8 @@ jobs:
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: dorny/paths-filter@v3
         with:
-          # On main, compare with the previous push, not the PR's merge base.
+          # Pushes compare before/head SHAs. PRs use the pull-request file API;
+          # paths-filter ignores base/ref for pull_request events.
           base: ${{ github.event_name == 'push' && github.event.before || github.base_ref }}
           ref: ${{ github.sha }}
           filters: .github/ci-paths.json
@@ -187,6 +189,9 @@ jobs:
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
+
+      - name: Check frontend quality
+        uses: ./.github/actions/frontend-quality
 
   frontend-test:
     needs: changes
@@ -295,7 +300,7 @@ jobs:
       - name: Check frontend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality"}'
+          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only"}'
         run: node scripts/ci-scope.mjs gate
 
   # The Go caches are handled explicitly here rather than through setup-go's
@@ -511,7 +516,7 @@ jobs:
   # Preserve the existing required-check name while allowing tests, generated
   # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, cursor-background-lifecycle, windows-execenv, script-checks]
+    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, cursor-background-lifecycle, windows-execenv, script-checks, installer]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -519,7 +524,7 @@ jobs:
       - name: Check backend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","cursor-background-lifecycle":"runtime","windows-execenv":"runtime","script-checks":"scripts"}'
+          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","cursor-background-lifecycle":"runtime","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
         run: node scripts/ci-scope.mjs gate
 
   windows-execenv:
@@ -811,7 +816,7 @@ jobs:
 
   frontend-quality:
     needs: changes
-    if: ${{ needs.changes.outputs.quality == 'true' }}
+    if: ${{ needs.changes.outputs.quality_only == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -823,18 +828,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # One owner for web, desktop and mobile radius checks and UI reachability.
-      # knip remains advisory until its existing findings have been resolved.
-      - name: Check packages/ui wildcard exports
-        run: |
-          bash scripts/check-ui-wildcard-exports.test.sh
-          node scripts/check-ui-wildcard-exports.mjs
-
-      - name: Check UI radius tokens
-        run: |
-          node --test scripts/check-ui-radius-tokens.test.mjs
-          node scripts/check-ui-radius-tokens.mjs
-
-      - name: Check for dead code and phantom dependencies (knip)
-        continue-on-error: true
-        run: pnpm knip
+      - name: Check frontend quality
+        uses: ./.github/actions/frontend-quality

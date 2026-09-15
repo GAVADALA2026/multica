@@ -23,8 +23,22 @@ their separate triggers.
 | `installer` | Installer fixtures on Linux, macOS and Windows |
 | `images` | PR bitmap size check against the exact base SHA |
 
+UI exports, radius and knip checks share the `frontend-quality` composite
+action. When `frontend` is selected, `frontend-build` runs it using its existing
+dependency install. Otherwise, `quality` changes select a standalone runner via
+the derived `quality_only` output. Docs/mobile-only changes still get these
+checks, while web/desktop and daily/manual full runs do not pay for a second
+quality install. Knip remains advisory in both callers.
+
 Runtime selection deliberately includes all internal/shared Go sources: the
 daemon tests import CLI, handler and service code as well as the agent package.
+This includes `server/pkg/db/generated`: query-generated Go changes can break
+native test compilation even when the selected tests do not query a database.
+Inspect the test dependency graph with `go list -deps -test` from `server/`
+before narrowing the filter. Include `./internal/daemon`,
+`./internal/daemon/execenv`, `./internal/daemon/repocache` and `./pkg/agent`.
+The current scope is broader than process code; it also protects the platform
+suites' transitive compilation dependencies.
 Migration-only and Helm-only changes do not need native process tests. Linux
 Cursor tests are already included in the full Linux race suites. macOS keeps
 one finalization pass without race instrumentation plus its cgo-disabled
@@ -35,11 +49,17 @@ every selected dependency to succeed. Only an explicit `false` path result can
 authorize a skipped dependency. Failed filtering, missing outputs, cancelled or
 missing expected jobs all fail the gate. Job-level filtering avoids allocating
 the PostgreSQL/Redis services when backend tests are not selected.
+The backend aggregate also owns the three-platform installer matrix: selected
+installer failures cannot leave the aggregate green, and unrelated changes
+may explicitly skip it.
 
 When adding a check, include its sources, fixtures, generated inputs and
 cross-package dependencies in the filter. Update scope regression scenarios
-when changing a boundary. Keep repo-wide radius checking in `frontend-quality`
-so a shared change does not run it twice through Mobile Verify.
+when changing a boundary. Keep repo-wide radius checking in the shared quality
+action so a shared change does not run it twice through Mobile Verify.
+Gate regression tests read the production `needs`, `JOB_SCOPES`, conditions and
+outputs from the workflow. They exercise mixed selections and unsuccessful or
+missing jobs, including standalone quality checks and the installer matrix.
 
 Local validation (Node 22.13+):
 

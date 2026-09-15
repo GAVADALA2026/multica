@@ -1,5 +1,6 @@
 {
   "frontend": [
+    ".github/actions/frontend-quality/**",
     "apps/web/**",
     "apps/desktop/**",
     "packages/**",
@@ -55,6 +56,7 @@
     "scripts/ci-scope.test.mjs"
   ],
   "quality": [
+    ".github/actions/frontend-quality/**",
     "apps/**",
     "packages/**",
     "package.json",

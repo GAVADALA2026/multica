@@ -19,6 +19,9 @@ export function decideScopes(event, filtered) {
     }
     outputs[scope] = full ? "true" : filtered[scope];
   }
+  // Product builds already install dependencies and run the shared checks.
+  // Only allocate a separate runner when quality is the sole frontend work.
+  outputs.quality_only = String(outputs.quality === "true" && outputs.frontend === "false");
   return outputs;
 }
 
