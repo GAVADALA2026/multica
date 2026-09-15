@@ -286,6 +286,11 @@ func EnterIssueWorkflowStatus(ctx context.Context, q *db.Queries, previous *db.I
 			return result, err
 		}
 	}
+	// A Triage status is a proposal, not accepted work. Keep its transition
+	// history without starting the proposed node's executor.
+	if current.TriageState.Valid {
+		return result, nil
+	}
 	result.Issue, result.Execution, result.Task, err = applyWorkflowEntryPolicy(ctx, q, current, transition, actor)
 	return result, err
 }

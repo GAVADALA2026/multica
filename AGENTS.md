@@ -86,7 +86,7 @@ In `server/internal/handler/`, distinguish UUID sources before using them in wri
 
 Workspace-scoped queries filter by `workspace_id`; membership gates access and `X-Workspace-ID` selects the workspace. Assignees are polymorphic: interpret `assignee_id` together with `assignee_type`.
 
-Runtime issue status writes use `service.EnterIssueWorkflowStatus` inside the same transaction as the issue mutation, or the `IssueService.TransitionStatus` / `TransitionStatusNode` wrappers. Record the transition, snapshot the entry policy, and enqueue its task atomically; publish task notifications after commit. Workflow execution retries do not re-enter the business status.
+Runtime issue status writes use `service.EnterIssueWorkflowStatus` inside the same transaction as the issue mutation, or the `IssueService.TransitionStatus` / `TransitionStatusNode` wrappers. Record the transition, snapshot the entry policy, and enqueue its task atomically; publish task notifications after commit. Workflow execution retries do not re-enter the business status. Triage proposal changes record transitions without starting workflow entry executors.
 
 ## Desktop Rules
 

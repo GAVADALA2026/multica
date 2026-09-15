@@ -101,6 +101,44 @@ func TestIssueStatusEntryPathsApplyPolicyAtomically(t *testing.T) {
 			}
 		})
 	}
+	for _, path := range []string{"native", "generic node", "legacy key", "batch key", "project move"} {
+		t.Run("triage proposal has no entry executor/"+path, func(t *testing.T) {
+			issue := create(t)
+			fx.Exec(t, `UPDATE issue SET triage_state='pending' WHERE id=$1`, issue.ID)
+			targetID := doneID
+			switch path {
+			case "native":
+				targetID = reviewID
+				testutil.Call(t, testHandler.TransitionIssueStatusNode, withURLParam(newRequest(http.MethodPost, "/api/issues/"+issue.ID+"/transitions", map[string]any{"workflow_status_id": targetID}), "id", issue.ID)).Want(http.StatusOK)
+			case "generic node", "legacy key":
+				body := map[string]any{"status": "done"}
+				if path == "generic node" {
+					targetID = reviewID
+					body = map[string]any{"workflow_status_id": targetID}
+				}
+				testutil.Call(t, testHandler.UpdateIssue, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issue.ID, body), "id", issue.ID)).Want(http.StatusOK)
+			case "batch key":
+				testutil.Call(t, testHandler.BatchUpdateIssues, newRequest(http.MethodPatch, "/api/issues/batch", map[string]any{"issue_ids": []string{issue.ID}, "updates": map[string]any{"status": "done"}})).Want(http.StatusOK)
+			case "project move":
+				targetID = reviewID
+				fx.Exec(t, `UPDATE issue SET project_id=NULL WHERE id=$1`, issue.ID)
+				fx.Exec(t, `UPDATE issue_workflow SET initial_status_id=$1 WHERE id=$2`, reviewID, workflowID)
+				defer fx.Exec(t, `UPDATE issue_workflow SET initial_status_id=$1 WHERE id=$2`, initialID, workflowID)
+				testutil.Call(t, testHandler.UpdateIssue, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issue.ID, map[string]any{"project_id": projectID}), "id", issue.ID)).Want(http.StatusOK)
+			}
+			current, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(issue.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.WorkflowStatusID != parseUUID(targetID) || current.TriageState.String != "pending" {
+				t.Fatalf("proposal status=%v triage=%v", current.WorkflowStatusID, current.TriageState)
+			}
+			if fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1`, issue.ID) != 0 ||
+				fx.Count(t, `SELECT count(*) FROM automation_execution WHERE issue_id=$1 AND executor_type IS NOT NULL`, issue.ID) != 0 {
+				t.Fatal("triage proposal started a workflow executor")
+			}
+		})
+	}
 	t.Run("unavailable policy rolls back the entire generic patch", func(t *testing.T) {
 		issue := create(t)
 		fx.Exec(t, `UPDATE agent SET archived_at=NOW() WHERE id=$1`, executorID)
