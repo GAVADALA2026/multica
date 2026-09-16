@@ -29,6 +29,7 @@ import {
 } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
 import { SurfaceWorkflowContext } from "./workflow-context";
+import { WorkflowBoardView } from "../components/workflow-board-view";
 import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
@@ -103,10 +104,8 @@ export function IssueSurface({
   // An open saved view swaps the surface onto its own view-preference key:
   // display/extra-filter adjustments persist per user per view, and the
   // underlying built-in surface state is never touched (no draft machinery).
-  const projectSelectionKey = (scope.type === "workspace" || scope.type === "my") && scope.projectId !== undefined
-    ? `:project:${scope.projectId ?? "workspace"}` : "";
   const resolvedSurfaceKey = activeView
-    ? `view:${activeView.id}${projectSelectionKey}`
+    ? `view:${activeView.id}`
     : (surfaceKey ?? issueScopeKey(scope));
   const seedDefinition = activeView
     ? { ...activeView.query, ...activeView.display }
@@ -123,9 +122,9 @@ export function IssueSurface({
   // unrestricted axis value.
   const effectiveScope: IssueScope =
     activeView && (scope.type === "workspace" || scope.type === "project")
-      ? { ...scope, actorKind: actorKindForViewVariant(activeView.scope_variant) }
+      ? { ...scope, ...(scope.type === "workspace" ? { projectId: undefined } : {}), actorKind: actorKindForViewVariant(activeView.scope_variant) }
       : activeView && scope.type === "my"
-        ? { ...scope, relation: myRelationForViewVariant(activeView.scope_variant) }
+        ? { ...scope, projectId: undefined, relation: myRelationForViewVariant(activeView.scope_variant) }
         : scope;
   const store = useMemo(() => {
     // First-open seeding happens HERE, at store-creation time for this key:
@@ -250,8 +249,9 @@ function IssueSurfaceContent({
       controller.viewMode === "list" ||
       controller.viewMode === "table");
 
+  const StatusBoard = controller.workflowLanes ? WorkflowBoardView : BoardView;
   return (
-    <SurfaceWorkflowContext value={{ statuses: controller.filterWorkflowStatuses, groups: controller.groupBranches?.descriptors }}>
+    <SurfaceWorkflowContext value={{ statuses: controller.filterWorkflowStatuses, groups: controller.groupBranches?.descriptors, facets: controller.tableFacetCounts }}>
     <IssueSurfaceActionsProvider actions={controller.actions}>
       {/* One shared right-click menu for every card/row this surface renders
           — see IssueContextMenuProvider. Inside the actions provider so the
@@ -323,7 +323,7 @@ function IssueSurfaceContent({
         ) : (
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
             {controller.viewMode === "board" && (
-              <BoardView
+              <StatusBoard
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
                 hiddenStatuses={controller.hiddenStatuses}

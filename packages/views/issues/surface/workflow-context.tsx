@@ -5,6 +5,7 @@ import type {
   IssueWorkflowStatusNode,
   IssueStatusEntry,
   IssueTableGroupDescriptor,
+  IssueTableFacetsResponse,
 } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -15,6 +16,7 @@ import {
 export const SurfaceWorkflowContext = createContext<{
   statuses?: IssueWorkflowStatusNode[];
   groups?: IssueTableGroupDescriptor[];
+  facets?: IssueTableFacetsResponse;
 }>({});
 
 export function useSurfaceWorkflow() {
@@ -30,7 +32,7 @@ export function workflowColumnKey(group: IssueTableGroupDescriptor): string | un
 
 export function useSurfaceStatusCatalog(wsId: string) {
   const workspace = useIssueStatuses(wsId);
-  const { statuses, groups } = useSurfaceWorkflow();
+  const { statuses, groups, facets } = useSurfaceWorkflow();
   return useMemo(() => {
     if (!statuses) return workspace;
     const entries = new Map<string, IssueStatusEntry>(statuses.map((node) => [node.id, {
@@ -40,7 +42,12 @@ export function useSurfaceStatusCatalog(wsId: string) {
       category: normalizeIssueStatusCategory(node.phase) ?? "unstarted",
       is_system: false,
     }]));
-    for (const group of groups ?? []) {
+    // Keep legacy saved-view filters readable alongside exact node filters.
+    for (const legacy of workspace.statuses) if (!entries.has(legacy.key)) entries.set(legacy.key, legacy);
+    const facetGroups: IssueTableGroupDescriptor[] = (facets?.facets ?? []).flatMap((facet) =>
+      facet.values.flatMap((value) => value.status_node ? [{ key: value.key, count: value.count, value: value.status_node }] : []),
+    );
+    for (const group of [...(groups ?? []), ...facetGroups]) {
       for (const item of group.secondary_groups ?? [group]) {
         const value = item.value;
         if (value.kind !== "workflow_status") continue;
@@ -49,16 +56,17 @@ export function useSurfaceStatusCatalog(wsId: string) {
           if (legacy) entries.set(legacy.key, legacy);
           continue;
         }
-        if (entries.has(value.workflow_status_id)) continue;
-        // Historical definitions may still own issues but cannot receive new ones.
+        if (entries.has(value.workflow_status_id) && !facetGroups.includes(group)) continue;
+        // Pinned definitions remain readable after project defaults change;
+        // only archived nodes are unavailable as transition targets.
         entries.set(value.workflow_status_id, {
           id: value.workflow_status_id, workspace_id: wsId, key: value.workflow_status_id,
           name: value.name, description: "", category: normalizeIssueStatusCategory(value.phase ?? "unstarted") ?? "unstarted",
           color: value.color ?? "#808080", icon: value.icon, position: value.position ?? 0,
-          is_system: false, archived_at: "historical", created_at: "", updated_at: "",
+          is_system: false, archived_at: value.archived ? "archived" : null, created_at: "", updated_at: "",
         });
       }
     }
     return buildIssueStatusCatalog([...entries.values()].sort((a, b) => a.position - b.position));
-  }, [groups, statuses, workspace, wsId]);
+  }, [groups, facets, statuses, workspace, wsId]);
 }

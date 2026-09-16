@@ -17,6 +17,7 @@ import type {
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { workflowFacetForDisplay } from "../utils/workflow-status-groups";
 import { effectiveIssueWorkflowOptions } from "@multica/core/issue-workflows/queries";
 import { statusFilterColumns, visibleStatusKeys } from "@multica/core/issues";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
@@ -88,6 +89,7 @@ export interface IssueSurfaceController {
   hiddenStatuses: IssueStatus[];
   /** Concrete status nodes for project-scoped Board/List surfaces. */
   workflowStatuses?: IssueWorkflowStatusNode[];
+  workflowLanes: boolean;
   filterWorkflowStatuses?: IssueWorkflowStatusNode[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
@@ -327,23 +329,27 @@ export function useIssueSurfaceController({
       : grouping;
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
+  const workflowProjectId = projectId ?? (projectFilters.length === 1 && !includeNoProject ? projectFilters[0] : undefined);
+  const wantsWorkflowLanes = effectiveViewMode === "board" && effectiveGrouping === "status";
   const wantsProjectWorkflowSurface =
     (!!projectId || hasProjectScope) &&
     (effectiveViewMode === "list" ||
       (effectiveViewMode === "board" && effectiveGrouping === "status"));
   const projectWorkflowQuery = useQuery({
-    ...effectiveIssueWorkflowOptions(wsId, projectId ?? null, true),
-    enabled: wantsProjectWorkflowSurface || hasProjectScope,
+    ...effectiveIssueWorkflowOptions(wsId, wantsWorkflowLanes ? workflowProjectId ?? null : projectId ?? null, true),
+    enabled: wantsWorkflowLanes || wantsProjectWorkflowSurface || hasProjectScope,
   });
   // Installed clients can still point at an older self-hosted backend. Hold
   // the first paint while capability resolves, then fall back to the portable
   // category surface only when the workflow endpoint is actually absent.
+  const usesWorkflowLanes = wantsWorkflowLanes && projectWorkflowQuery.isSuccess && !!projectWorkflowQuery.data.workflow.id;
   const usesProjectWorkflowSurface =
+    !usesWorkflowLanes &&
     wantsProjectWorkflowSurface &&
     projectWorkflowQuery.isSuccess &&
     !!projectWorkflowQuery.data.workflow.id;
   const projectWorkflowPending =
-    (wantsProjectWorkflowSurface || hasProjectScope) && projectWorkflowQuery.isPending;
+    (wantsWorkflowLanes || wantsProjectWorkflowSurface || hasProjectScope) && projectWorkflowQuery.isPending;
   const scopedWorkflowId = hasProjectScope && !projectId ? projectWorkflowQuery.data?.workflow.id : undefined;
   const nativeStatusFilters = useMemo(() => statusFilters.filter((key) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(key)), [statusFilters]);
   const legacyStatusFilters = useMemo(() => statusFilters.filter((key) => !nativeStatusFilters.includes(key)), [statusFilters, nativeStatusFilters]);
@@ -363,11 +369,12 @@ export function useIssueSurfaceController({
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
     !usesProjectWorkflowSurface &&
+    !usesWorkflowLanes &&
     !projectWorkflowPending &&
     (effectiveViewMode === "list" ||
       (effectiveViewMode === "board" && effectiveGrouping === "status"));
   const usesServerGroupSurface =
-    usesProjectWorkflowSurface ||
+    usesWorkflowLanes || usesProjectWorkflowSurface ||
     (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
     effectiveViewMode === "swimlane";
   const usesServerFacets =
@@ -658,9 +665,9 @@ export function useIssueSurfaceController({
   }, [usesServerFacets]);
   const requestActiveTableFacet = useCallback(
     (facet: IssueTableFacetSpec | null) => {
-      setActiveTableFacet(usesServerFacets ? (hasProjectScope && facet?.kind === "status" ? { kind: "workflow_status" } : facet) : null);
+      setActiveTableFacet(usesServerFacets ? ((hasProjectScope || usesWorkflowLanes) && facet?.kind === "status" ? { kind: "workflow_status" } : facet) : null);
     },
-    [hasProjectScope, usesServerFacets],
+    [hasProjectScope, usesWorkflowLanes, usesServerFacets],
   );
   const serverStatusBranches = useIssueStatusBranches({
     wsId,
@@ -673,6 +680,7 @@ export function useIssueSurfaceController({
   });
   const nativeSwimlane = hasProjectScope && effectiveViewMode === "swimlane" && !!projectWorkflowQuery.data?.workflow.id;
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
+    if (usesWorkflowLanes) return { kind: "compound", primary: "workflow", secondary: "workflow_status" };
     if (usesProjectWorkflowSurface) return { kind: "workflow_status" };
     if (effectiveViewMode === "swimlane") {
       return {
@@ -702,6 +710,7 @@ export function useIssueSurfaceController({
     serverStatuses,
     swimlaneGrouping,
     usesProjectWorkflowSurface,
+    usesWorkflowLanes,
   ]);
   const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
     if (effectiveViewMode !== "swimlane" || nativeSwimlane) return tableQuerySpec;
@@ -893,21 +902,22 @@ export function useIssueSurfaceController({
 
   return {
     scopeKey,
-    projectId,
+    projectId: usesWorkflowLanes ? workflowProjectId : projectId,
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
     workingAgents,
     hasActiveFilters,
-    filterWorkflowStatuses: hasProjectScope ? projectWorkflowQuery.data?.statuses : undefined,
+    workflowLanes: usesWorkflowLanes,
+    filterWorkflowStatuses: usesWorkflowLanes ? [] : hasProjectScope ? projectWorkflowQuery.data?.statuses : undefined,
     visibleStatuses: nativeSwimlane
       ? swimlaneStatusKeys.filter((key) => !hiddenStatusKeys.includes(key) || statusFilters.includes(key))
       : surfaceData.visibleStatuses,
     hiddenStatuses: nativeSwimlane
       ? swimlaneStatusKeys.filter((key) => hiddenStatusKeys.includes(key) && !statusFilters.includes(key))
       : surfaceData.hiddenStatuses,
-    workflowStatuses: usesProjectWorkflowSurface
+    workflowStatuses: usesProjectWorkflowSurface || (usesWorkflowLanes && !!workflowProjectId)
       ? projectWorkflowStatuses
       : undefined,
     statusPagination: usesServerStatusSurface
@@ -922,13 +932,14 @@ export function useIssueSurfaceController({
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
       data.isEmpty &&
+      !(usesWorkflowLanes && !!workflowProjectId && projectWorkflowStatuses.length > 0) &&
       !projectWorkflowPending &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
     isLoading:
       data.isLoading ||
       projectWorkflowPending,
-    isStatusCatalogError: data.isStatusCatalogError || (hasProjectScope && projectWorkflowQuery.isError),
+    isStatusCatalogError: data.isStatusCatalogError || ((hasProjectScope || wantsWorkflowLanes) && projectWorkflowQuery.isError),
     retryStatusCatalog: () => { catalog.retry(); void projectWorkflowQuery.refetch(); },
     sort,
     actions,
@@ -938,7 +949,7 @@ export function useIssueSurfaceController({
     tableFacetCounts:
       usesServerStatusSurface ||
       ((usesTable || usesServerGroupSurface) && activeTableFacet !== null)
-        ? tableFacetsQuery.data && { ...tableFacetsQuery.data, facets: tableFacetsQuery.data.facets.map((facet) => facet.kind === "workflow_status" ? { ...facet, kind: "status" as const } : facet) }
+        ? tableFacetsQuery.data && { ...tableFacetsQuery.data, facets: tableFacetsQuery.data.facets.map(workflowFacetForDisplay) }
         : undefined,
     facetCountsExact:
       !usesTable && !usesServerStatusSurface && !usesServerGroupSurface,

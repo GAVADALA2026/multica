@@ -349,6 +349,9 @@
     "toggle_collapse": "レーンの開閉"
   },
   "board": {
+    "legacy_workflow": "以前のワークフロー",
+    "more_workflows": "他のワークフローを表示",
+    "choose_workflow_project": "この列に課題を作成するには、このワークフローを使用するプロジェクト（またはプロジェクトなし）を選択してください。",
     "hidden_columns_label": "非表示の列",
     "hide_column": "列を非表示",
     "show_column": "列を表示",

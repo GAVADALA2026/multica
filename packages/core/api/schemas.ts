@@ -1519,14 +1519,7 @@ const IssueTableParentRefSchema = z.object({
   status: z.string(),
 }).loose();
 
-const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("status"),
-    // Preserve the requested bucket vocabulary (legacy wire, lifecycle, or
-    // concrete status). Normalizing here would disconnect values from keys.
-    status: z.string(),
-  }).loose(),
-  z.object({
+const IssueTableWorkflowStatusValueSchema = z.object({
     kind: z.literal("workflow_status"),
     workflow_id: z.string().optional(),
     workflow_status_id: z.string().optional(),
@@ -1537,7 +1530,21 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     position: z.number().optional(),
     phase: z.string().optional(),
     archived: z.boolean().optional(),
+  }).loose();
+
+const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("workflow"),
+    workflow_id: z.string().nullable().optional().default(null),
+    name: z.string().optional().default(""),
   }).loose(),
+  z.object({
+    kind: z.literal("status"),
+    // Preserve the requested bucket vocabulary (legacy wire, lifecycle, or
+    // concrete status). Normalizing here would disconnect values from keys.
+    status: z.string(),
+  }).loose(),
+  IssueTableWorkflowStatusValueSchema,
   z.object({
     kind: z.literal("assignee"),
     actor: IssueTableActorRefSchema.nullable(),
@@ -1607,6 +1614,7 @@ export const EMPTY_ISSUE_TABLE_ROWS_RESPONSE: IssueTableRowsResponse = {
 };
 
 const IssueTableFacetValueSchema = z.object({
+  status_node: IssueTableWorkflowStatusValueSchema.optional().catch(undefined),
   key: z.string(),
   count: z.number(),
 }).loose();

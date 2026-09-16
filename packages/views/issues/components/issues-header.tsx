@@ -1440,7 +1440,7 @@ export function IssueFilterMenu({
   const workspaceStatusOptions = useStatusOptions(wsId);
   const surfaceWorkflow = useSurfaceWorkflow();
   const surfaceCatalog = useSurfaceStatusCatalog(wsId);
-  const statusOptions = surfaceWorkflow.statuses ? surfaceCatalog.statuses.filter((status) => !status.archived_at || statusFilters.includes(status.id)).map((status) => ({
+  const statusOptions = surfaceWorkflow.statuses ? surfaceCatalog.statuses.filter((status) => (status.key === status.id || statusFilters.includes(status.key)) && (!status.archived_at || statusFilters.includes(status.id))).map((status) => ({
     key: status.key, label: status.name, category: status.category, color: status.color, icon: status.icon,
   })) : workspaceStatusOptions;
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));

@@ -3,7 +3,7 @@ import type {
   IssueWorkflowStatusNode,
   IssueTableGroupDescriptor,
 } from "@multica/core/types";
-import { buildWorkflowStatusGroups } from "./workflow-status-groups";
+import { buildWorkflowStatusGroups, workflowFacetForDisplay } from "./workflow-status-groups";
 
 function node(
   id: string,
@@ -87,4 +87,15 @@ describe("buildWorkflowStatusGroups", () => {
     });
     expect(groups[2]?.createData).toBeUndefined();
   });
+});
+
+it("keeps aggregate counts for saved legacy filters alongside exact workflow nodes", () => {
+  const facet = workflowFacetForDisplay({ kind: "workflow_status", values: [
+    { key: "a", count: 3, status_node: { kind: "workflow_status", name: "A / Review", status: "in_review" } },
+    { key: "b", count: 4, status_node: { kind: "workflow_status", name: "B / Review", status: "in_review" } },
+    { key: "legacy:in_review", count: 2 },
+  ] });
+  expect(facet.kind).toBe("status");
+  expect(facet.values.find((value) => value.key === "in_review")?.count).toBe(9);
+  expect(facet.values.find((value) => value.key === "a")?.count).toBe(3);
 });

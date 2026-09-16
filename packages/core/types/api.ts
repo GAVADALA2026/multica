@@ -365,7 +365,7 @@ export type IssueTableGroupSpec =
   | { kind: "parent" }
   | {
       kind: "compound";
-      primary: "assignee" | "project" | "parent";
+      primary: "assignee" | "project" | "parent" | "workflow";
       /** `status_category` folds custom statuses into their category's cell. */
       secondary: "status" | "status_category" | "workflow_status";
       /** Omit for legacy seven-value category buckets; only for status_category. */
@@ -393,6 +393,7 @@ export interface IssueTableParentRef {
 }
 
 export type IssueTableGroupValue =
+  | { kind: "workflow"; workflow_id: string | null; name: string }
   | { kind: "status"; status: string }
   | {
       kind: "workflow_status";
@@ -495,6 +496,7 @@ export interface IssueTableFacetsRequest {
 }
 
 export interface IssueTableFacetValue {
+  status_node?: Extract<IssueTableGroupValue, { kind: "workflow_status" }>;
   key: string;
   count: number;
 }

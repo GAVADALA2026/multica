@@ -1,6 +1,7 @@
 import type {
   IssueWorkflowStatusNode,
   IssueTableGroupDescriptor,
+  IssueTableFacet,
 } from "@multica/core/types";
 import type { BoardColumnGroup } from "../components/board-column";
 
@@ -17,6 +18,7 @@ export function workflowStatusGroupId(statusId: string): string {
 export function buildWorkflowStatusGroups(
   statuses: readonly IssueWorkflowStatusNode[],
   descriptors: readonly IssueTableGroupDescriptor[],
+  ownWorkflow = false,
 ): BoardColumnGroup[] {
   const groups = new Map<string, BoardColumnGroup>();
   for (const status of statuses) {
@@ -52,8 +54,9 @@ export function buildWorkflowStatusGroups(
       workflowStatusPhase: value.phase,
       workflowStatusPosition: value.position,
       workflowStatusArchived: value.archived,
-      workflowStatusHistorical: existing === undefined,
-      createData: undefined,
+      workflowStatusHistorical: !ownWorkflow && existing === undefined,
+      createData: ownWorkflow && value.workflow_status_id && !value.archived
+        ? { workflow_status_id: value.workflow_status_id } : undefined,
       ...existing,
       totalCount: descriptor.count,
     });
@@ -68,4 +71,18 @@ export function buildWorkflowStatusGroups(
     if (aPosition !== bPosition) return aPosition - bPosition;
     return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
   });
+}
+
+/** Preserve counts for legacy saved filters while offering exact node choices. */
+export function workflowFacetForDisplay(facet: IssueTableFacet): IssueTableFacet {
+  if (facet.kind !== "workflow_status") return facet;
+  const legacyCounts = new Map<string, number>();
+  for (const value of facet.values) {
+    const key = value.status_node?.status || (value.key.startsWith("legacy:") ? value.key.slice(7) : undefined);
+    if (key) legacyCounts.set(key, (legacyCounts.get(key) ?? 0) + value.count);
+  }
+  return { ...facet, kind: "status", values: [
+    ...facet.values,
+    ...Array.from(legacyCounts, ([key, count]) => ({ key, count })),
+  ] };
 }

@@ -742,6 +742,27 @@ describe("CreateIssueModal", () => {
     expect(mockCreateIssue.mock.calls[0]?.[0]).not.toHaveProperty("status");
   });
 
+  it("preserves the chosen lane's exact node after an explicit project choice", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null, required_workflow_id: "proj-1-flow", workflow_status_id: "proj-1-review", require_project_choice: true }} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Create in Review");
+    expect(screen.getByRole("button", { name: "Create Issue" })).toBeDisabled();
+    await user.click(screen.getByTestId("project-picker"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create Issue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: "proj-1", workflow_status_id: "proj-1-review" })));
+  });
+
+  it("rejects a project using another workflow instead of silently choosing its initial status", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null, required_workflow_id: "another-flow", workflow_status_id: "another-review", require_project_choice: true }} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Wrong workflow");
+    await user.click(screen.getByTestId("project-picker"));
+    await screen.findByRole("button", { name: "Ready" });
+    expect(screen.getByRole("button", { name: "Create Issue" })).toBeDisabled();
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
   it("disables creation while workflow loading fails and allows retry", async () => {
     const user = userEvent.setup();
     mockGetEffectiveWorkflow.mockRejectedValue(new Error("offline"));

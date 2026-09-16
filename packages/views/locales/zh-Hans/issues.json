@@ -349,6 +349,9 @@
     "toggle_collapse": "切换泳道"
   },
   "board": {
+    "legacy_workflow": "旧版工作流",
+    "more_workflows": "显示更多工作流",
+    "choose_workflow_project": "请选择使用这套工作流的项目（或无项目），以在此状态列创建任务。",
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",

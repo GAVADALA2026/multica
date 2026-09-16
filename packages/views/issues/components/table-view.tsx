@@ -1790,7 +1790,7 @@ export function TableView({
         // of collapsing to the schema fallback or an empty label. (MUL-6243)
         return resolveStatusLabel(value.status);
       }
-      if (value.kind === "workflow_status") return value.name;
+      if (value.kind === "workflow_status" || value.kind === "workflow") return value.name;
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)

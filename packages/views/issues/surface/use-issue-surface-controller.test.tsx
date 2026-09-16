@@ -193,6 +193,7 @@ describe("useIssueSurfaceController", () => {
       // read. Empty is the real shape for a workspace with no custom statuses:
       // a built-in key IS its own category. (MUL-6243)
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueWorkflow: async () => scopeWorkflow(""),
       listIssues,
       ...tableMethods,
       listIssueTableRows,
@@ -272,6 +273,36 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.groupBranches?.issues.map((row) => row.id)).toContain("native-row"));
     expect(result.current.visibleStatuses).toEqual([nodeId]);
     expect(result.current.hiddenStatuses).not.toContain("cancelled");
+  });
+
+  it("keeps global and personal boards across workflows, with project filters in the query rather than scope", async () => {
+    const groups = vi.fn(async () => ({ query_fingerprint: "test", total: 0, next_cursor: null, groups: [] }));
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueWorkflow: async () => scopeWorkflow("workspace-workflow"),
+      listIssueTableGroups: groups, listIssueTableRows, listIssueTableFacets,
+      getWorkspaceWorkingAgents, listProjects: async () => ({ projects: [], total: 0 }),
+    } as unknown as ApiClient);
+    const key = "my:user-1:assigned";
+    const store = getIssueSurfaceViewStore(key);
+    store.getState().setViewMode("board");
+    store.getState().toggleProjectFilter("p1");
+    store.getState().toggleProjectFilter("p2");
+    store.getState().toggleNoProject();
+    const { result } = renderHook(() => useIssueSurfaceController({
+      scope: { type: "my", userId: "user-1", relation: "assigned" }, modes: ["board"],
+    }), { wrapper: makeWrapper(qc, key) });
+    await waitFor(() => expect(groups).toHaveBeenCalled());
+    expect(groups).toHaveBeenLastCalledWith(expect.objectContaining({
+      group: { kind: "compound", primary: "workflow", secondary: "workflow_status" },
+      query: expect.objectContaining({ scope: { kind: "my", relation: "assigned" },
+        filters: expect.objectContaining({ project_ids: ["p1", "p2"], include_no_project: true }) }),
+    }));
+    expect(result.current.workflowLanes).toBe(true);
+    act(() => store.getState().clearFilters());
+    expect(result.current.tableQuerySpec.scope).toEqual({ kind: "my", relation: "assigned" });
+    expect(result.current.tableQuerySpec.filters.project_ids).toBeUndefined();
+    expect(result.current.tableQuerySpec.scope.workflow_id).toBeUndefined();
   });
 
   it("defaults the explicit Workspace selection to its own workflow", () => {
@@ -418,12 +449,13 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
     expect(listIssueTableGroups).toHaveBeenCalledWith(
-      expect.objectContaining({ group: { kind: "workflow_status" } }),
+      expect.objectContaining({ group: { kind: "compound", primary: "workflow", secondary: "workflow_status" } }),
     );
+    act(() => result.current.groupBranches!.pagination["workflow_status:node-implementation"]!.loadMore());
     await waitFor(() => expect(workflowRows).toHaveBeenCalled());
     expect(workflowRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group: { kind: "workflow_status" },
+        group: { kind: "compound", primary: "workflow", secondary: "workflow_status" },
         group_key: "workflow_status:node-implementation",
       }),
     );

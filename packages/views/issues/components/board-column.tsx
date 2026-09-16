@@ -135,17 +135,18 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
+  const columnKey = group.workflowStatusId ?? status;
   const wsId = useWorkspaceId();
   const { categoryOf, entryOf } = useIssueStatuses(wsId);
-  const archived = !!status && !!entryOf(status)?.archived_at;
+  const archived = !!group.workflowStatusArchived || (!!status && !!entryOf(status)?.archived_at);
   const cfg = status ? STATUS_CONFIG[categoryOf(status)] : null;
-  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id });
+  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id, disabled: archived });
   const isOver = droppableIsOver && !archived;
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —
   // that would silently strip one of the view's own conditions.
   const viewBaseline = useViewBaseline();
-  const statusFixedByView = !!status && viewBaseline?.status.has(status) === true;
+  const statusFixedByView = (!!columnKey && viewBaseline?.status.has(columnKey) === true) || (!!group.workflowStatusLegacyKey && viewBaseline?.status.has(group.workflowStatusLegacyKey) === true);
   const { t } = useT("issues");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
@@ -219,7 +220,7 @@ export const BoardColumn = memo(function BoardColumn({
               header per column and almost none of these menus/tooltips are
               ever opened — eagerly mounting them dominated surface mount
               cost (DeferredPopup / DeferredTooltip). */}
-          {status && (
+          {columnKey && (
             <DeferredPopup
               ariaHasPopup="menu"
               triggerRender={
@@ -241,7 +242,7 @@ export const BoardColumn = memo(function BoardColumn({
                     <DropdownMenuItem
                       disabled={statusFixedByView}
                       title={statusFixedByView ? t(($) => $.filters.in_view) : undefined}
-                      onClick={() => viewStoreApi.getState().hideStatus(status)}
+                      onClick={() => viewStoreApi.getState().hideStatus(columnKey)}
                     >
                       <EyeOff className="size-3.5" />
                       {t(($) => $.board.hide_column)}

@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   IssueWorkflowEntryPolicySchema,
+  IssueTableFacetsResponseSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -2306,6 +2307,24 @@ describe("issue workflow schemas", () => {
     });
     expect(parsed.issue.workflow_status_id).toBe("status-1");
     expect(parsed.transition).toBeNull();
+  });
+
+  it("validates workflow lane identity and tolerates absent or malformed optional facet metadata", () => {
+    const payload = { query_fingerprint: "query", total: 1, next_cursor: null, groups: [{
+      key: "workflow:one", count: 1, value: { kind: "workflow", workflow_id: "one", name: "Design" },
+      secondary_groups: [{ key: "opaque", count: 1, value: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Review" } }],
+    }] };
+    expect(IssueTableGroupsResponseSchema.parse(payload).groups[0]?.secondary_groups?.[0]?.key).toBe("opaque");
+    expect(IssueTableGroupsResponseSchema.safeParse({ ...payload, groups: [{ ...payload.groups[0], value: { kind: "workflow", workflow_id: 12 } }] }).success).toBe(false);
+    const facet = IssueTableFacetsResponseSchema.parse({ query_fingerprint: "query", total: 1, facets: [{
+      kind: "workflow_status", values: [
+        { key: "review", count: 1, status_node: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Design / Review" } },
+        { key: "old", count: 2 }, { key: "bad", count: 3, status_node: { kind: "workflow_status", name: 12 } },
+      ],
+    }] });
+    expect(facet.facets[0]?.values[0]?.status_node?.name).toBe("Design / Review");
+    expect(facet.facets[0]?.values[1]?.status_node).toBeUndefined();
+    expect(facet.facets[0]?.values[2]?.status_node).toBeUndefined();
   });
 
   it("preserves workflow status-node identity in table group descriptors", () => {

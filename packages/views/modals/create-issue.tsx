@@ -287,6 +287,8 @@ export function ManualCreatePanel({
     }
     return draft.shared.projectId;
   });
+  const [projectChosen, setProjectChosen] = useState(!data?.require_project_choice);
+  const requiredWorkflowId = typeof data?.required_workflow_id === "string" ? data.required_workflow_id : undefined;
   const [statusSelection, setStatusSelection] = useState(() => ({
     projectId: projectId ?? null,
     nodeId: typeof data?.workflow_status_id === "string" ? data.workflow_status_id
@@ -332,7 +334,8 @@ export function ManualCreatePanel({
   const wsId = useWorkspaceId();
   const workflowQuery = useQuery(effectiveIssueWorkflowOptions(wsId, projectId ?? null));
   const selectedNode = resolveCreateWorkflowStatus(workflowQuery.data, projectId ?? null, statusSelection);
-  const workflowReady = workflowQuery.isSuccess && !!selectedNode;
+  const workflowMatches = !requiredWorkflowId || (workflowQuery.data?.workflow.id === requiredWorkflowId && selectedNode?.id === statusSelection.nodeId);
+  const workflowReady = workflowQuery.isSuccess && !!selectedNode && workflowMatches && projectChosen;
   const { categoryOf: draftStatusCategory, colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
@@ -396,8 +399,9 @@ export function ManualCreatePanel({
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => {
+    setProjectChosen(true);
     if (id !== projectId) {
-      setStatusSelection({ projectId: id ?? null, nodeId: undefined, legacyKey: undefined });
+      setStatusSelection({ projectId: id ?? null, nodeId: requiredWorkflowId ? statusSelection.nodeId : undefined, legacyKey: undefined });
       setManual({ workflowStatusId: undefined, workflowProjectId: id ?? null });
     }
     setProjectId(id); setShared({ projectId: id });
@@ -422,7 +426,7 @@ export function ManualCreatePanel({
     priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
     assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
     labels: manualFields.includes("labels") || labelIds.length > 0 || fieldPickerOpen === "labels",
-    project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
+    project: !!requiredWorkflowId || manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
     due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
     start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
   };
@@ -435,14 +439,14 @@ export function ManualCreatePanel({
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
-    setStatusSelection({ projectId: null, nodeId: undefined, legacyKey: undefined });
+    if (!requiredWorkflowId) setStatusSelection({ projectId: null, nodeId: undefined, legacyKey: undefined });
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
     setLabelIds([]);
     setPropertyValues({});
     setCustomPropertyPickerId(null);
-    setProjectId(undefined);
+    if (!requiredWorkflowId) setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
@@ -996,10 +1000,13 @@ export function ManualCreatePanel({
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            {selectedNode && (workflowQuery.data?.workflow.scope_type === "project"
+            {requiredWorkflowId && (!projectChosen || !workflowMatches) && (
+              <p className="px-4 text-caption text-muted-foreground" role="status">{tIssues(($) => $.board.choose_workflow_project)}</p>
+            )}
+            {selectedNode && workflowMatches && (workflowQuery.data?.workflow.scope_type === "project"
               ? <div className="px-4"><WorkflowEntryEffects node={selectedNode} /></div>
               : <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={selectedNode.legacy_status_key ?? status} />)}
-            {!workflowReady && <p role={workflowQuery.isError ? "alert" : "status"} className="px-4 text-caption text-muted-foreground">
+            {(workflowQuery.isPending || workflowQuery.isError || !selectedNode) && <p role={workflowQuery.isError ? "alert" : "status"} className="px-4 text-caption text-muted-foreground">
               {workflowQuery.isPending ? tIssues(($) => $.workflow_selection.loading) : tIssues(($) => $.workflow_selection.load_error)}
               {!workflowQuery.isPending && <Button variant="link" size="sm" onClick={() => void workflowQuery.refetch()}>{tIssues(($) => $.workflow_selection.retry)}</Button>}
             </p>}

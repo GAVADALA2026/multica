@@ -349,6 +349,9 @@
     "toggle_collapse": "레인 접기/펼치기"
   },
   "board": {
+    "legacy_workflow": "이전 워크플로",
+    "more_workflows": "워크플로 더 보기",
+    "choose_workflow_project": "이 열에 이슈를 만들려면 이 워크플로를 사용하는 프로젝트(또는 프로젝트 없음)를 선택하세요.",
     "hidden_columns_label": "숨긴 열",
     "hide_column": "열 숨기기",
     "show_column": "열 표시",

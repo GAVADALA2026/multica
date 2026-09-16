@@ -353,6 +353,9 @@
     "toggle_collapse": "Toggle lane"
   },
   "board": {
+    "legacy_workflow": "Legacy workflow",
+    "more_workflows": "Show more workflows",
+    "choose_workflow_project": "Choose a project (or No project) that uses this workflow to create an issue in this column.",
     "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
     "show_column": "Show column",

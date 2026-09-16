@@ -24,8 +24,9 @@ import (
 const issueTableMaxFacets = 32
 
 type issueTableFacetValueResponse struct {
-	Key   string `json:"key"`
-	Count int64  `json:"count"`
+	Key        string                        `json:"key"`
+	Count      int64                         `json:"count"`
+	StatusNode *issueTableGroupValueResponse `json:"status_node,omitempty"`
 }
 
 type issueTableFacetResponse struct {
@@ -433,6 +434,54 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		responses[index] = resolved
+	}
+
+	// Status filters are disjunctive and must not depend on the lanes already
+	// paged into the board. Resolve their labels in one workspace-scoped query.
+	for index := range responses {
+		if responses[index].Kind != "workflow_status" {
+			continue
+		}
+		ids := make([]string, 0, len(responses[index].Values))
+		for _, value := range responses[index].Values {
+			ids = append(ids, value.Key)
+		}
+		rows, err := h.DB.Query(r.Context(), `SELECT s.id::text, s.workflow_id::text,
+          COALESCE(s.legacy_status_key,''), w.name || ' / ' || s.name, s.color,
+          COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text
+          FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
+          WHERE s.workspace_id=$1 AND s.id::text=ANY($2::text[])`, base.args[0], ids)
+		if err != nil {
+			writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+			return
+		}
+		nodes := map[string]issueTableGroupValueResponse{}
+		for rows.Next() {
+			var node issueTableWorkflowStatusRef
+			if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt); err != nil {
+				rows.Close()
+				writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+				return
+			}
+			descriptor, err := (resolvedIssueTableGroup{kind: "workflow_status"}).descriptor(node.ID, 0, issueTableGroupContext{WorkflowStatus: &node}, nil)
+			if err != nil {
+				rows.Close()
+				writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+				return
+			}
+			nodes[node.ID] = descriptor.Value
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
+			return
+		}
+		for i := range responses[index].Values {
+			if node, ok := nodes[responses[index].Values[i].Key]; ok {
+				responses[index].Values[i].StatusNode = &node
+			}
+		}
 	}
 
 	response := issueTableFacetsResponse{

@@ -55,9 +55,13 @@ export function HiddenColumnsPanel({
 export function HiddenColumnRow({
   status,
   total,
+  label,
+  onShow,
 }: {
   status: IssueStatus;
   total?: number;
+  label?: string;
+  onShow?: () => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -68,7 +72,7 @@ export function HiddenColumnRow({
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
         <StatusIcon category={categoryOf(status)} color={colorOf(status)} icon={iconOf(status)} status={status} className="h-3.5 w-3.5" />
-        <span className="text-body">{entryOf(status)?.id === status ? entryOf(status)!.name : labelOf(status)}</span>
+        <span className="text-body">{label ?? (entryOf(status)?.id === status ? entryOf(status)!.name : labelOf(status))}</span>
       </div>
       <div className="flex items-center gap-1.5">
         {total !== undefined && (
@@ -90,7 +94,7 @@ export function HiddenColumnRow({
           />
           <DropdownMenuContent align="end">
             <DropdownMenuItem
-              onClick={() => viewStoreApi.getState().showStatus(status)}
+              onClick={onShow ?? (() => viewStoreApi.getState().showStatus(status))}
             >
               <Eye className="size-3.5" />
               {t(($) => $.board.show_column)}

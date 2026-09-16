@@ -293,6 +293,8 @@ export interface IssueViewState {
   /** Persisted collapsed lanes, keyed by grouping. Same id space as
    *  `swimlaneOrders`, plus the sentinel `"none"` for the pinned
    *  no-X lane and `"__orphans__"` for the parent-grouping fallback. */
+  collapsedWorkflowLanes: string[];
+  toggleWorkflowLaneCollapsed: (key: string) => void;
   collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
   /** Ordered table columns. Title is mandatory and normalized to the front. */
   tableColumns: TableColumnConfig[];
@@ -376,6 +378,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
+  collapsedWorkflowLanes: [],
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
   tableGrouping: "none",
@@ -575,6 +578,11 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
     })),
+  toggleWorkflowLaneCollapsed: (key) => set((state) => ({
+    collapsedWorkflowLanes: state.collapsedWorkflowLanes.includes(key)
+      ? state.collapsedWorkflowLanes.filter((id) => id !== key)
+      : [...state.collapsedWorkflowLanes, key],
+  })),
   toggleSwimlaneCollapsed: (key) =>
     set((state) => {
       const grouping = state.swimlaneGrouping;
@@ -667,6 +675,7 @@ export const viewStorePersistOptions = (name: string) => ({
     ganttShowCompleted: state.ganttShowCompleted,
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
+    collapsedWorkflowLanes: state.collapsedWorkflowLanes,
     collapsedSwimlanes: state.collapsedSwimlanes,
     tableColumns: state.tableColumns,
     tableGrouping: state.tableGrouping,
@@ -740,6 +749,9 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
+    collapsedWorkflowLanes: Array.isArray(p.collapsedWorkflowLanes)
+      ? p.collapsedWorkflowLanes.filter((id): id is string => typeof id === "string")
+      : current.collapsedWorkflowLanes,
     hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
     listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {
