@@ -1601,6 +1601,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					r.Get("/pr-automation", h.GetPRPolicy)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -1624,6 +1625,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
+					r.Post("/pr-automation/preview", h.PreviewPRPolicy)
+					r.Post("/pr-automation/sync", h.SyncPRPolicy)
+					r.Put("/pr-automation", h.UpdatePRPolicy)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
@@ -1930,6 +1934,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/pr-automation", h.GetIssuePRPolicy)
+					r.Put("/pr-automation", h.UpdateIssuePRPolicy)
 				})
 			})
 

@@ -894,6 +894,7 @@ export function useRealtimeSync(
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
       },
       pull_request: () => {
+        qc.invalidateQueries({ queryKey: ["pr-automation", getCurrentWsId()] });
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
         qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
@@ -1013,6 +1014,7 @@ export function useRealtimeSync(
       if (!issue?.id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
+        qc.invalidateQueries({queryKey: ["pr-automation", wsId]});
         onIssueUpdated(qc, wsId, issue, {
           assigneeChanged: payload.assignee_changed,
           statusChanged: payload.status_changed,
