@@ -2110,7 +2110,7 @@ func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
 	}
 	for _, want := range []string{
 		"The issue is unchanged since your last run",
-		"the server compared title, description and status",
+		"the server compared title and description",
 		"status: in_progress; assignee: agent agent-7",
 		"only if resumed memory is not enough",
 	} {

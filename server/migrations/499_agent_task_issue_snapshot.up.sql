@@ -17,18 +17,23 @@
 -- would report "unchanged" forever with no symptom. A snapshot taken at claim
 -- time has exactly one writer, whatever the compared set happens to be.
 --
--- Shape is {"v":1,...}: version, status, and sha256 of title and description.
--- Hashes, not bodies — this column is a comparison key, never a second copy of
--- the issue text. `v` gates the comparison: a snapshot written by a different
+-- Shape is {"v":1,...}: version plus sha256 of title and description. Hashes,
+-- not bodies — this column is a comparison key, never a second copy of the
+-- issue text. `v` gates the comparison: a snapshot written by a different
 -- version is treated as unknown, which degrades to the pre-existing "read the
--- issue" instruction, so narrowing or widening the set later is always safe.
+-- issue" instruction.
 --
--- The set is deliberately smaller than "the issue": it answers only "must the
--- agent read the issue again?", so a field belongs here only if changing it
--- alters what the agent does AND its current value is not already in the
--- per-turn message. Assignee and priority fail that test — the claim ships the
--- current assignee outright, and priority does not change the agent's work.
--- Labels, parent, due date, stage, project and metadata are out too.
+-- The set answers only "must the agent re-read the issue BODY?", so only title
+-- and description qualify — they are the task itself and nothing but a read
+-- delivers them. Status, assignee and priority are out: the claim ships the
+-- current status and assignee on every response, so no comparison is needed to
+-- learn them, and priority does not change the agent's work. Labels, parent,
+-- due date, stage, project and metadata are out too.
+--
+-- Rows written by an earlier shape of this column also carry a "status" key;
+-- it is ignored. Removing a field from the set is backward compatible, so it
+-- does not bump `v` — only adding one, or changing how a value is derived,
+-- makes an old row unable to answer the current question.
 --
 -- Nullable, and NULL is the normal state for every row written before this
 -- migration. A reader must treat NULL as "not compared", never as "unchanged".

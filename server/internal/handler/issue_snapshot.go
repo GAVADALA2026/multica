@@ -11,49 +11,54 @@ import (
 )
 
 // issueSnapshotVersion is the shape version of the JSON stored in
-// agent_task_queue.issue_snapshot. Bump it whenever the compared field SET
-// changes — never when only a value's formatting changes, because a stored
-// snapshot is compared against a freshly built one and a formatting drift
-// inside the same version would read as a spurious "changed".
+// agent_task_queue.issue_snapshot.
 //
 // A snapshot carrying any other version is treated as UNKNOWN rather than
-// coerced: the two runs did not compare the same things, so neither
-// "unchanged" nor a changed-field list would be true. Unknown degrades to the
-// unconditional issue read, which is the behaviour that predates this column.
+// coerced, which degrades to the unconditional issue read — the behaviour that
+// predates this column.
 //
-// This is version 1 — the first shape the column has ever held. The set below
-// was narrowed during review, before any of this shipped, so no stored row has
-// ever carried a wider one and there is nothing for a bump to protect. The
-// version earns its place from here on, not retroactively.
+// Bump it when a stored row can no longer answer the question the current code
+// asks of it. In practice that is exactly two cases:
+//
+//   - a field is ADDED to the compared set, because old rows do not carry it
+//     and their silence would read as "unchanged";
+//   - the way a value is derived changes (a different hash, a different
+//     normalisation), because the same content would then compare as different.
+//
+// REMOVING a field does not qualify and must not bump: the remaining fields are
+// still present in old rows and still mean the same thing, so the comparison
+// stays correct and the extra key is simply ignored. Dropping status (MUL-7344
+// review) is that case, which is why this is still 1 even though rows written
+// by the previous shape already exist.
 const issueSnapshotVersion = 1
 
 // Compared field names, in the fixed order they are reported.
 //
-// The set answers exactly one question — "must the agent run `issue get`
-// again?" — so a field earns a place here only if changing it would alter what
-// the agent does AND the per-turn message does not already carry its current
-// value:
+// The set answers exactly one question — "must the agent re-read the issue
+// BODY?" — so only title and description qualify. They are the task itself, and
+// nothing but a read can deliver them.
 //
-//   - title, description: the task itself, and reachable only by reading the
-//     issue. Both must be compared.
-//   - status: also shipped as a current value, so comparing it is strictly
-//     redundant for "what is it now". It stays because "changed: status" is the
-//     clearest available signal that somebody intervened between the runs — a
-//     push back from in_review to todo means the delivery was rejected — and
-//     carrying it costs nothing.
-//   - assignee: the agent only needs "is this mine now", which the current
-//     value answers outright. Not compared; still shipped.
-//   - priority: reachable only by reading, but it does not change what the
-//     agent does. Not compared.
+// Everything else is excluded because the per-turn message already carries the
+// current value, or because changing it does not change the agent's work:
+//
+//   - status: shipped as a current value on every claim, so the agent learns it
+//     without a read. Comparing it was a mistake measured, not argued: the
+//     workflow has the agent set in_progress and in_review on its OWN runs, so
+//     its own bookkeeping counted as "changed" and reported a body re-read that
+//     nothing in the body justified. Replaying this issue's 21 follow-ups, that
+//     alone cut "unchanged" from 17 to 4. "Somebody intervened" is still
+//     visible — the agent compares the shipped status against what it last set.
+//   - assignee: shipped as a current value; "is this mine now" needs no compare.
+//   - priority: only a read reveals it, but it does not change what the agent
+//     does.
 //
 // The agent is told exactly this set was compared, so a field absent here must
-// never be implied to have been checked: assignee, priority, labels, parent,
-// due date, stage, project and metadata are all out of scope, and an issue
-// whose ONLY change is one of them is reported as unchanged.
+// never be implied to have been checked: status, assignee, priority, labels,
+// parent, due date, stage, project and metadata are all out of scope, and an
+// issue whose ONLY change is one of them is reported as unchanged.
 const (
 	issueFieldTitle       = "title"
 	issueFieldDescription = "description"
-	issueFieldStatus      = "status"
 )
 
 // issueStateSnapshot is the comparison key for one claim's view of an issue.
@@ -61,14 +66,13 @@ const (
 // Title and description are stored as SHA-256 hex, not as text: the column
 // exists to answer "did this move", and a second copy of every issue body in
 // the task queue would be both a storage cost and a place for issue text to
-// leak from. Status is a short key, so it is stored raw.
+// leak from.
 //
 // The claim's CURRENT status and assignee reach the agent as their own response
-// fields, read straight off the issue row — they are not sourced from here, and
-// narrowing this struct does not affect them.
+// fields, read straight off the issue row — they were never sourced from here,
+// so dropping status from the comparison did not affect them.
 type issueStateSnapshot struct {
 	Version           int    `json:"v"`
-	Status            string `json:"status"`
 	TitleSHA256       string `json:"title_sha256"`
 	DescriptionSHA256 string `json:"description_sha256"`
 }
@@ -82,7 +86,6 @@ func sha256Hex(s string) string {
 func buildIssueStateSnapshot(issue db.Issue) issueStateSnapshot {
 	return issueStateSnapshot{
 		Version:           issueSnapshotVersion,
-		Status:            issue.Status,
 		TitleSHA256:       sha256Hex(issue.Title),
 		DescriptionSHA256: sha256Hex(issue.Description.String),
 	}
@@ -98,9 +101,6 @@ func (s issueStateSnapshot) changedFieldsSince(prev issueStateSnapshot) []string
 	}
 	if s.DescriptionSHA256 != prev.DescriptionSHA256 {
 		changed = append(changed, issueFieldDescription)
-	}
-	if s.Status != prev.Status {
-		changed = append(changed, issueFieldStatus)
 	}
 	return changed
 }

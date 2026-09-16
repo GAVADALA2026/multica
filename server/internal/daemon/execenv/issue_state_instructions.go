@@ -58,7 +58,7 @@ func BuildIssueStateHint(issueID, issueStatus, assigneeType, assigneeID string, 
 	state := fmt.Sprintf("status: %s; assignee: %s", issueStatus, issueAssigneeLabel(assigneeType, assigneeID))
 	if len(changedFields) == 0 {
 		return fmt.Sprintf(
-			"The issue is unchanged since your last run — the server compared title, description and status (%s). "+
+			"The issue is unchanged since your last run — the server compared title and description (%s). "+
 				"That answers workflow step 1: continue from your resumed context, and re-read with %s only if resumed memory is not enough.\n\n",
 			state, readCommand,
 		)

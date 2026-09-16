@@ -42,11 +42,10 @@ func seedPriorRunWithSnapshot(t *testing.T, agentID, runtimeID, issueID, snapsho
 // caller override individual fields to model what the previous run saw.
 // createClaimReclaimAgentAndIssue always creates an unassigned issue in
 // status in_progress with priority none, and titles it "<name> issue".
-func issueSnapshotJSON(t *testing.T, version int, title, description, status string) string {
+func issueSnapshotJSON(t *testing.T, version int, title, description string) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
 		"v":                  version,
-		"status":             status,
 		"title_sha256":       sha256Hex(title),
 		"description_sha256": sha256Hex(description),
 	})
@@ -69,7 +68,7 @@ func TestClaimTaskByRuntime_IssueUnchangedReportsEmptyDelta(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
 
 	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
-		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"))
+		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""))
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
 	resp := claimCommentTask(t, runtimeID, "issue-snapshot-unchanged")
@@ -96,18 +95,18 @@ func TestClaimTaskByRuntime_IssueChangedNamesFields(t *testing.T) {
 	const name = "Issue snapshot changed agent"
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
 
-	// The previous run saw a different description and a different status;
-	// title and priority are unchanged and must NOT be reported.
+	// The previous run saw a different description. Title is unchanged and must
+	// NOT be reported alongside it.
 	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
-		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "an older description", "todo"))
+		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "an older description"))
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
 	resp := claimCommentTask(t, runtimeID, "issue-snapshot-changed")
 	if !resp.Task.IssueStateDeltaKnown {
 		t.Fatalf("issue_state_delta_known must be true when the comparison ran")
 	}
-	if got := strings.Join(resp.Task.IssueChangedFields, ","); got != "description,status" {
-		t.Errorf("issue_changed_fields = %q, want \"description,status\"", got)
+	if got := strings.Join(resp.Task.IssueChangedFields, ","); got != "description" {
+		t.Errorf("issue_changed_fields = %q, want \"description\"", got)
 	}
 }
 
@@ -171,7 +170,7 @@ func TestClaimTaskByRuntime_ForeignSnapshotVersionIsUnknown(t *testing.T) {
 
 	// Byte-identical to the unchanged case apart from `v`.
 	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
-		issueSnapshotJSON(t, issueSnapshotVersion+1, name+" issue", "", "in_progress"))
+		issueSnapshotJSON(t, issueSnapshotVersion+1, name+" issue", ""))
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
 	resp := claimCommentTask(t, runtimeID, "issue-snapshot-version")
@@ -211,9 +210,6 @@ func TestClaimTaskByRuntime_RecordsItsOwnIssueSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("claim did not persist a decodable issue snapshot, got %q", string(raw))
 	}
-	if stored.Status != "in_progress" {
-		t.Errorf("stored snapshot = %+v, want the issue's status", stored)
-	}
 	if stored.TitleSHA256 != sha256Hex(name+" issue") {
 		t.Errorf("stored title hash does not match the claimed issue's title")
 	}
@@ -239,7 +235,7 @@ func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
 	// One prior run carries both halves of the anchor: its started_at dates the
 	// comment delta, its snapshot dates the issue-state delta.
 	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
-		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"))
+		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""))
 
 	// A member comment after that anchor, so the comment delta is non-zero and
 	// the two deltas cannot both be trivially empty.
@@ -308,7 +304,7 @@ func TestClaimTaskByRuntime_DeltasDateFromTheResumedRun(t *testing.T) {
 				"work_dir":       "/tmp/resumed-anchor-workdir",
 				"started_at":     testutil.Raw("now() - interval '2 hours'"),
 				"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
-				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions", "in_progress"),
+				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions"),
 			})
 			// A NEWER run that saw the issue as it is now. Anchoring here is the
 			// bug: its session is not the one being resumed.
@@ -321,7 +317,7 @@ func TestClaimTaskByRuntime_DeltasDateFromTheResumedRun(t *testing.T) {
 				"work_dir":       "/tmp/resumed-anchor-other-workdir",
 				"started_at":     testutil.Raw("now() - interval '1 hour'"),
 				"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
-				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"),
+				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
 			}
 			if manualRerun {
 				// Nothing wrong with the newer run here; the operator simply
@@ -398,7 +394,7 @@ func TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta(t *testing.
 		"session_id": "never-started-anchor-session", "work_dir": "/tmp/never-started-anchor",
 		"started_at":     testutil.Raw("now() - interval '2 hours'"),
 		"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
-		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions", "in_progress"),
+		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions"),
 	})
 	// A retry child that inherited session S: claimed after the description
 	// was edited to what it is now (so its snapshot matches the current issue),
@@ -409,7 +405,7 @@ func TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta(t *testing.
 		"session_id": "never-started-anchor-session", "work_dir": "/tmp/never-started-anchor",
 		"dispatched_at":  testutil.Raw("now() - interval '1 hour'"),
 		"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
-		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"),
+		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
 	})
 	triggerID := dbfx.Comment(t, issueID, "continue")
 	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": triggerID})
@@ -457,7 +453,7 @@ func TestClaimTaskByRuntime_NoAdoptedSessionHasNoDeltas(t *testing.T) {
 				"session_id":     "no-adopted-session-prior",
 				"started_at":     testutil.Raw("now() - interval '1 hour'"),
 				"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
-				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"),
+				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
 			}
 			switch mode {
 			case "missing_session":
@@ -487,15 +483,19 @@ func TestClaimTaskByRuntime_NoAdoptedSessionHasNoDeltas(t *testing.T) {
 	}
 }
 
-// TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope pins the compared set.
-// Reassigning an issue or changing its priority does not change what the agent
-// has to read, so neither is compared — an issue whose ONLY change is one of
-// them is reported as unchanged, and the prompt says which three fields were
-// checked so that report cannot be read as "nothing about this issue moved".
+// TestClaimTaskByRuntime_NonBodyFieldsAreOutOfScope pins the compared set.
+// The comparison answers "must the agent re-read the issue BODY?", so status,
+// assignee and priority are all outside it: an issue whose ONLY change is one
+// of them is reported unchanged, and the prompt names the two fields it did
+// check so that report cannot be read as "nothing about this issue moved".
 //
-// The current assignee still ships on every claim; the agent answers "is this
-// mine now" from that value, not from the comparison.
-func TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope(t *testing.T) {
+// Status matters most here. The workflow has the agent set in_progress and
+// in_review on its own runs, so comparing status made the agent's own
+// bookkeeping demand a body re-read that nothing in the body justified.
+//
+// Their CURRENT values still ship on every claim, which is why comparing them
+// buys nothing: the agent reads status and assignee straight off the message.
+func TestClaimTaskByRuntime_NonBodyFieldsAreOutOfScope(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -504,12 +504,13 @@ func TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope(t *testing.T) {
 	const name = "narrowed scope agent"
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
 
-	// The prior run saw the three compared fields exactly as they are now.
+	// The prior run saw title and description exactly as they are now. The
+	// fixture creates the issue in_progress.
 	seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID,
-		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "", "in_progress"))
-	// Since that run the issue was reassigned and re-prioritised. Neither is in
-	// the compared set.
-	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $1, priority = 'urgent' WHERE id = $2`,
+		issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""))
+	// Since that run the issue moved status, was reassigned, and was
+	// re-prioritised. None of the three is in the compared set.
+	dbfx.Exec(t, `UPDATE issue SET status = 'in_review', assignee_type = 'agent', assignee_id = $1, priority = 'urgent' WHERE id = $2`,
 		agentID, issueID)
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
@@ -518,10 +519,15 @@ func TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope(t *testing.T) {
 		t.Fatalf("the comparison must still run")
 	}
 	if len(resp.Task.IssueChangedFields) != 0 {
-		t.Errorf("issue_changed_fields = %v, want empty — assignee and priority are out of the compared set",
+		t.Errorf("issue_changed_fields = %v, want empty — status, assignee and priority are all out of the compared set",
 			resp.Task.IssueChangedFields)
 	}
-	// The value the agent actually needs is still delivered.
+	// The values the agent actually needs are still delivered, and they are the
+	// NEW ones — without this the fixture's UPDATE could silently not apply and
+	// the emptiness above would prove nothing.
+	if resp.Task.IssueStatus != "in_review" {
+		t.Errorf("current status must still ship: got %q, want in_review", resp.Task.IssueStatus)
+	}
 	if resp.Task.IssueAssigneeType != "agent" || resp.Task.IssueAssigneeID != agentID {
 		t.Errorf("current assignee must still ship: type=%q id=%q, want agent/%s",
 			resp.Task.IssueAssigneeType, resp.Task.IssueAssigneeID, agentID)
@@ -566,7 +572,7 @@ func TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads(t *test
 		"trigger_comment_id": triggerID,
 		"started_at":         testutil.Raw("now() - interval '2 hours'"),
 		"completed_at":       testutil.Raw("now() - interval '110 minutes'"),
-		"issue_snapshot":     issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "old requirements", "in_progress"),
+		"issue_snapshot":     issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "old requirements"),
 	})
 	// A comment that session never saw.
 	dbfx.Comment(t, issueID, "instructions the old session has never seen", testutil.Cols{
@@ -614,5 +620,60 @@ func TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads(t *test
 	if got.DeltaKnown {
 		t.Errorf("a run that never reached the provider must not date the comment delta either: known=%v count=%d since=%q",
 			got.DeltaKnown, got.NewCommentCount, got.NewCommentsSince)
+	}
+}
+
+// TestClaimTaskByRuntime_LegacySnapshotWithStatusStillCompares pins the reason
+// dropping status did NOT bump issueSnapshotVersion.
+//
+// Rows written before the narrowing carry an extra "status" key. Removing a
+// field from the compared set is backward compatible: the fields that remain
+// are still present in those rows and still mean the same thing, so the
+// comparison stays correct and the stale key is simply ignored. Only ADDING a
+// field, or changing how a value is derived, leaves an old row unable to answer
+// the current question — and only that earns a bump.
+//
+// Without this test the compatibility claim is an assertion in a comment, and
+// the cost of it being wrong is a silent false "unchanged" on every dev row.
+func TestClaimTaskByRuntime_LegacySnapshotWithStatusStillCompares(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, tc := range []struct {
+		name        string
+		description string
+		wantChanged string
+	}{
+		{name: "body unchanged", description: "", wantChanged: ""},
+		{name: "description moved", description: "an older description", wantChanged: "description"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtimeID := createClaimReclaimRuntime(t, ctx, "legacy snapshot runtime "+tc.name)
+			name := "legacy snapshot agent " + tc.name
+			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
+
+			// A snapshot in the PREVIOUS shape: same version, extra status key.
+			legacy, err := json.Marshal(map[string]any{
+				"v":                  issueSnapshotVersion,
+				"status":             "todo", // the issue is in_progress now
+				"title_sha256":       sha256Hex(name + " issue"),
+				"description_sha256": sha256Hex(tc.description),
+			})
+			if err != nil {
+				t.Fatalf("marshal legacy snapshot: %v", err)
+			}
+			seedPriorRunWithSnapshot(t, agentID, runtimeID, issueID, string(legacy))
+			createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+
+			resp := claimCommentTask(t, runtimeID, "legacy-snapshot-claim")
+			if !resp.Task.IssueStateDeltaKnown {
+				t.Fatalf("a legacy row must still be comparable, not reported as unknown")
+			}
+			if got := strings.Join(resp.Task.IssueChangedFields, ","); got != tc.wantChanged {
+				t.Errorf("issue_changed_fields = %q, want %q — the stale status key must be ignored, not compared",
+					got, tc.wantChanged)
+			}
+		})
 	}
 }
