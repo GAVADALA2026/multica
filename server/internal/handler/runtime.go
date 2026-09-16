@@ -734,7 +734,8 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 // not, which of those blockers the user can actually do anything about. Mika is
 // a user-kind agent that can be neither archived nor moved, so "reassign or
 // archive them" is not a universal instruction here either.
-func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers []db.Agent, known bool) map[string]any {
+func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers profileInstanceBlockers) map[string]any {
+	known := blockers.known
 	ttlDays := service.OfflineRuntimeTTLDays()
 	name := rt.Name
 	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
@@ -760,15 +761,29 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 			"It is offline, and Multica removes offline runtimes automatically after %d days, once no agent is bound to them and nothing is still running on them.",
 			ttlDays,
 		))
-	case len(blockers) > 0:
+	case len(blockers.agents) > 0 || blockers.undrainedTasks > 0:
+		// GC needs BOTH gone. Naming only the agents would send a user who
+		// clears them straight back here a week later, still waiting on a task
+		// nothing told them about — a deferred run left behind when its agent
+		// was rebound elsewhere is the ordinary way this happens.
+		var holds []string
+		if n := len(blockers.agents); n > 0 {
+			holds = append(holds, fmt.Sprintf("%d agent(s) are still bound to it", n))
+		}
+		if n := blockers.undrainedTasks; n > 0 {
+			holds = append(holds, fmt.Sprintf("%d task(s) on it have not finished", n))
+		}
 		parts = append(parts, fmt.Sprintf(
-			"It is offline, but %d agent(s) are still bound to it, which holds it in place; Multica removes the runtime automatically after %d days offline once they are gone.",
-			len(blockers), ttlDays,
+			"It is offline, but %s, which holds it in place; Multica removes the runtime automatically after %d days offline once that is cleared.",
+			strings.Join(holds, " and "), ttlDays,
 		))
-		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers))...)
+		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents))...)
+		if blockers.undrainedTasks > 0 {
+			parts = append(parts, "Let the unfinished tasks complete, or cancel them.")
+		}
 	default:
 		parts = append(parts, fmt.Sprintf(
-			"It is offline with no agents bound, so Multica removes it automatically after %d days offline — this row will be reclaimed without any action from you.",
+			"It is offline with no agents bound and nothing still running on it, so Multica removes it automatically after %d days offline — this row will be reclaimed without any action from you.",
 			ttlDays,
 		))
 	}
@@ -789,9 +804,20 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		"auto_cleanup_after_days": ttlDays,
 	}
 	if known {
-		resp["active_agent_count"] = len(blockers)
+		resp["active_agent_count"] = len(blockers.agents)
+		resp["undrained_task_count"] = blockers.undrainedTasks
 	}
 	return resp
+}
+
+// profileInstanceBlockers is everything retention GC checks before it will
+// reclaim an offline runtime. Both halves matter to the refusal: GC's candidate
+// query requires no non-archived user agent AND no task with completed_at NULL,
+// so reporting only one of them would promise a cleanup the sweeper then skips.
+type profileInstanceBlockers struct {
+	agents         []db.Agent
+	undrainedTasks int64
+	known          bool
 }
 
 // profileInstanceRefusalBlockers reads what would stop retention GC from
@@ -801,14 +827,25 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 //
 // Already bounded — a single runtime's bound agents, unlike a profile's, are
 // capped by what one machine can host.
-func (h *Handler) profileInstanceRefusalBlockers(ctx context.Context, runtimeID pgtype.UUID) ([]db.Agent, bool) {
+func (h *Handler) profileInstanceRefusalBlockers(ctx context.Context, runtimeID pgtype.UUID) profileInstanceBlockers {
 	agents, err := h.Queries.ListActiveAgentsByRuntime(ctx, runtimeID)
 	if err != nil {
 		slog.Warn("profile instance refusal: active agent lookup failed",
 			"runtime_id", uuidToString(runtimeID), "error", err)
-		return nil, false
+		return profileInstanceBlockers{}
 	}
-	return agents, true
+	// Runtime-owned tasks only, mirroring ListStaleOfflineRuntimeGCCandidates.
+	// The agent-side predicate belongs to the teardown drain check, not to the
+	// question this message answers ("will GC pick this row up").
+	tasks, err := h.Queries.CountUndrainedTasksByRuntimeOrAgent(ctx, db.CountUndrainedTasksByRuntimeOrAgentParams{
+		RuntimeIds: []pgtype.UUID{runtimeID},
+	})
+	if err != nil {
+		slog.Warn("profile instance refusal: undrained task lookup failed",
+			"runtime_id", uuidToString(runtimeID), "error", err)
+		return profileInstanceBlockers{}
+	}
+	return profileInstanceBlockers{agents: agents, undrainedTasks: tasks, known: true}
 }
 
 // canUseRuntimeForAgent reports whether a workspace member is allowed to
@@ -970,8 +1007,8 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if hasLiveProfile {
-		blockers, known := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
-		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers, known))
+		blockers := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers))
 		return
 	}
 	if rt.ProfileID.Valid {
@@ -1188,8 +1225,8 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if hasLiveProfile {
-		blockers, known := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
-		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers, known))
+		blockers := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers))
 		return
 	}
 	if rt.ProfileID.Valid {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -645,5 +646,117 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 		if tc.got != want {
 			t.Fatalf("%s_count = %d, rows of that class = %d", tc.name, tc.got, want)
 		}
+	}
+}
+
+// Retention GC needs both no bound agents AND no unfinished task. An agent
+// rebound to another machine can leave a deferred run pinned to the old
+// runtime, so "no agents bound" alone is not a cleanup promise this server can
+// keep. Regression contributed by review.
+func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseCleanup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Review Retired Host")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Review Moved Agent")
+	issueID := dbfx.Issue(t, "Review deferred task")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "issue_id": issueID, "status": "deferred",
+		"fire_at": testutil.Raw("now() + interval '30 days'"),
+	})
+	targetID := newTestRuntime(t, "Review New Host", "online")
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(newRequest("PATCH", "/api/agents/"+agentID,
+		map[string]any{"runtime_id": targetID}), "id", agentID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("rebind: %d %s", w.Code, w.Body.String())
+	}
+	dbfx.Exec(t, `UPDATE agent_runtime SET status='offline', last_seen_at=now()-interval '8 days' WHERE id=$1`, runtimeID)
+	var taskRuntime, taskStatus string
+	dbfx.QueryRow(t, `SELECT runtime_id::text, status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&taskRuntime, &taskStatus)
+	if taskRuntime != runtimeID || taskStatus != "deferred" {
+		t.Fatalf("unexpected task after rebind: %s %s", taskRuntime, taskStatus)
+	}
+	rows, err := testHandler.Queries.ListStaleOfflineRuntimeGCCandidates(ctx, db.ListStaleOfflineRuntimeGCCandidatesParams{
+		StaleSeconds: service.OfflineRuntimeTTLSeconds, MaxPerTick: 10000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range rows {
+		if uuidToString(id) == runtimeID {
+			t.Fatal("GC unexpectedly allows runtime with deferred task")
+		}
+	}
+	for _, cascade := range []bool{false, true} {
+		w = httptest.NewRecorder()
+		if cascade {
+			r := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete", map[string]any{"expected_active_agent_ids": []string{}})
+			testHandler.UnbindAgentsAndDeleteRuntime(w, withURLParam(r, "runtimeId", runtimeID))
+		} else {
+			testHandler.DeleteAgentRuntime(w, withURLParam(newRequest("DELETE", "/api/runtimes/"+runtimeID, nil), "runtimeId", runtimeID))
+		}
+		if w.Code != http.StatusConflict {
+			t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+		}
+		body := decodeConflict(t, w)
+		msg := conflictMessage(t, body)
+		if body["active_agent_count"] != float64(0) {
+			t.Fatalf("expected no agent bindings: %#v", body)
+		}
+		if strings.Contains(msg, "without any action from you") {
+			t.Errorf("cascade=%v: GC excludes this 8-day-old runtime with a deferred task, but guidance promises cleanup: %s", cascade, msg)
+		}
+	}
+}
+
+// Builder sessions are creator-scoped reads, so an admin who is not the
+// creator gets 403 from list, switch and discard alike. Telling that admin to
+// reopen the session is another instruction they cannot carry out.
+// Regression contributed by review.
+func TestDeleteRuntimeProfile_BuilderRemedyAddressesTheSessionCreator(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	creatorID := dbfx.User(t, "Review Builder Owner", "review-builder-owner@multica.ai")
+	dbfx.Insert(t, "member", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": creatorID, "role": "member"})
+	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Review Shared Builder Host")
+	dbfx.Exec(t, `UPDATE agent_runtime SET visibility='public' WHERE id=$1`, runtimeID)
+	w := httptest.NewRecorder()
+	testHandler.CreateAgentBuilderSession(w, newRequestAs(creatorID, "POST", "/api/agent-builder/sessions", map[string]any{"runtime_id": runtimeID}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create builder: %d %s", w.Code, w.Body.String())
+	}
+	var session CreateAgentBuilderSessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Exec(t, `INSERT INTO agent_builder_draft (chat_session_id, workspace_id, draft) VALUES ($1, $2, '{"name":"Saved draft"}'::jsonb)`, session.SessionID, testWorkspaceID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_builder_draft WHERE chat_session_id=$1`, session.SessionID)
+	})
+	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
+	w = httptest.NewRecorder()
+	testHandler.ListAgentBuilderSessions(w, newRequest("GET", "/api/agent-builder/sessions", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), session.SessionID) {
+		t.Fatal("other member's private session unexpectedly visible")
+	}
+	w = switchBuilderRuntime(t, session.SessionID, runtimeID)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("switch: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	r := withURLParam(newRequest("DELETE", "/api/chat/sessions/"+session.SessionID, nil), "sessionId", session.SessionID)
+	testHandler.DeleteChatSession(w, withChatTestWorkspaceCtx(t, r))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("discard: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(msg, "reopen the session") && !strings.Contains(msg, "creator") && !strings.Contains(msg, "owner") {
+		t.Fatalf("admin cannot see, switch, or discard the member's Builder, but guidance tells the admin to reopen it: %s", msg)
 	}
 }

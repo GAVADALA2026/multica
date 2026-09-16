@@ -119,7 +119,13 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool) []string {
 		out = append(out, "Reassign or archive them first.")
 	}
 	if classes[blockingAgentBuilderCarrier] {
-		out = append(out, "The unfinished Agent Builder session(s) here are hidden from the agent list — reopen the session to pick another runtime, or discard it, to release its runtime.")
+		// Addressed to the creator, not to whoever hit this error. Builder
+		// sessions are creator-scoped reads (ListAgentBuilderSessions, and
+		// loadChatSessionForUser behind switch/discard), so an admin who is not
+		// the creator cannot list, switch or discard the session — all three
+		// return 403. Telling them to reopen it would be another instruction
+		// that cannot be carried out.
+		out = append(out, "The unfinished Agent Builder session(s) here are hidden from the agent list, and only their creator can open them — ask the member who started the session to switch its runtime or discard it; another admin cannot do that for them.")
 	}
 	if classes[blockingAgentMika] {
 		out = append(out, "Mika is built into Multica: it cannot be archived, and there is no supported way to move it to another runtime yet, so this cannot be cleared from here while Mika is bound.")
