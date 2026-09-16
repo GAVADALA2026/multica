@@ -2883,7 +2883,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// flags a Codex rollout that went missing, which is only one of the ways
 		// the resumed session can be older than the newest run; the daemon
 		// applies it as its own separate gate.
-		if resumeAnchor != nil {
+		//
+		// The anchor row must also have STARTED. GetLastTaskSession returns the
+		// session's latest terminal row, and that row can be a retry child that
+		// inherited the session, was claimed (so its snapshot was written) and
+		// then failed before the agent ever ran — runtime offline during
+		// prepare, cancelled while dispatched. Its snapshot then describes an
+		// issue the session's memory never saw, and comparing against it would
+		// report "unchanged" across an edit made after the last run that
+		// actually executed. A never-started row dates neither delta.
+		if resumeAnchor != nil && resumeAnchor.StartedAt.Valid {
 			if prev, ok := decodeIssueStateSnapshot(resumeAnchor.IssueSnapshot); ok {
 				resp.IssueStateDeltaKnown = true
 				resp.IssueChangedFields = currentSnapshot.changedFieldsSince(prev)
@@ -2899,7 +2908,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// former may waive the workflow's comment scan (MUL-6984). The count
 			// fields stay suppressed at zero — there is no hint to render from a
 			// zero, and the anchor would only invite a read returning nothing.
-			if commentDeltaScope != nil && resumeAnchor.StartedAt.Valid {
+			if commentDeltaScope != nil {
 				if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
 					AnchorID:    commentDeltaScope.AnchorID,
 					IssueID:     commentDeltaScope.IssueID,

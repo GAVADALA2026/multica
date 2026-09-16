@@ -142,8 +142,11 @@ func decodeIssueStateSnapshot(raw []byte) (issueStateSnapshot, bool) {
 // neither delta is computed and the daemon falls back to the reads it has
 // always performed.
 type resumedRunAnchor struct {
-	// StartedAt dates the comment delta. Invalid when the resumed run never
-	// started, which leaves the comment delta uncomputed.
+	// StartedAt dates the comment delta, and gates BOTH deltas. It is invalid
+	// for a row that was claimed but never ran — a retry child that inherited
+	// the session, had its snapshot written at claim, then failed during
+	// prepare. Such a row's snapshot describes an issue the session's memory
+	// never saw, so it may date nothing.
 	StartedAt pgtype.Timestamptz
 	// IssueSnapshot is the issue state that run was handed at ITS claim. Empty
 	// for a run that predates the column.

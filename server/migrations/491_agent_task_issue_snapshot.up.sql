@@ -3,9 +3,15 @@
 -- issue itself moved instead of re-reading it unconditionally.
 --
 -- Written once per claim, next to the comment-delivery receipt and under the
--- same CAS, then read back by the following claim through the same
--- (agent_id, issue_id, started_at DESC) anchor the comment delta already uses.
--- That anchor is why the column lives here and not on `issue`: a
+-- same CAS. It is read back by a LATER claim only off the row whose provider
+-- session that claim actually resumes — the row GetLastTaskSession returns, or
+-- the operator-chosen source of a manual rerun — and only when that row
+-- actually started. "The run that started last" is a different row whenever a
+-- poisoned session is skipped or an older run is rerun, and comparing against
+-- it would report "unchanged" to an agent whose resumed memory predates the
+-- change.
+--
+-- One writer per row is why the column lives here and not on `issue`: a
 -- content_revision on the issue row would have to be bumped by every one of the
 -- dozen-odd writers that touch a title, description, status, assignee or
 -- priority, and the first one missed would report "unchanged" forever with no
@@ -19,8 +25,7 @@
 --
 -- Nullable, and NULL is the normal state for every row written before this
 -- migration. A reader must treat NULL as "not compared", never as "unchanged".
--- No index: every reader scopes by (agent_id, issue_id) and rides the same
--- index path as the comment delta's anchor, which it shares a row with:
--- both are read off the resumed run returned by GetLastTaskSession (or, for a
--- manual rerun, the operator-chosen source task).
+-- No index: the column is never a lookup key. It is only ever projected off a
+-- row some other query already located by (agent_id, issue_id), alongside the
+-- started_at that dates the comment delta.
 ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS issue_snapshot JSONB;
