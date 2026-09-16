@@ -13,7 +13,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
-import { isActiveWakeupRun } from "./wakeup-presentation";
+import { isActiveWakeupRun, useWakeupText } from "./wakeup-presentation";
 
 export function WakeupControl({
   wakeup,
@@ -31,6 +31,7 @@ export function WakeupControl({
   onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
 }) {
   const { t } = useT("issues");
+  const text = useWakeupText();
   const status = task?.status ?? wakeup.last_task_status;
   const canDisable =
     !wakeup.disabled_at &&
@@ -58,8 +59,13 @@ export function WakeupControl({
           })}
           onCheckedChange={(checked) => {
             if (checked)
-              void onEnable().catch(() =>
-                toast.error(t(($) => $.wakeups.enable_error)),
+              void onEnable().catch((err) =>
+                toast.error(
+                  text.error(
+                    err,
+                    t(($) => $.wakeups.enable_error),
+                  ),
+                ),
               );
             else onDisable();
           }}
@@ -85,8 +91,13 @@ export function WakeupControl({
           size="sm"
           disabled={pending || !canEnable}
           onClick={() =>
-            void onEnable({ rearm: true }).catch(() =>
-              toast.error(t(($) => $.wakeups.enable_error)),
+            void onEnable({ rearm: true }).catch((err) =>
+              toast.error(
+                text.error(
+                  err,
+                  t(($) => $.wakeups.enable_error),
+                ),
+              ),
             )
           }
         >
@@ -107,6 +118,7 @@ function RescheduleWakeup({
   onSubmit: (at: string) => Promise<void>;
 }) {
   const { t } = useT("issues");
+  const text = useWakeupText();
   const id = useId();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
@@ -145,8 +157,13 @@ function RescheduleWakeup({
             try {
               await onSubmit(date.toISOString());
               setOpen(false);
-            } catch {
-              setError(t(($) => $.wakeups.enable_error));
+            } catch (err) {
+              setError(
+                text.error(
+                  err,
+                  t(($) => $.wakeups.enable_error),
+                ),
+              );
             }
           }}
         >

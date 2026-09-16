@@ -464,7 +464,7 @@
     "scope": "범위",
     "issue": "작업",
     "trigger": "트리거",
-    "next": "다음 깨우기",
+    "next": "깨우기 상태",
     "enabled": "활성화",
     "all_triggers": "모든 트리거",
     "event": "이벤트",
@@ -481,7 +481,7 @@
     "select_page": "이 페이지의 활성 항목 선택",
     "load_error": "깨우기를 불러오지 못했습니다",
     "loading": "불러오는 중…",
-    "empty": "일치하는 깨우기가 없습니다",
+    "empty": "깨우기 규칙이 없습니다",
     "selected": "{{count}}개 선택됨",
     "disable_selected": "선택 항목 끄기",
     "clear": "선택 해제",
@@ -489,16 +489,22 @@
     "previous": "이전",
     "next_page": "다음",
     "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
-    "confirm_body": "이후 트리거를 중지하고 아직 수락되지 않은 실행을 취소합니다. 이미 시작된 실행은 계속됩니다. 작업의 실행 로그에서 중지할 수 있습니다.",
+    "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
     "cancel": "취소",
     "confirm": "끄기",
     "disabling": "끄는 중…",
     "batch_result": "꺼짐: {{succeeded}}개. 실패: {{failed}}개.",
     "scopes": {
-      "active": "활성 또는 실행 중",
+      "active": "깨우기 대기 또는 실행 중",
       "all": "전체",
       "disabled": "꺼짐",
       "ended": "종료됨"
-    }
+    },
+    "target_agent": "깨울 에이전트",
+    "wakeup_run": "깨운 후 실행",
+    "empty_filtered": "일치하는 깨우기가 없습니다",
+    "clear_filters": "필터 지우기",
+    "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
+    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다."
   }
 }

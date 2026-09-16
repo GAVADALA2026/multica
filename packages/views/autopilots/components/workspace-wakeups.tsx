@@ -49,7 +49,6 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { WakeupControl } from "../../issues/components/wakeup-control";
 import {
-  formatWakeupTime,
   isActiveWakeupRun,
   useWakeupText,
 } from "../../issues/components/wakeup-presentation";
@@ -75,28 +74,8 @@ function WakeupListRow({
   const disable = useDisableIssueWakeup(wsId, row.issue_id);
   const enable = useEnableIssueWakeup(wsId, row.issue_id);
   const Icon = row.kind === "event" ? Bell : Clock3;
-  const next = row.issue_closed
-    ? t(($) => $.wakeups.issue_closed)
-    : !row.enabled
-      ? row.disabled_at
-        ? ti(($) => $.wakeups.disabled_state)
-        : ti(($) => $.wakeups.completed)
-      : row.kind === "event"
-        ? ti(($) => $.wakeups.waiting_event)
-        : row.next_fire_at
-          ? formatWakeupTime(row.next_fire_at, locale, row.timezone)
-          : "—";
+  const next = text.state(row, row.issue_closed);
   const status = row.task?.status;
-  const labels: Record<string, string> = {
-    queued: ti(($) => $.wakeups.run_queued),
-    deferred: ti(($) => $.wakeups.run_deferred),
-    dispatched: ti(($) => $.wakeups.run_dispatched),
-    running: t(($) => $.wakeups.running),
-    waiting_local_directory: ti(($) => $.wakeups.run_waiting_local_directory),
-    completed: ti(($) => $.wakeups.completed),
-    failed: ti(($) => $.wakeups.run_failed),
-    cancelled: ti(($) => $.wakeups.run_cancelled),
-  };
   return (
     <TableRow data-state={selected ? "selected" : undefined}>
       <TableCell className="w-10 pl-4">
@@ -137,15 +116,17 @@ function WakeupListRow({
       <TableCell className="max-w-64">
         <span
           className="flex items-center gap-1.5"
-          title={row.event_types.map(text.eventName).join(", ")}
+          title={row.event_types
+            .map((event) =>
+              text.eventName(event, row.filter_agent_name || undefined),
+            )
+            .join(", ")}
         >
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {row.kind === "event" ? text.trigger(row) : text.schedule(row)}
-          </span>
+          <span className="line-clamp-2 break-words">{text.trigger(row)}</span>
         </span>
         <span className="block truncate text-caption text-muted-foreground">
-          {row.kind === "event" ? text.schedule(row) : row.timezone}
+          {row.kind === "event" ? text.frequency(row) : row.timezone}
         </span>
       </TableCell>
       <TableCell className="max-w-48">
@@ -179,7 +160,7 @@ function WakeupListRow({
                     : "text-muted-foreground"
                 }
               >
-                {labels[status ?? ""] ?? status}
+                {text.runState(status)}
               </span>
               <span className="block text-caption text-muted-foreground">
                 {row.active_runs > 1
@@ -199,7 +180,7 @@ function WakeupListRow({
             />
           </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <span className="text-muted-foreground">{text.runState()}</span>
         )}
       </TableCell>
       <TableCell className="pr-4">
@@ -222,7 +203,13 @@ function WakeupListRow({
             }
             onDisable={() =>
               disable.mutate(row.id, {
-                onError: () => toast.error(ti(($) => $.wakeups.disable_error)),
+                onError: (err) =>
+                  toast.error(
+                    text.error(
+                      err,
+                      ti(($) => $.wakeups.disable_error),
+                    ),
+                  ),
               })
             }
             onEnable={async (input = {}) => {
@@ -367,7 +354,7 @@ export function WorkspaceWakeups() {
             <SelectTrigger
               size="sm"
               className="max-w-48"
-              aria-label={t(($) => $.page.table.agent)}
+              aria-label={t(($) => $.wakeups.target_agent)}
             >
               <SelectValue />
             </SelectTrigger>
@@ -386,10 +373,17 @@ export function WorkspaceWakeups() {
           role="status"
           className={`px-4 py-2 text-caption ${batchResult.failed.length ? "text-destructive" : "text-muted-foreground"}`}
         >
-          {t(($) => $.wakeups.batch_result, {
-            succeeded: batchResult.succeeded,
-            failed: batchResult.failed.length,
-          })}
+          {t(
+            ($) =>
+              batchResult.failed.length
+                ? $.wakeups.batch_partial
+                : $.wakeups.batch_success,
+            {
+              count: batchResult.succeeded,
+              succeeded: batchResult.succeeded,
+              failed: batchResult.failed.length,
+            },
+          )}
         </p>
       )}
       {query.isError ? (
@@ -414,7 +408,40 @@ export function WorkspaceWakeups() {
           title={t(($) => $.wakeups.loading)}
         />
       ) : !rows.length ? (
-        <CollectionPageState icon={Bell} title={t(($) => $.wakeups.empty)} />
+        <CollectionPageState
+          icon={Bell}
+          title={t(($) =>
+            (query.data?.counts.all ?? 0) > 0 ||
+            filters.search ||
+            filters.kind !== "all" ||
+            filters.agent_id
+              ? $.wakeups.empty_filtered
+              : $.wakeups.empty,
+          )}
+          actions={
+            (filters.scope !== "all" ||
+              !!filters.search ||
+              filters.kind !== "all" ||
+              !!filters.agent_id) &&
+            (query.data?.counts.all ?? 0) > 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  change({
+                    scope: "all",
+                    kind: "all",
+                    search: "",
+                    agent_id: "",
+                  });
+                }}
+              >
+                {t(($) => $.wakeups.clear_filters)}
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <Table className="min-w-[1050px]">
@@ -440,10 +467,10 @@ export function WorkspaceWakeups() {
                   />
                 </TableHead>
                 <TableHead>{t(($) => $.wakeups.issue)}</TableHead>
-                <TableHead>{t(($) => $.page.table.agent)}</TableHead>
+                <TableHead>{t(($) => $.wakeups.target_agent)}</TableHead>
                 <TableHead>{t(($) => $.wakeups.trigger)}</TableHead>
                 <TableHead>{t(($) => $.wakeups.next)}</TableHead>
-                <TableHead>{t(($) => $.page.table.last_run)}</TableHead>
+                <TableHead>{t(($) => $.wakeups.wakeup_run)}</TableHead>
                 <TableHead className="pr-4 text-right">
                   {t(($) => $.wakeups.enabled)}
                 </TableHead>
@@ -495,10 +522,12 @@ export function WorkspaceWakeups() {
           </>
         )}
         <span className="ml-auto tabular-nums">
-          {t(($) => $.wakeups.results, {
-            count: query.data?.total ?? 0,
-            page: Math.floor(filters.offset / filters.limit) + 1,
-          })}
+          {query.data && !query.isError
+            ? t(($) => $.wakeups.results, {
+                count: query.data?.total ?? 0,
+                page: Math.floor(filters.offset / filters.limit) + 1,
+              })
+            : "—"}
         </span>
         <Button
           size="sm"

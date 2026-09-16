@@ -8,12 +8,13 @@ process, business-condition evaluator, or second run lifecycle.
 ## Product contract
 
 The shared web/Desktop issue sidebar lists event and time wakeups together,
-as two-line trigger/target summaries. Instructions, full filters, errors and
+as compact trigger/target summaries with a separate execution status when available.
+Instructions, full filters, errors and
 latest-run transcript are in the details popover. A directly visible toggle
 controls enabled configurations and restores manually disabled subscriptions or
-recurring schedules. Consumed one-shots offer Cancel pending run while unclaimed,
-then Resubscribe (events) or Reschedule (time), rather than a misleading toggle.
-Ended configurations are collapsed by default. A consumed one-shot remains
+recurring schedules. Consumed one-shots offer Cancel this execution while unclaimed,
+then Enable again (events) or Set a new time (time).
+Wakeup history is collapsed by default. A consumed one-shot remains
 in the current group while its run is queued, deferred, dispatched or running.
 Running or already
 claimed tasks use the normal Stop controls. Terminal lifecycle categories
@@ -21,7 +22,8 @@ claimed tasks use the normal Stop controls. Terminal lifecycle categories
 reopening does not reactivate them.
 
 Board and list activity cues prioritize current runs, mark wakeup-origin runs,
-and show future wakeups as a separate count. Without an active run they show the
+and show enabled wakeup rules as a separate count, not a forecast of executions.
+Without an active run they show the
 next scheduled time (including a date when needed) or waiting for an event.
 A shared workspace summary request contains exact enabled counts and at most
 three previews per issue, never prompts or history. Access follows agent
@@ -212,6 +214,17 @@ rule's last-task pointer refers to an older attempt. Configuration state and run
 state are separate columns. Rules on terminal issues appear under Ended once
 all their runs finish. Counts include only agents visible to the requester;
 private source-agent and source-run references are redacted.
+
+Trigger labels describe conditions (for example, "When Emacs's run succeeds"),
+not an outcome that has already happened. The monitored agent and specific run
+are distinct from the agent to wake. Multiple event types mean any of those events.
+Rule labels distinguish waiting, scheduled, turned off, triggered, expired, and
+stopped because the issue ended. A consumed one-shot is Triggered even when its
+execution is still queued or has failed. A manually disabled rule remains Turned
+off even if its previous execution succeeded. Execution results have their own
+labels and transcript entrypoint. Familiar schedules use natural language, while
+details retain the original cron and timezone. Disabled one-time rules retain
+their original scheduled time.
 
 The sidebar and inventory share enable, resubscribe, reschedule, and withdrawal
 controls. Batch disable is limited to explicitly selected enabled rules on the

@@ -127,9 +127,11 @@ it("shows consumed running work separately from its off state and keeps transcri
   mount();
   const row = await screen.findByRole("row", { name: /Issue a/ });
   expect(within(row).getByText("Running")).toBeVisible();
+  expect(within(row).getByText("Triggered")).toBeVisible();
+  expect(within(row).queryByText("Completed")).toBeNull();
   expect(within(row).getByRole("button", { name: "Transcript" })).toBeVisible();
   expect(
-    within(row).getByRole("button", { name: "Resubscribe" }),
+    within(row).getByRole("button", { name: "Enable again" }),
   ).toBeDisabled();
   expect(within(row).getByRole("checkbox")).toHaveAttribute(
     "aria-disabled",
@@ -154,13 +156,13 @@ it("confirms batch consequences and retains only failed selections for retry", a
   );
   fireEvent.click(screen.getByRole("button", { name: "Turn off selected" }));
   expect(
-    screen.getByText(/Runs that have already started will continue/),
+    screen.getByText(/Dispatched runs will continue/),
   ).toBeVisible();
   expect(disable).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Turn off" }),
   );
-  await screen.findByText("Turned off: 1. Failed: 1.");
+  await screen.findByText("Turned off 1; 1 failed. Failed items remain selected for retry.");
   expect(disable.mock.calls).toEqual([
     ["issue-a", "a"],
     ["issue-b", "b"],

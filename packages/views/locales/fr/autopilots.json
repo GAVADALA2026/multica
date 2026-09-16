@@ -467,7 +467,7 @@
     "scope": "Périmètre",
     "issue": "Tâche",
     "trigger": "Déclencheur",
-    "next": "Prochain réveil",
+    "next": "État du réveil",
     "enabled": "Activé",
     "all_triggers": "Tous les déclencheurs",
     "event": "Événement",
@@ -484,7 +484,7 @@
     "select_page": "Sélectionner les réveils activés sur cette page",
     "load_error": "Impossible de charger les réveils",
     "loading": "Chargement des réveils…",
-    "empty": "Aucun réveil correspondant",
+    "empty": "Aucune règle de réveil",
     "selected": "{{count}} sélectionnés",
     "disable_selected": "Désactiver la sélection",
     "clear": "Effacer la sélection",
@@ -492,16 +492,22 @@
     "previous": "Précédent",
     "next_page": "Suivant",
     "confirm_title": "Désactiver {{count}} réveils ?",
-    "confirm_body": "Les prochains déclenchements seront arrêtés et les exécutions non prises en charge seront retirées. Les exécutions déjà démarrées continueront ; arrêtez-les depuis le journal de la tâche.",
+    "confirm_body": "Les réveils futurs seront arrêtés. Les exécutions en file non confiées à un agent seront retirées. Les exécutions déjà confiées continueront ; arrêtez-les depuis le journal d’exécution.",
     "cancel": "Annuler",
     "confirm": "Désactiver",
     "disabling": "Désactivation…",
     "batch_result": "Désactivés : {{succeeded}}. Échecs : {{failed}}.",
     "scopes": {
-      "active": "Actifs",
+      "active": "En attente ou en cours",
       "all": "Tous",
       "disabled": "Désactivés",
       "ended": "Terminés"
-    }
+    },
+    "target_agent": "Agent à réveiller",
+    "wakeup_run": "Exécutions du réveil",
+    "empty_filtered": "Aucun réveil correspondant",
+    "clear_filters": "Effacer les filtres",
+    "batch_success": "{{count}} règles désactivées",
+    "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer."
   }
 }

@@ -179,7 +179,11 @@ export const IssueAgentActivityIndicator = memo(
           />
         )}
         {wakeupCount > 0 && (
-          <span className="text-micro tabular-nums text-muted-foreground">
+          <span
+            className="inline-flex items-center gap-1 text-micro tabular-nums text-muted-foreground"
+            title={t(($) => $.wakeups.upcoming, { count: wakeupCount })}
+          >
+            {!wakeupTriggered && <Bell className="size-3" aria-hidden="true" />}
             +{wakeupCount}
           </span>
         )}

@@ -31,6 +31,7 @@ import {
 function WakeupRow({
   wakeup,
   task,
+  sourceTask,
   pending,
   onDisable,
   onEnable,
@@ -38,6 +39,7 @@ function WakeupRow({
 }: {
   wakeup: IssueWakeup;
   task?: AgentTask;
+  sourceTask?: AgentTask;
   pending: boolean;
   onDisable: () => void;
   closed: boolean;
@@ -47,10 +49,6 @@ function WakeupRow({
   const text = useWakeupText();
   const status = task?.status ?? wakeup.last_task_status;
   const activeRun = isActiveWakeupRun(status);
-  const expired =
-    wakeup.kind === "at" &&
-    (!wakeup.next_fire_at ||
-      new Date(wakeup.next_fire_at).getTime() <= Date.now());
   const Icon = wakeup.kind === "event" ? Bell : Clock3;
   return (
     <div className="flex items-start gap-1" aria-busy={pending}>
@@ -68,26 +66,35 @@ function WakeupRow({
             aria-hidden="true"
           />
           <span className="min-w-0 flex-1 text-caption">
-            <span className="block truncate font-medium">
+            <span className="block line-clamp-2 break-words font-medium">
               {text.trigger(wakeup)}
             </span>
             <span className="block truncate text-muted-foreground">
               {t(($) => $.wakeups.wake_agent, { agent: wakeup.agent_name })} ·{" "}
-              {text.schedule(wakeup)}
-              {!wakeup.enabled && !activeRun && (
-                <>
-                  {" "}
-                  ·{" "}
-                  {status === "completed"
-                    ? t(($) => $.wakeups.completed)
-                    : expired
-                      ? t(($) => $.wakeups.expired)
-                      : wakeup.disabled_at
-                        ? t(($) => $.wakeups.disabled_state)
-                        : t(($) => $.wakeups.completed)}
-                </>
-              )}
+              {wakeup.kind === "event" || wakeup.kind === "at"
+                ? text.frequency(wakeup)
+                : text.state(wakeup, closed)}
+              {!wakeup.enabled &&
+                (wakeup.kind === "event" || wakeup.kind === "at") && (
+                  <> · {text.state(wakeup, closed)}</>
+                )}
             </span>
+            {status && (
+              <span className="block text-muted-foreground">
+                {t(
+                  ($) =>
+                    activeRun || wakeup.mode === "once"
+                      ? $.wakeups.execution_summary
+                      : $.wakeups.recent_execution,
+                  { state: text.runState(status) },
+                )}
+              </span>
+            )}
+            {(wakeup.disabled_at || closed) && activeRun && (
+              <span className="block text-muted-foreground">
+                {t(($) => $.wakeups.stopped_running)}
+              </span>
+            )}
             {wakeup.last_error && (
               <span className="block text-destructive">
                 {t(($) => $.wakeups.needs_attention)}
@@ -105,12 +112,24 @@ function WakeupRow({
             {t(($) => $.wakeups.wake_agent, { agent: wakeup.agent_name })} ·{" "}
             {text.schedule(wakeup)}
           </p>
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.wakeups.scope_title)}:{" "}
+            {t(($) => $.wakeups.scope_current)}
+          </p>
+          <p className="text-caption font-medium">
+            {t(($) => $.wakeups.instruction_title)}
+          </p>
           <p className="whitespace-pre-wrap break-words text-caption">
             {wakeup.instruction}
           </p>
           {wakeup.kind === "event" && (
             <p className="break-words text-caption text-muted-foreground">
-              {wakeup.event_types.map(text.eventName).join(", ")}
+              {t(($) => $.wakeups.any_event)}:{" "}
+              {wakeup.event_types
+                .map((event) =>
+                  text.eventName(event, wakeup.filter_agent_name || undefined),
+                )
+                .join("; ")}
             </p>
           )}
           {wakeup.filter_agent_id && (
@@ -118,6 +137,13 @@ function WakeupRow({
               {t(($) => $.wakeups.source_agent)}:{" "}
               {wakeup.filter_agent_name ?? wakeup.filter_agent_id}
             </p>
+          )}
+          {sourceTask && (
+            <TranscriptButton
+              task={sourceTask}
+              agentName={wakeup.filter_agent_name ?? ""}
+              title={t(($) => $.wakeups.source_run)}
+            />
           )}
           {wakeup.filter_task_id && (
             <p className="break-all text-caption text-muted-foreground">
@@ -131,6 +157,11 @@ function WakeupRow({
               })}{" "}
               · {wakeup.timezone}
             </p>
+          )}
+          {wakeup.cron_expression && (
+            <code className="block text-caption text-muted-foreground">
+              {wakeup.cron_expression} · {wakeup.timezone}
+            </code>
           )}
           {wakeup.last_error && (
             <p className="break-words text-caption text-destructive">
@@ -178,6 +209,7 @@ export function WakeupsSection({
     refetch,
   } = useQuery(issueWakeupsOptions(workspaceId, issueId));
   const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
+  const text = useWakeupText();
   const disable = useDisableIssueWakeup(workspaceId, issueId);
   const enable = useEnableIssueWakeup(workspaceId, issueId);
   if (!data.length && !isError) return null;
@@ -188,6 +220,7 @@ export function WakeupsSection({
       key={wakeup.id}
       wakeup={wakeup}
       task={wakeupRun(wakeup, tasks)}
+      sourceTask={tasks.find((task) => task.id === wakeup.filter_task_id)}
       pending={disable.isPending || enable.isPending}
       closed={closed}
       onEnable={async (input = {}) => {
@@ -199,7 +232,13 @@ export function WakeupsSection({
       }}
       onDisable={() =>
         disable.mutate(wakeup.id, {
-          onError: () => toast.error(t(($) => $.wakeups.disable_error)),
+          onError: (err) =>
+            toast.error(
+              text.error(
+                err,
+                t(($) => $.wakeups.disable_error),
+              ),
+            ),
           onSuccess: () => setHistoryOpen(true),
         })
       }

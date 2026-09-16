@@ -177,7 +177,7 @@ it("shows waiting and aggregate count even without an active run", () => {
   mockState.snapshot = [];
   mockState.summaries = [eventSummary];
   render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
-  expect(screen.getByText("Waiting for event")).toBeInTheDocument();
+  expect(screen.getByText("Waiting for trigger")).toBeInTheDocument();
   expect(screen.getByText("+1")).toBeInTheDocument();
   expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
 });
@@ -191,7 +191,7 @@ it("prioritizes active runs, marking wakeup origin separately from future count"
   expect(screen.getByText("Working")).toBeInTheDocument();
   expect(screen.getByLabelText("Triggered by wakeup")).toBeInTheDocument();
   expect(screen.getByText("+2")).toBeInTheDocument();
-  expect(screen.queryByText("Waiting for event")).toBeNull();
+  expect(screen.queryByText("Waiting for trigger")).toBeNull();
 });
 it("does not expose another issue's wakeups", () => {
   mockState.snapshot = [];
