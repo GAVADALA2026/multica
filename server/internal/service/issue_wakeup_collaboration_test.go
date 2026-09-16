@@ -122,6 +122,28 @@ func TestIssueWakeupNonterminalSubscriptionIsProspective(t *testing.T) {
 	}
 }
 
+func TestIssueWakeupReplyUnresolveKeepsSource(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	parent := f.Comment(t, util.UUIDToString(issue), "resolved thread", testutil.Cols{"resolved_at": testutil.Raw("now()"), "resolved_by_type": "member", "resolved_by_id": f.UserID})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", EventTypes: []string{"comment.unresolved"}, Instruction: "inspect reply"})
+	run := f.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')")})
+	f.Cleanup(t, "DELETE FROM comment WHERE source_task_id=$1", run)
+	f.Exec(t, "UPDATE agent_task_queue SET context=jsonb_build_object('wakeup_id',$2::text) WHERE id=$1", run, util.UUIDToString(w.ID))
+	s.Tasks.createAgentComment(context.Background(), issue, parseTestUUID(t, agent), "own reply", "comment", parseTestUUID(t, parent), parseTestUUID(t, run))
+	if n := f.Count(t, "SELECT count(*) FROM comment WHERE id=$1 AND resolved_at IS NULL", parent); n != 1 {
+		t.Fatal("reply did not reopen thread")
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1", w.ID); n != 0 {
+		t.Fatal("automatic unresolve caused self-loop")
+	}
+	f.Exec(t, "UPDATE agent_task_queue SET context='{}' WHERE id=$1", run)
+	f.Exec(t, "UPDATE comment SET resolved_at=now(),resolved_by_type='member',resolved_by_id=$2 WHERE id=$1", parent, f.UserID)
+	s.Tasks.createAgentComment(context.Background(), issue, parseTestUUID(t, agent), "external reply", "comment", parseTestUUID(t, parent), parseTestUUID(t, run))
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND payload->>'source_task_id'=$2", w.ID, run); n != 1 {
+		t.Fatalf("external reply not attributed: %d", n)
+	}
+}
+
 func TestIssueWakeupCollaborationTransactionAndActor(t *testing.T) {
 	f, s, issue, agent := wakeFixture(t)
 	comment := f.Comment(t, util.UUIDToString(issue), "original", testutil.Cols{"author_type": "agent", "author_id": agent})
