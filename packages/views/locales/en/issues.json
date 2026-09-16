@@ -946,6 +946,26 @@
     "run_failed": "Run failed",
     "run_cancelled": "Run cancelled",
     "comment_created": "New comment",
-    "status_changed": "Issue status changed"
+    "status_changed": "Issue status changed",
+    "run_queued": "Run queued",
+    "run_dispatched": "Run dispatched",
+    "run_started": "Run started",
+    "run_deferred": "Run deferred",
+    "run_waiting_local_directory": "Waiting for local directory",
+    "issue_updated": "Issue updated",
+    "assignee_changed": "Assignee changed",
+    "parent_changed": "Parent issue changed",
+    "project_changed": "Project changed",
+    "labels_changed": "Labels changed",
+    "properties_changed": "Properties changed",
+    "metadata_changed": "Metadata changed",
+    "comment_updated": "Comment edited",
+    "comment_deleted": "Comment deleted",
+    "comment_resolved": "Thread resolved",
+    "comment_unresolved": "Thread reopened",
+    "reaction_added": "Reaction added",
+    "reaction_removed": "Reaction removed",
+    "attachment_attached": "Attachment added",
+    "attachment_detached": "Attachment removed"
   }
 }

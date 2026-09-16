@@ -915,6 +915,26 @@
     "run_failed": "실행 실패",
     "run_cancelled": "실행 취소",
     "comment_created": "새 댓글",
-    "status_changed": "작업 상태 변경"
+    "status_changed": "작업 상태 변경",
+    "run_queued": "실행 대기열에 추가됨",
+    "run_dispatched": "실행 전달됨",
+    "run_started": "실행 시작됨",
+    "run_deferred": "실행 연기됨",
+    "run_waiting_local_directory": "로컬 디렉터리 대기 중",
+    "issue_updated": "태스크 업데이트됨",
+    "assignee_changed": "담당자 변경됨",
+    "parent_changed": "상위 태스크 변경됨",
+    "project_changed": "프로젝트 변경됨",
+    "labels_changed": "라벨 변경됨",
+    "properties_changed": "속성 변경됨",
+    "metadata_changed": "메타데이터 변경됨",
+    "comment_updated": "댓글 수정됨",
+    "comment_deleted": "댓글 삭제됨",
+    "comment_resolved": "스레드 해결됨",
+    "comment_unresolved": "스레드 다시 열림",
+    "reaction_added": "반응 추가됨",
+    "reaction_removed": "반응 삭제됨",
+    "attachment_attached": "첨부 파일 추가됨",
+    "attachment_detached": "첨부 파일 삭제됨"
   }
 }

@@ -30,6 +30,26 @@ export function WakeupsSection({ issueId }: { issueId: string }) {
           const task = tasks.find((item) => item.id === wakeup.last_task_id);
           const active = wakeup.enabled || (!wakeup.disabled_at && (!wakeup.last_task_id || (!!task && ["queued", "deferred"].includes(task.status))));
           const eventLabels: Record<string, string> = {
+            "task.queued": t(($) => $.wakeups.run_queued),
+            "task.dispatched": t(($) => $.wakeups.run_dispatched),
+            "task.started": t(($) => $.wakeups.run_started),
+            "task.deferred": t(($) => $.wakeups.run_deferred),
+            "task.waiting_local_directory": t(($) => $.wakeups.run_waiting_local_directory),
+            "issue.updated": t(($) => $.wakeups.issue_updated),
+            "issue.assignee_changed": t(($) => $.wakeups.assignee_changed),
+            "issue.parent_changed": t(($) => $.wakeups.parent_changed),
+            "issue.project_changed": t(($) => $.wakeups.project_changed),
+            "issue.labels_changed": t(($) => $.wakeups.labels_changed),
+            "issue.properties_changed": t(($) => $.wakeups.properties_changed),
+            "issue.metadata_changed": t(($) => $.wakeups.metadata_changed),
+            "comment.updated": t(($) => $.wakeups.comment_updated),
+            "comment.deleted": t(($) => $.wakeups.comment_deleted),
+            "comment.resolved": t(($) => $.wakeups.comment_resolved),
+            "comment.unresolved": t(($) => $.wakeups.comment_unresolved),
+            "reaction.added": t(($) => $.wakeups.reaction_added),
+            "reaction.removed": t(($) => $.wakeups.reaction_removed),
+            "attachment.attached": t(($) => $.wakeups.attachment_attached),
+            "attachment.detached": t(($) => $.wakeups.attachment_detached),
             "task.completed": t(($) => $.wakeups.run_completed), "task.failed": t(($) => $.wakeups.run_failed), "task.cancelled": t(($) => $.wakeups.run_cancelled),
             "comment.created": t(($) => $.wakeups.comment_created), "issue.status_changed": t(($) => $.wakeups.status_changed),
           };

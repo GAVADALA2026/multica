@@ -74,6 +74,9 @@ func (s *IssueWakeupService) Validate(in *WakeupInput, now time.Time) (pgtype.Ti
 			return bad("select at least one supported event")
 		}
 		for _, e := range in.EventTypes {
+			if slices.Contains(eventcontract.LifecycleTypes, e) {
+				return bad(e + " cannot wake its own issue; subscriptions require an existing, open issue")
+			}
 			if !slices.Contains(WakeupEventTypes, e) {
 				return bad("unsupported event: " + e)
 			}
@@ -267,8 +270,15 @@ func (s *IssueWakeupService) Save(ctx context.Context, issueID, member, source, 
 	}
 	// Subscribe and inspect the concrete source under the same row lock. This
 	// closes the already-terminal race even if the caller exits immediately.
-	if filterTask.Valid && slices.Contains(in.EventTypes, "task."+target.Status) {
-		payload, _ := json.Marshal(map[string]any{"task_id": util.UUIDToString(target.ID), "status": target.Status, "agent_id": util.UUIDToString(target.AgentID)})
+	if filterTask.Valid && slices.Contains([]string{"completed", "failed", "cancelled"}, target.Status) && slices.Contains(in.EventTypes, eventcontract.TaskEvent(target.Status)) {
+		payload, _ := json.Marshal(map[string]any{
+			"event_id": util.UUIDToString(target.ID) + ":" + target.Status, "event_type": eventcontract.TaskEvent(target.Status), "version": 1,
+			"occurred_at": target.CompletedAt, "observed_at": now, "registration_snapshot": true,
+			"workspace_id": util.UUIDToString(issue.WorkspaceID), "issue_id": util.UUIDToString(issue.ID),
+			"task_id": util.UUIDToString(target.ID), "source_task_id": util.UUIDToString(target.ID), "status": target.Status,
+			"agent_id": util.UUIDToString(target.AgentID), "actor_type": "agent", "actor_id": util.UUIDToString(target.AgentID),
+			"retry_of_task_id": target.RetryOfTaskID, "rerun_of_task_id": target.RerunOfTaskID,
+		})
 		_, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: out.ID, Revision: out.Revision, EventKey: util.UUIDToString(target.ID) + ":" + target.Status, EventType: "task." + target.Status, Payload: payload})
 		if err != nil {
 			return out, err

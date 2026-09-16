@@ -915,6 +915,26 @@
     "run_failed": "実行失敗",
     "run_cancelled": "実行キャンセル",
     "comment_created": "新しいコメント",
-    "status_changed": "タスクの状態変更"
+    "status_changed": "タスクの状態変更",
+    "run_queued": "実行がキューに追加",
+    "run_dispatched": "実行を配信",
+    "run_started": "実行開始",
+    "run_deferred": "実行を延期",
+    "run_waiting_local_directory": "ローカルディレクトリ待ち",
+    "issue_updated": "タスクを更新",
+    "assignee_changed": "担当者を変更",
+    "parent_changed": "親タスクを変更",
+    "project_changed": "プロジェクトを変更",
+    "labels_changed": "ラベルを変更",
+    "properties_changed": "プロパティを変更",
+    "metadata_changed": "メタデータを変更",
+    "comment_updated": "コメントを編集",
+    "comment_deleted": "コメントを削除",
+    "comment_resolved": "スレッドを解決",
+    "comment_unresolved": "スレッドを再開",
+    "reaction_added": "リアクションを追加",
+    "reaction_removed": "リアクションを削除",
+    "attachment_attached": "添付ファイルを追加",
+    "attachment_detached": "添付ファイルを削除"
   }
 }

@@ -915,6 +915,26 @@
     "run_failed": "运行失败",
     "run_cancelled": "运行取消",
     "comment_created": "新增评论",
-    "status_changed": "任务状态变化"
+    "status_changed": "任务状态变化",
+    "run_queued": "运行已排队",
+    "run_dispatched": "运行已分发",
+    "run_started": "运行已开始",
+    "run_deferred": "运行已延后",
+    "run_waiting_local_directory": "等待本地目录",
+    "issue_updated": "任务已更新",
+    "assignee_changed": "负责人变更",
+    "parent_changed": "父任务变更",
+    "project_changed": "项目变更",
+    "labels_changed": "标签变更",
+    "properties_changed": "属性变更",
+    "metadata_changed": "元数据变更",
+    "comment_updated": "评论已编辑",
+    "comment_deleted": "评论已删除",
+    "comment_resolved": "讨论已解决",
+    "comment_unresolved": "讨论重新打开",
+    "reaction_added": "新增表态",
+    "reaction_removed": "移除表态",
+    "attachment_attached": "关联附件",
+    "attachment_detached": "移除附件"
   }
 }

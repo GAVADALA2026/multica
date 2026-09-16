@@ -946,6 +946,26 @@
     "run_failed": "Échec de l’exécution",
     "run_cancelled": "Exécution annulée",
     "comment_created": "Nouveau commentaire",
-    "status_changed": "Statut de la tâche modifié"
+    "status_changed": "Statut de la tâche modifié",
+    "run_queued": "Exécution en attente",
+    "run_dispatched": "Exécution envoyée",
+    "run_started": "Exécution démarrée",
+    "run_deferred": "Exécution différée",
+    "run_waiting_local_directory": "En attente du répertoire local",
+    "issue_updated": "Tâche mise à jour",
+    "assignee_changed": "Responsable modifié",
+    "parent_changed": "Tâche parente modifiée",
+    "project_changed": "Projet modifié",
+    "labels_changed": "Étiquettes modifiées",
+    "properties_changed": "Propriétés modifiées",
+    "metadata_changed": "Métadonnées modifiées",
+    "comment_updated": "Commentaire modifié",
+    "comment_deleted": "Commentaire supprimé",
+    "comment_resolved": "Discussion résolue",
+    "comment_unresolved": "Discussion rouverte",
+    "reaction_added": "Réaction ajoutée",
+    "reaction_removed": "Réaction supprimée",
+    "attachment_attached": "Pièce jointe ajoutée",
+    "attachment_detached": "Pièce jointe retirée"
   }
 }

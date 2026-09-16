@@ -49,12 +49,57 @@ every historical tick. All runs retain normal comment delivery, including checks
 that find no change. CI can be polled by the agent; CI push events are not claimed
 as supported by this version.
 
+## Event catalog
+
+`multica issue wakeup events` lists the 25 supported issue-scoped subscriptions:
+
+| Area | Events |
+| --- | --- |
+| Run | `task.queued`, `task.dispatched`, `task.started`, `task.deferred`, `task.waiting_local_directory`, `task.completed`, `task.failed`, `task.cancelled` |
+| Issue | `issue.updated`, `issue.status_changed`, `issue.assignee_changed`, `issue.parent_changed`, `issue.project_changed`, `issue.labels_changed`, `issue.properties_changed`, `issue.metadata_changed` |
+| Comment | `comment.created`, `comment.updated`, `comment.deleted`, `comment.resolved`, `comment.unresolved` |
+| Reaction | `reaction.added`, `reaction.removed` (issue or comment) |
+| Attachment | `attachment.attached`, `attachment.detached` (issue or comment) |
+
+`task.started` means the persisted run entered `running`. Retries emit a new
+`task.queued` with `retry_of_task_id`; manual reruns carry `rerun_of_task_id`.
+Queue/defer transitions may happen repeatedly. Unchanged writes, bookkeeping
+revisions, duplicate reactions, and pruning an already-deleted comment do not
+produce another fact. Attachment events describe binding to an issue/comment,
+not uploading an unbound file; moving a file produces detach and attach facts.
+
+`issue.updated` includes `changed_fields` for meaningful issue fields, excluding
+position, revision and timestamps. Specialized issue events can accompany it;
+subscribing to both produces two inputs that the normal dispatcher coalesces.
+Metadata/properties events include changed keys, never their values. Comment
+events contain comment/thread/parent references, not bodies. Attachment events
+contain references, not private URLs or filenames. Agents pull current state to
+decide what to do. There is no business-condition evaluator.
+
+Each newly captured fact includes `event_id`, `event_type`, `version`,
+`occurred_at`, workspace/issue IDs, actor identity and optional source run/agent.
+The already-terminal registration snapshot additionally has `observed_at` and
+`registration_snapshot`; its `occurred_at` can be null for historical runs with
+no completion timestamp. Older queued payloads remain readable.
+
+`--filter-agent-id` matches the run's agent for run events and the actual source
+agent for mutation events. Editing another agent's comment does not make that
+agent the editor; payloads distinguish actor from author. `--task-id` accepts
+only run events. Filters never expand the subscription beyond its current issue.
+
+The platform lifecycle names `issue.created` and `issue.deleted` are listed
+separately and rejected for self-wakeups: subscription requires an existing
+issue, and deleting it withdraws its work. Workspace/cross-issue subscriptions,
+external CI push events, and expanding the plugin subscription contract are
+outside this version. Terminal issue transitions disable wakeups rather than
+starting a final run on the closed issue.
+
 ## Implementation
 
 - `pkg/eventcontract` owns stable business-event names independently of plugins.
   Plugin constants alias the existing names, preserving their payload contract.
 - `issue_wakeup` stores configuration and `issue_wakeup_receipt` stores matching
-  inputs. Task terminal transitions, comment creation and issue status changes
+  inputs. Run transitions and the collaboration changes in the catalog above
   capture matching receipts in the source transaction. SQL capture hooks cover
   service, scheduler and HTTP writers without a best-effort in-memory hop. They
   do not build a general event archive or evaluate business predicates.
@@ -68,9 +113,10 @@ as supported by this version.
 - Event inputs merge into an unclaimed task without losing their references.
   Time inputs replace the pending time note with the newest signal. A claimed
   prompt is immutable; later input becomes at most one subsequent queued task.
-- Direct comments and task/status events from the same wakeup's run are ignored.
-  The trusted task source of HTTP issue updates is transaction-local; a client
-  cannot choose it through the issue request body.
+- Mutations and run events from the same wakeup's run are ignored. HTTP mutation
+  transactions stamp server-resolved actor and source task identity in local
+  PostgreSQL settings; those settings do not survive connection reuse. A client
+  cannot choose source identity through a request body or an untrusted task header.
 - `context.wakeup_id` and `context.wakeup_revision` identify the new trigger.
   Its instruction/facts travel in the ordinary per-turn handoff note. Daemon
   wakeup prompts preserve this instruction even when a delivery thread exists.
@@ -92,9 +138,25 @@ Deploy the updated CLI and daemon with the server to recognize the wakeup comman
 and per-turn prompt. Before rollback, disable/drain wakeups; do not remove their
 configuration tables while tasks still reference them.
 
+Migration 502 adds capture hooks without indexes, table rewrites, or foreign
+keys. Deploy it before admitting subscriptions to the expanded catalog. Older
+servers still dispatch the added receipts and older sidebars fall back to raw
+event names; only updated servers accept create/update with new event types.
+During a rolling upgrade, mutation attribution from older HTTP servers is best
+effort (some older write paths provide no source identity). Keep new event
+subscriptions disabled until all mutation-serving instances are upgraded, so
+their own writes cannot feed back without attribution. Before rolling application
+code back, disable subscriptions using the expanded catalog; before rolling the
+capture migration back, drain their inputs as well. The down migration restores
+the original five-event capture behavior and retains configuration/receipt data.
+
 Integration coverage includes transaction rollback, already-terminal registration,
 source scope, one-shot deduplication, independent comment/assign input, merging,
 self-loop suppression, custom terminal statuses, reopen behavior, offline timers,
 configuration replacement, revoked permission at enqueue/claim, and retry prompt
 inheritance. UI tests cover disabling and consumed one-shot state; API response
 schemas reject malformed wakeup state rather than presenting an empty list.
+Expanded-event integration tests execute writes for every advertised event and
+cover attachment rebinding, repeated queue transitions, tombstone cleanup,
+meaningful-change suppression, rollback, actor/author distinction, forged source
+headers, metadata redaction and self-loop suppression on HTTP mutations.

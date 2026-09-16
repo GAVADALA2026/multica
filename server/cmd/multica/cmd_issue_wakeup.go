@@ -17,7 +17,7 @@ func init() { issueCmd.AddCommand(newIssueWakeupCommand()) }
 func newIssueWakeupCommand() *cobra.Command {
 	wake := &cobra.Command{Use: "wakeup", Short: "Manage event and time wakeups that start ordinary runs"}
 	wake.AddCommand(&cobra.Command{Use: "events", Short: "List supported event types and filters", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "scope": "current issue", "filters": []string{"filter_agent_id", "filter_task_id (task events only)"}, "modes": []string{"once (default)", "continuous"}})
+		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "platform_only_event_types": eventcontract.LifecycleTypes, "platform_only_reason": "Creation precedes subscription; deletion withdraws the issue's wakeups. Cross-issue subscriptions are not supported.", "scope": "current issue", "filters": []string{"filter_agent_id", "filter_task_id (task events only)"}, "modes": []string{"once (default)", "continuous"}})
 	}})
 	for _, action := range []string{"list", "get", "disable", "create", "update"} {
 		action := action
