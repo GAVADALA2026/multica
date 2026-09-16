@@ -32,3 +32,31 @@ unresolved reachable vulnerability.
 
 Every Go binary retains its compiler version in the standard Go build metadata;
 use `go version -m <binary>` when auditing a downloaded release artifact.
+
+## macOS Desktop artifacts
+
+The tag-triggered Release workflow publishes the CLI and creates the GitHub
+Release, but signing and notarizing the macOS Desktop application requires a
+maintainer's macOS keychain. After the Release contains both
+`multica_darwin_amd64.tar.gz` and `multica_darwin_arm64.tar.gz`, run:
+
+```bash
+scripts/release-desktop.sh v0.18.4
+```
+
+The script requires `gh`, Go, Node.js, pnpm, and a matching Developer ID
+Application certificate. It reads `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`,
+and `APPLE_TEAM_ID` from `~/.multica/release.env` by default; set
+`MULTICA_RELEASE_ENV` to use another file. The credential file must not be
+accessible by group or others (`chmod 600`) and must never be committed.
+
+The script checks out the exact tag, installs locked dependencies, delegates
+the actual clean/build/sign/notarize/upload work to the Desktop package script,
+verifies all ten expected macOS assets, and restores the caller's original
+branch or detached commit on every exit path.
+
+If any macOS Desktop asset already exists, the script fails closed rather than
+overwriting or deleting release state. Inspect the Release first; if the
+previous attempt was incomplete, explicitly delete its macOS Desktop assets
+before retrying. A failed upload can therefore be recovered without silently
+mixing artifacts from separate builds.

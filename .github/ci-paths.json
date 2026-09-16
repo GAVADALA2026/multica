@@ -93,6 +93,8 @@
     "scripts/helm-config.test.sh",
     "scripts/entrypoint.test.sh",
     "scripts/makefile-build.test.sh",
+    "scripts/release-desktop.sh",
+    "scripts/release-desktop.test.sh",
     "deploy/helm/**",
     "docker/entrypoint.sh",
     ".env.example",
