@@ -40,7 +40,10 @@
     "archived_title": "アーカイブ済み",
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",
-    "actions_aria": "通知の操作"
+    "actions_aria": "通知の操作",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中…",
+    "retry": "再試行"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
@@ -107,6 +110,7 @@
     "archive_all_read_failed": "既読の項目をアーカイブできませんでした",
     "archive_completed_failed": "完了した項目をアーカイブできませんでした",
     "unarchive_failed": "アーカイブ解除に失敗しました",
-    "archived_load_failed": "アーカイブ済み通知を読み込めませんでした"
+    "archived_load_failed": "アーカイブ済み通知を読み込めませんでした",
+    "filters_load_failed": "フィルターを読み込めませんでした"
   }
 }

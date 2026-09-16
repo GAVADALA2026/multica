@@ -88,11 +88,16 @@ const ITEMS = [
 function renderMenu({
   items = ITEMS,
   priorityFilterSupport = "supported",
+  archived = false,
+  getArchivedInboxFacets = vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, unreadCount: 0 })),
 }: {
   items?: InboxItem[];
   priorityFilterSupport?: InboxPriorityFilterSupport;
+  archived?: boolean;
+  getArchivedInboxFacets?: ReturnType<typeof vi.fn>;
 } = {}) {
   setApiInstance({
+    getArchivedInboxFacets,
     listIssueStatuses: async () => ({
       statuses: BUILT_IN_STATUS_ORDER.map(statusEntry),
       categories: [],
@@ -108,6 +113,7 @@ function renderMenu({
         wsId="ws-1"
         items={items}
         priorityFilterSupport={priorityFilterSupport}
+        archived={archived}
       />
     </QueryClientProvider>,
   );
@@ -131,6 +137,15 @@ afterEach(() => {
 });
 
 describe("InboxFilterMenu", () => {
+  it("loads full-archive facets only when opened, including an actor absent from loaded rows", async () => {
+    const getArchivedInboxFacets = vi.fn(async () => ({ statuses: { done: 251 }, priorities: { high: 251 }, actors: { "member:alice": 251 }, unreadCount: 0 }));
+    renderMenu({ items: [], archived: true, getArchivedInboxFacets });
+    expect(getArchivedInboxFacets).not.toHaveBeenCalled();
+    await openSubmenu("From");
+    expect(await screen.findByRole("menuitemcheckbox", { name: /Alice.*251/ })).toBeTruthy();
+    expect(getArchivedInboxFacets).toHaveBeenCalledTimes(1);
+  });
+
   it("selects a status and exposes the active count on the trigger", async () => {
     renderMenu();
     await openSubmenu("Status");
