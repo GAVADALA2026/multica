@@ -63,7 +63,10 @@ Event subscriptions default to `once`; `--mode continuous` keeps listening.
 A concrete source run must belong to this issue. Registration checks its current
 terminal state under a lock, so a run that just finished is not missed. A busy
 source run returns 409 and asks the caller to retry; registration never waits
-on a source lock while holding the issue lock. Broad
+on a source lock while holding the issue lock. The server returns the stable
+`wakeup_source_busy` code for this rolled-back conflict; CLI create retries it
+once after 250ms. Other conflicts and ambiguous network failures are not retried.
+Broad
 agent filters observe future facts, without replaying history or following retry
 chains. `--parent COMMENT` preserves the original result-delivery thread.
 
@@ -169,7 +172,7 @@ Deploy the updated CLI and daemon with the server to recognize the wakeup comman
 and per-turn prompt. Before rollback, disable/drain wakeups; do not remove their
 configuration tables while tasks still reference them.
 
-Migration 506 adds capture hooks without indexes, table rewrites, or foreign
+Migration 511 adds capture hooks without indexes, table rewrites, or foreign
 keys. Deploy it before admitting subscriptions to the expanded catalog. Older
 servers still dispatch the added receipts and older sidebars fall back to raw
 event names; only updated servers accept create/update with new event types.
@@ -181,11 +184,31 @@ code back, disable subscriptions using the expanded catalog; before rolling the
 capture migration back, drain their inputs as well. The down migration restores
 the original five-event capture behavior and retains configuration/receipt data.
 
-Migration 507 adds a concurrent partial index for enabled workspace summaries.
+Migration 512 adds a concurrent partial index for enabled workspace summaries.
 It can be rolled back independently of configuration data. Deploy the server
 before the UI: an older server lacks the summary endpoint, so cards cannot
 show future wakeups until it is upgraded. Existing task activity still works.
 New detail fields are optional for rolling compatibility.
+
+Migration 514 excludes the registering run's own events, in addition to events
+from runs produced by the same rule. Human/external events with no source run
+still match. Apply this migration before enabling broad agent-created subscriptions.
+Rolling it back restores the previous capture function without rewriting data;
+disable affected subscriptions first to avoid registration feedback.
+
+This unmerged branch's migrations use prefixes 500–514 to follow main's 495–499.
+Local databases that already applied the previous 495–508 wakeup filenames must
+rename those exact `schema_migrations.version` entries by +5 before updating.
+Do not rename main's migrations or rerun the table-creation migration. Fresh
+databases use the normal migration runner.
+
+Dispatch keeps the instruction and recent evidence within a 40,000-byte prompt
+budget. Large or older details are explicitly condensed; original receipts remain
+linked to the task and are consumed atomically with its queue update. A claimed
+prompt is immutable, so further inputs remain pending until it starts or recovers.
+After the normal 90-second claim recovery window with an expired/absent prepare
+lease, `last_error` exposes that wait. Existing runtime claim recovery owns retries;
+wakeups do not add another execution timeout. Timer progress advances while waiting.
 
 Integration coverage includes transaction rollback, already-terminal registration,
 source scope, one-shot deduplication, independent comment/assign input, merging,

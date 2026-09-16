@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
@@ -33,6 +36,7 @@ func newIssueWakeupCommand() *cobra.Command {
 		c.Flags().String("output", "json", "Output format (json or table)")
 		if action == "create" || action == "update" {
 			c.Long = "Create or replace the complete configuration. Events default to once; every/cron use continuous. Updating explicitly re-enables the configuration. Runs use normal comment delivery."
+			c.Long += " To wait for another agent, prefer --task-id for one run or --filter-agent-id for that agent. Without a source filter, all matching events on this issue can wake the target."
 			c.Flags().String("agent-id", "", "Agent to wake (defaults to authenticated agent)")
 			c.Flags().String("instruction", "", "Instruction for the next run")
 			c.Flags().String("instruction-file", "", "Read instruction from a UTF-8 file")
@@ -120,6 +124,19 @@ func runIssueWakeup(cmd *cobra.Command, args []string, action string) error {
 			err = client.PutJSON(ctx, path+"/"+url.PathEscape(args[1]), body, &row)
 		} else {
 			err = client.PostJSON(ctx, path, body, &row)
+			if isWakeupSourceBusy(err) {
+				// The server reports this only after rolling back the NOWAIT
+				// transaction. Retry once after a short commit window; never retry
+				// ambiguous transport failures or other non-idempotent POST errors.
+				timer := time.NewTimer(250 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-timer.C:
+					err = client.PostJSON(ctx, path, body, &row)
+				}
+			}
 		}
 		result = row
 	}
@@ -143,4 +160,15 @@ func runIssueWakeup(cmd *cobra.Command, args []string, action string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func isWakeupSourceBusy(err error) bool {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return false
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	return json.Unmarshal([]byte(httpErr.Body), &body) == nil && body.Code == "wakeup_source_busy"
 }

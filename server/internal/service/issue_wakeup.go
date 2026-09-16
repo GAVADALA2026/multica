@@ -529,30 +529,36 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	if len(receipts) == 0 {
 		return tx.Commit(ctx)
 	}
-	var b strings.Builder
-	b.WriteString("Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\nTrigger facts (read current state before deciding what to do):\n")
 	ids := make([]pgtype.UUID, 0, len(receipts))
 	for _, r := range receipts {
 		ids = append(ids, r.ID)
-		fmt.Fprintf(&b, "%s %s\n", r.EventType, string(r.Payload))
 	}
-	note := b.String()
 	if w.Mode == "once" {
 		enabled = false
 	}
 	task, err := q.FindPendingWakeupTask(ctx, util.UUIDToString(w.ID))
 	if err == nil && task.Status == "dispatched" {
-		return tx.Commit(ctx)
-	} // a claimed prompt is immutable; retry receipts after it starts
-	if err == nil && w.Kind == "event" && len(task.HandoffNote.String) > 40000 {
+		// A claimed prompt is immutable. Recovery belongs to the ordinary
+		// claim/prepare lease, not a second wakeup-specific task timeout.
+		var waiting pgtype.Text
+		if task.DispatchedAt.Valid && now.Sub(task.DispatchedAt.Time) >= claimResponseRecoveryWindow &&
+			(!task.PrepareLeaseExpiresAt.Valid || !task.PrepareLeaseExpiresAt.Time.After(now)) {
+			waiting = pgtype.Text{String: "Waiting for claimed run " + util.UUIDToString(task.ID) + " to start or recover; new trigger inputs are retained.", Valid: true}
+		}
+		// Persist timer progress even while waiting; do not regenerate each
+		// elapsed tick. Keep once enabled until its pending input is assigned.
+		if err := q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: w.Enabled, NextFireAt: next, LastError: waiting}); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
+	previous := ""
+	if err == nil && w.Kind == "event" {
+		previous = task.HandoffNote.String
+	}
+	note := buildWakeupNote(w, previous, receipts)
 	if err == nil {
-		if w.Kind == "event" {
-			task, err = q.AppendWakeupEvidence(ctx, db.AppendWakeupEvidenceParams{ID: task.ID, Evidence: note})
-		} else {
-			task, err = q.ReplaceWakeupTimeEvidence(ctx, db.ReplaceWakeupTimeEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: note, Valid: true}})
-		}
+		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: note, Valid: true}})
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginNamed); err != nil {
 			return err

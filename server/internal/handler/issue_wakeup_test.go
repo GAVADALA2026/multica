@@ -36,6 +36,15 @@ func TestIssueWakeupAPIAndTrustedOrigin(t *testing.T) {
 	if result.SourceTaskID.Valid || uuidToString(result.CreatedBy) != testUserID {
 		t.Fatal("untrusted source identity")
 	}
+	update := withURLParams(newRequest("PUT", "/", body), "id", issue, "wakeupID", uuidToString(result.ID))
+	updated := httptest.NewRecorder()
+	testHandler.CreateIssueWakeup(updated, update)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update %d: %s", updated.Code, updated.Body.String())
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
 	req = withURLParam(newRequest("GET", "/", nil), "id", issue)
 	rec = httptest.NewRecorder()
 	testHandler.ListIssueWakeups(rec, req)

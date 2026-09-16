@@ -56,9 +56,6 @@ UPDATE issue_wakeup_receipt SET processed_at=now() WHERE wakeup_id= @id AND proc
 UPDATE issue_wakeup SET enabled= @enabled,next_fire_at=sqlc.narg(next_fire_at),last_task_id=COALESCE(sqlc.narg(last_task_id),last_task_id),last_error=sqlc.narg(last_error),updated_at=clock_timestamp() WHERE id= @id;
 -- name: FindPendingWakeupTask :one
 SELECT * FROM agent_task_queue WHERE context->>'wakeup_id'= @wakeup_id::text AND status IN ('queued','dispatched') ORDER BY created_at LIMIT 1 FOR UPDATE;
--- name: AppendWakeupEvidence :one
-UPDATE agent_task_queue SET handoff_note=COALESCE(handoff_note,'')||E'\n'|| @evidence::text
-WHERE id= @id AND status='queued' RETURNING *;
 
 -- name: CreateWakeupTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -116,7 +113,7 @@ RETURNING *;
 -- name: LocklessWakeup :one
 SELECT * FROM issue_wakeup WHERE id= @id;
 
--- name: ReplaceWakeupTimeEvidence :one
+-- name: ReplaceWakeupEvidence :one
 UPDATE agent_task_queue SET handoff_note=sqlc.narg(handoff_note) WHERE id= @id AND status='queued' RETURNING *;
 -- name: NoteWakeupFailure :exec
 UPDATE issue_wakeup SET last_error=sqlc.narg(last_error),updated_at=clock_timestamp() WHERE id= @id;

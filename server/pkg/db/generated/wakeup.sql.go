@@ -34,82 +34,6 @@ func (q *Queries) AdvanceIssueWakeup(ctx context.Context, arg AdvanceIssueWakeup
 	return err
 }
 
-const appendWakeupEvidence = `-- name: AppendWakeupEvidence :one
-UPDATE agent_task_queue SET handoff_note=COALESCE(handoff_note,'')||E'\n'|| $1::text
-WHERE id= $2 AND status='queued' RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
-`
-
-type AppendWakeupEvidenceParams struct {
-	Evidence string      `json:"evidence"`
-	ID       pgtype.UUID `json:"id"`
-}
-
-func (q *Queries) AppendWakeupEvidence(ctx context.Context, arg AppendWakeupEvidenceParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, appendWakeupEvidence, arg.Evidence, arg.ID)
-	var i AgentTaskQueue
-	err := row.Scan(
-		&i.ID,
-		&i.AgentID,
-		&i.IssueID,
-		&i.Status,
-		&i.Priority,
-		&i.DispatchedAt,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.Result,
-		&i.Error,
-		&i.CreatedAt,
-		&i.Context,
-		&i.RuntimeID,
-		&i.SessionID,
-		&i.WorkDir,
-		&i.TriggerCommentID,
-		&i.ChatSessionID,
-		&i.AutopilotRunID,
-		&i.Attempt,
-		&i.MaxAttempts,
-		&i.ParentTaskID,
-		&i.FailureReason,
-		&i.TriggerSummary,
-		&i.ForceFreshSession,
-		&i.IsLeaderTask,
-		&i.WaitReason,
-		&i.InitiatorUserID,
-		&i.HandoffNote,
-		&i.PrepareLeaseExpiresAt,
-		&i.SquadID,
-		&i.RuntimeMcpOverlay,
-		&i.EscalationForTaskID,
-		&i.FireAt,
-		&i.OriginatorUserID,
-		&i.RuntimeConnectedApps,
-		&i.CoalescedCommentIds,
-		&i.DeliveredCommentIds,
-		&i.ChatInputTaskID,
-		&i.ChatFinalizeDeferredAt,
-		&i.OriginatorSource,
-		&i.DelegatedFromTaskID,
-		&i.RetryOfTaskID,
-		&i.RerunOfTaskID,
-		&i.RuleVersionID,
-		&i.TriggerEvidenceKind,
-		&i.TriggerEvidenceRefID,
-		&i.AccountableUserID,
-		&i.SessionRolloutMissing,
-		&i.RetiredSessionID,
-		&i.QuickActionsDisabled,
-		&i.RegenerateQuickActionsFor,
-		&i.BranchName,
-		&i.DurableWorkDir,
-		&i.ChannelContextRevision,
-		&i.CommentThreadID,
-		&i.CancelledByType,
-		&i.CancelledByID,
-		&i.CancelledByName,
-	)
-	return i, err
-}
-
 const cancelUnstartedWakeupTasks = `-- name: CancelUnstartedWakeupTasks :many
 UPDATE agent_task_queue SET status='cancelled',completed_at=now(),error='Wakeup disabled or updated'
 WHERE context->>'wakeup_id'= $1::text AND status IN ('queued','deferred') AND started_at IS NULL RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
@@ -1077,17 +1001,17 @@ func (q *Queries) RecordWakeupReceipt(ctx context.Context, arg RecordWakeupRecei
 	return i, err
 }
 
-const replaceWakeupTimeEvidence = `-- name: ReplaceWakeupTimeEvidence :one
+const replaceWakeupEvidence = `-- name: ReplaceWakeupEvidence :one
 UPDATE agent_task_queue SET handoff_note=$1 WHERE id= $2 AND status='queued' RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
 `
 
-type ReplaceWakeupTimeEvidenceParams struct {
+type ReplaceWakeupEvidenceParams struct {
 	HandoffNote pgtype.Text `json:"handoff_note"`
 	ID          pgtype.UUID `json:"id"`
 }
 
-func (q *Queries) ReplaceWakeupTimeEvidence(ctx context.Context, arg ReplaceWakeupTimeEvidenceParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, replaceWakeupTimeEvidence, arg.HandoffNote, arg.ID)
+func (q *Queries) ReplaceWakeupEvidence(ctx context.Context, arg ReplaceWakeupEvidenceParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, replaceWakeupEvidence, arg.HandoffNote, arg.ID)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,

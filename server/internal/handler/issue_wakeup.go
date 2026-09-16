@@ -99,7 +99,7 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 func wakeupError(w http.ResponseWriter, err error) {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
-		writeError(w, 409, "source run is changing; retry registration")
+		writeErrorCode(w, 409, "wakeup_source_busy", "source run is changing; retry registration")
 		return
 	}
 	switch {
@@ -215,7 +215,11 @@ func (h *Handler) CreateIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, result)
+	status := http.StatusCreated
+	if existingID.Valid {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, result)
 }
 
 func (h *Handler) DisableIssueWakeup(w http.ResponseWriter, r *http.Request) {
