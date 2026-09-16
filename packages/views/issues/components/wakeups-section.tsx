@@ -51,25 +51,30 @@ function WakeupRow({
   const activeRun = isActiveWakeupRun(status);
   const Icon = wakeup.kind === "event" ? Bell : Clock3;
   return (
-    <div className="flex items-start gap-1" aria-busy={pending}>
+    <div
+      className="grid grid-cols-[minmax(0,1fr)_auto]"
+      aria-busy={pending}
+    >
       <Popover>
         <PopoverTrigger
           render={
             <button
               type="button"
-              className="flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-1.5 text-left text-caption hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
-          <Icon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <span className="min-w-0 flex-1 text-caption">
-            <span className="block line-clamp-2 break-words font-medium">
+          <span className="flex min-h-8 min-w-0 items-center gap-2 pl-2 pr-1">
+            <Icon
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="truncate font-medium">
               {text.trigger(wakeup)}
             </span>
-            <span className="block truncate text-muted-foreground">
+          </span>
+          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2">
+            <span className="block text-muted-foreground">
               {t(($) => $.wakeups.wake_agent, { agent: wakeup.agent_name })} ·{" "}
               {wakeup.kind === "event" || wakeup.kind === "at"
                 ? text.frequency(wakeup)
@@ -180,14 +185,16 @@ function WakeupRow({
           )}
         </PopoverContent>
       </Popover>
-      <WakeupControl
-        wakeup={wakeup}
-        task={task}
-        pending={pending}
-        closed={closed}
-        onDisable={onDisable}
-        onEnable={onEnable}
-      />
+      <div className="z-10 col-start-2 row-start-1 self-start">
+        <WakeupControl
+          wakeup={wakeup}
+          task={task}
+          pending={pending}
+          closed={closed}
+          onDisable={onDisable}
+          onEnable={onEnable}
+        />
+      </div>
     </div>
   );
 }
