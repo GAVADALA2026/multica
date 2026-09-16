@@ -167,7 +167,7 @@ Deploy the updated CLI and daemon with the server to recognize the wakeup comman
 and per-turn prompt. Before rollback, disable/drain wakeups; do not remove their
 configuration tables while tasks still reference them.
 
-Migration 502 adds capture hooks without indexes, table rewrites, or foreign
+Migration 506 adds capture hooks without indexes, table rewrites, or foreign
 keys. Deploy it before admitting subscriptions to the expanded catalog. Older
 servers still dispatch the added receipts and older sidebars fall back to raw
 event names; only updated servers accept create/update with new event types.
@@ -179,7 +179,7 @@ code back, disable subscriptions using the expanded catalog; before rolling the
 capture migration back, drain their inputs as well. The down migration restores
 the original five-event capture behavior and retains configuration/receipt data.
 
-Migration 503 adds a concurrent partial index for enabled workspace summaries.
+Migration 507 adds a concurrent partial index for enabled workspace summaries.
 It can be rolled back independently of configuration data. Deploy the server
 before the UI: an older server lacks the summary endpoint, so cards cannot
 show future wakeups until it is upgraded. Existing task activity still works.
