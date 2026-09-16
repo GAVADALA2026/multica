@@ -53,16 +53,21 @@ const (
 	blockingAgentClassKeyOtherSystem = "other_system"
 )
 
+// Unknown keys fall to other_system, not user. Only the exact "user" key may
+// produce the one class whose remedy claims an action ("reassign or archive"):
+// if a future class is added to the SQL CASE and not here, the refusal should
+// say it cannot name a remedy rather than confidently hand out one that does
+// not apply.
 func blockingAgentClassFromKey(key string) blockingAgentClass {
 	switch key {
+	case blockingAgentClassKeyUser:
+		return blockingAgentUser
 	case blockingAgentClassKeyMika:
 		return blockingAgentMika
 	case blockingAgentClassKeyBuilder:
 		return blockingAgentBuilderCarrier
-	case blockingAgentClassKeyOtherSystem:
-		return blockingAgentOtherSystem
 	default:
-		return blockingAgentUser
+		return blockingAgentOtherSystem
 	}
 }
 

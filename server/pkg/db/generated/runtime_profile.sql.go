@@ -205,7 +205,12 @@ WITH blockers AS (
         CASE
             WHEN a.system_key IS NULL OR btrim(a.system_key) = '' THEN 'user'
             WHEN btrim(a.system_key) = 'mika' THEN 'mika'
-            WHEN btrim(a.system_key) LIKE 'agent_builder:%' THEN 'agent_builder'
+            -- starts_with, not LIKE: '_' is a single-character wildcard in
+            -- LIKE, so 'agent_builder:%' also matches 'agent-builder:x' and
+            -- 'agentXbuilder:x'. Those would be classified here as carriers
+            -- and by the Go side as other_system, and the refusal would send
+            -- the user to an Agent Builder session that does not exist.
+            WHEN starts_with(btrim(a.system_key), 'agent_builder:') THEN 'agent_builder'
             ELSE 'other_system'
         END AS blocker_class
     FROM agent a

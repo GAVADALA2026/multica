@@ -596,6 +596,12 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Mika", "user", "mika")
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Builder", "system", "agent_builder:pinflow")
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Future", "system", "some_future_facility")
+	// Near misses for the builder prefix. '_' is a single-character wildcard in
+	// SQL LIKE, so a LIKE-based CASE classifies both of these as carriers while
+	// Go's HasPrefix does not — and the refusal would then send the user to an
+	// Agent Builder session that does not exist.
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Dash", "system", "agent-builder:not-a-carrier")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Wildcard", "system", "agentXbuilder:not-a-carrier")
 
 	rows, err := testHandler.Queries.ListActiveAgentsByProfile(ctx, db.ListActiveAgentsByProfileParams{
 		ProfileID:   parseUUID(profileID),
@@ -605,8 +611,8 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list blockers: %v", err)
 	}
-	if len(rows) != 4 {
-		t.Fatalf("expected 4 blockers, got %d", len(rows))
+	if len(rows) != 6 {
+		t.Fatalf("expected 6 blockers, got %d", len(rows))
 	}
 
 	for _, row := range rows {
