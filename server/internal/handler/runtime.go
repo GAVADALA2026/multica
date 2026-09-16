@@ -726,12 +726,15 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 // a bound agent will refuse anyway. So the refusal now leads with the outcome
 // the user wants — an offline row is reclaimed automatically — and states the
 // blast radius of the profile delete rather than recommending it.
-// activeAgents is the number of non-archived user agents bound to rt, matching
-// the predicate retention GC applies. It decides whether the promise of
-// automatic cleanup is one this server can actually keep: GC skips a runtime
-// that still has a bound agent, so telling that user to sit and wait would be
-// a new piece of wrong advice replacing the old one.
-func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, activeAgents int) map[string]any {
+//
+// blockers are the non-archived user agents bound to rt, matching the predicate
+// retention GC applies; known is false when that read failed. They decide two
+// things. Whether the promise of automatic cleanup is one this server can keep
+// at all — GC skips a runtime that still has a bound agent — and, when it is
+// not, which of those blockers the user can actually do anything about. Mika is
+// a user-kind agent that can be neither archived nor moved, so "reassign or
+// archive them" is not a universal instruction here either.
+func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers []db.Agent, known bool) map[string]any {
 	ttlDays := service.OfflineRuntimeTTLDays()
 	name := rt.Name
 	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
@@ -744,32 +747,34 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 	)
 	scope := "Deleting the profile instead would remove this runtime on every machine that registered it, not just this one."
 
-	var outlook string
+	parts := []string{lead}
 	switch {
 	case rt.Status == "online":
-		outlook = fmt.Sprintf(
+		parts = append(parts, fmt.Sprintf(
 			"It is still online, so its daemon would register it again. Stop that daemon first; Multica then removes the runtime automatically after %d days offline, once no agent is bound to it and nothing is still running on it.",
 			ttlDays,
-		)
-	case activeAgents > 0:
-		outlook = fmt.Sprintf(
-			"It is offline, but %d agent(s) are still bound to it, which holds it in place. Reassign or archive them and Multica removes the runtime automatically after %d days offline.",
-			activeAgents, ttlDays,
-		)
-	case activeAgents == 0:
-		outlook = fmt.Sprintf(
-			"It is offline with no agents bound, so Multica removes it automatically after %d days offline — this row will be reclaimed without any action from you.",
-			ttlDays,
-		)
-	default:
-		// Count unavailable; promise only what holds regardless of it.
-		outlook = fmt.Sprintf(
+		))
+	case !known:
+		// Blocker set unavailable; promise only what holds regardless of it.
+		parts = append(parts, fmt.Sprintf(
 			"It is offline, and Multica removes offline runtimes automatically after %d days, once no agent is bound to them and nothing is still running on them.",
 			ttlDays,
-		)
+		))
+	case len(blockers) > 0:
+		parts = append(parts, fmt.Sprintf(
+			"It is offline, but %d agent(s) are still bound to it, which holds it in place; Multica removes the runtime automatically after %d days offline once they are gone.",
+			len(blockers), ttlDays,
+		))
+		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers))...)
+	default:
+		parts = append(parts, fmt.Sprintf(
+			"It is offline with no agents bound, so Multica removes it automatically after %d days offline — this row will be reclaimed without any action from you.",
+			ttlDays,
+		))
 	}
+	parts = append(parts, scope)
 
-	msg := strings.Join([]string{lead, outlook, scope}, " ")
+	msg := strings.Join(parts, " ")
 
 	resp := map[string]any{
 		"error": msg,
@@ -783,24 +788,27 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		"last_seen_at":            timestampToPtr(rt.LastSeenAt),
 		"auto_cleanup_after_days": ttlDays,
 	}
-	if activeAgents >= 0 {
-		resp["active_agent_count"] = activeAgents
+	if known {
+		resp["active_agent_count"] = len(blockers)
 	}
 	return resp
 }
 
-// profileInstanceRefusalActiveAgents counts what would block retention GC from
+// profileInstanceRefusalBlockers reads what would stop retention GC from
 // reclaiming this runtime. A read failure is not worth failing the request
 // over: it only costs the refusal its most specific sentence, so report it as
-// "unknown" (-1) and let the caller fall back to the cautious wording.
-func (h *Handler) profileInstanceRefusalActiveAgents(ctx context.Context, runtimeID pgtype.UUID) int {
+// unknown and let the caller fall back to the cautious wording.
+//
+// Already bounded — a single runtime's bound agents, unlike a profile's, are
+// capped by what one machine can host.
+func (h *Handler) profileInstanceRefusalBlockers(ctx context.Context, runtimeID pgtype.UUID) ([]db.Agent, bool) {
 	agents, err := h.Queries.ListActiveAgentsByRuntime(ctx, runtimeID)
 	if err != nil {
 		slog.Warn("profile instance refusal: active agent lookup failed",
 			"runtime_id", uuidToString(runtimeID), "error", err)
-		return -1
+		return nil, false
 	}
-	return len(agents)
+	return agents, true
 }
 
 // canUseRuntimeForAgent reports whether a workspace member is allowed to
@@ -962,7 +970,8 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if hasLiveProfile {
-		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, h.profileInstanceRefusalActiveAgents(r.Context(), rt.ID)))
+		blockers, known := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers, known))
 		return
 	}
 	if rt.ProfileID.Valid {
@@ -1179,7 +1188,8 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if hasLiveProfile {
-		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, h.profileInstanceRefusalActiveAgents(r.Context(), rt.ID)))
+		blockers, known := h.profileInstanceRefusalBlockers(r.Context(), rt.ID)
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, blockers, known))
 		return
 	}
 	if rt.ProfileID.Valid {

@@ -196,29 +196,35 @@ SELECT
     a.id,
     a.name,
     a.kind,
+    a.system_key,
     ar.id AS runtime_id,
     ar.name AS runtime_name,
     ar.custom_name AS runtime_custom_name,
-    ar.status AS runtime_status
+    ar.status AS runtime_status,
+    count(*) OVER () AS total_count
 FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
 WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
 ORDER BY ar.name ASC, a.name ASC
+LIMIT $3::int
 `
 
 type ListActiveAgentsByProfileParams struct {
 	ProfileID   pgtype.UUID `json:"profile_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MaxRows     int32       `json:"max_rows"`
 }
 
 type ListActiveAgentsByProfileRow struct {
 	ID                pgtype.UUID `json:"id"`
 	Name              string      `json:"name"`
 	Kind              string      `json:"kind"`
+	SystemKey         pgtype.Text `json:"system_key"`
 	RuntimeID         pgtype.UUID `json:"runtime_id"`
 	RuntimeName       string      `json:"runtime_name"`
 	RuntimeCustomName pgtype.Text `json:"runtime_custom_name"`
 	RuntimeStatus     string      `json:"runtime_status"`
+	TotalCount        int64       `json:"total_count"`
 }
 
 // Active (non-archived) agents bound to any runtime instance of this profile.
@@ -232,10 +238,23 @@ type ListActiveAgentsByProfileRow struct {
 // (GH #8456). Carrying the runtime is what lets the message say which machine.
 //
 // Deliberately not filtered by kind: it defines when deletion is refused, and
-// narrowing it to user agents here would quietly let a profile with a bound
-// system agent through.
+// narrowing it to user agents here would let a profile with a bound builder
+// carrier through, whereupon TeardownRuntime would hard-delete that carrier.
+//
+// system_key rides along because it, not kind, decides what the user can
+// actually do about a blocker. Mika is kind='user' with system_key='mika' and
+// can be neither archived nor moved; a builder carrier is kind='system' and is
+// released by its Builder session, not from the agent list.
+//
+// Bounded on purpose. The caller only needs to know that blockers exist, name a
+// few, and report how many there are — it never needs every row. This runs
+// inside the delete transaction while profile, runtime and agent rows are
+// locked, and the response is buffered whole before it is written, so an
+// unbounded read here would make both the time under lock and the response body
+// grow with the number of agents a profile has accumulated across machines.
+// total_count is a window function, evaluated before LIMIT, so it stays exact.
 func (q *Queries) ListActiveAgentsByProfile(ctx context.Context, arg ListActiveAgentsByProfileParams) ([]ListActiveAgentsByProfileRow, error) {
-	rows, err := q.db.Query(ctx, listActiveAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
+	rows, err := q.db.Query(ctx, listActiveAgentsByProfile, arg.ProfileID, arg.WorkspaceID, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}
@@ -247,10 +266,12 @@ func (q *Queries) ListActiveAgentsByProfile(ctx context.Context, arg ListActiveA
 			&i.ID,
 			&i.Name,
 			&i.Kind,
+			&i.SystemKey,
 			&i.RuntimeID,
 			&i.RuntimeName,
 			&i.RuntimeCustomName,
 			&i.RuntimeStatus,
+			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}

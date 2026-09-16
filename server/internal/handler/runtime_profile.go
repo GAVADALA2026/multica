@@ -343,8 +343,15 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 // maxNamedBlockingAgents caps how many agents the refusal spells out before it
 // falls back to a count. Enough to recognise the machine they sit on without
-// turning a CLI error into a wall of text; the full set is on the response.
+// turning a CLI error into a wall of text.
 const maxNamedBlockingAgents = 5
+
+// maxReportedBlockingAgents caps both the rows read inside the delete
+// transaction and the entries put on the response. A profile accumulates agents
+// across every machine that registered it, and neither the sentence nor any
+// client needs the whole set to do its job — the exact size travels separately
+// as active_agent_count.
+const maxReportedBlockingAgents = 20
 
 // profileDeleteBlockedByAgents explains which agents are keeping this profile
 // alive and, crucially, which machine each one is on.
@@ -356,22 +363,25 @@ const maxNamedBlockingAgents = 5
 // the dead machine or the healthy one — and the natural next move, unbinding
 // agents that were working fine, is exactly the damage worth preventing
 // (GH #8456).
-func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow) map[string]any {
-	byRuntime := make([]string, 0, len(agents))
-	seen := 0
+// agents is the bounded sample the query returned; total is the exact number of
+// blockers, which can exceed it.
+func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow, total int64) map[string]any {
+	classes := make(map[blockingAgentClass]bool, 2)
+	named := make([]string, 0, maxNamedBlockingAgents)
 	for _, a := range agents {
-		if seen >= maxNamedBlockingAgents {
-			break
+		class := classifyBlockingAgent(a.SystemKey)
+		classes[class] = true
+		if len(named) >= maxNamedBlockingAgents {
+			continue
 		}
 		runtimeName := a.RuntimeName
 		if a.RuntimeCustomName.Valid && strings.TrimSpace(a.RuntimeCustomName.String) != "" {
 			runtimeName = a.RuntimeCustomName.String
 		}
-		byRuntime = append(byRuntime, fmt.Sprintf("%q on %q (%s)", a.Name, runtimeName, a.RuntimeStatus))
-		seen++
+		named = append(named, blockingAgentLabel(a.Name, runtimeName, a.RuntimeStatus, class))
 	}
-	listed := strings.Join(byRuntime, ", ")
-	if remaining := len(agents) - seen; remaining > 0 {
+	listed := strings.Join(named, ", ")
+	if remaining := total - int64(len(named)); remaining > 0 {
 		listed = fmt.Sprintf("%s, and %d more", listed, remaining)
 	}
 
@@ -380,12 +390,22 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
 	}
 
+	// Remedies are derived from the sample, so a class present only beyond the
+	// cap can go unmentioned. Acceptable: every clause it could add is a reason
+	// the delete cannot proceed, and the user still has to clear the blockers
+	// they can see first, which brings the rest into the sample.
+	remedies := blockingAgentRemedies(classes)
+	if len(remedies) == 0 {
+		remedies = []string{"None of them can be released from here."}
+	}
+
 	resp := make([]map[string]any, len(agents))
 	for i, a := range agents {
 		resp[i] = map[string]any{
 			"id":           uuidToString(a.ID),
 			"name":         a.Name,
 			"kind":         a.Kind,
+			"system_key":   textToPtr(a.SystemKey),
 			"runtime_id":   uuidToString(a.RuntimeID),
 			"runtime_name": a.RuntimeName,
 			// Deliberately separate from runtime_name: a client that renders
@@ -395,13 +415,20 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 		}
 	}
 
+	sentences := append([]string{fmt.Sprintf(
+		"cannot delete %s: %d active agent(s) are still bound to its runtimes — %s.",
+		subject, total, listed,
+	)}, remedies...)
+	sentences = append(sentences,
+		"Deleting this profile removes its runtime on every machine that registered it, so agents on a machine you did not intend to touch will be affected too.")
+
 	return map[string]any{
-		"error": fmt.Sprintf(
-			"cannot delete %s: %d active agent(s) are still bound to its runtimes — %s. Reassign or archive them first. Deleting this profile removes its runtime on every machine that registered it, so agents on a machine you did not intend to touch will be affected too.",
-			subject, len(agents), listed,
-		),
+		"error":         strings.Join(sentences, " "),
 		"code":          "runtime_profile_has_active_agents",
 		"active_agents": resp,
+		// The sample above is capped; this is the real number.
+		"active_agent_count":      total,
+		"active_agents_truncated": total > int64(len(resp)),
 	}
 }
 
@@ -478,9 +505,12 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Bounded read: the guard only needs "is there at least one", and the
+	// refusal needs a few names plus the exact total, which rides on each row.
 	blockingAgents, err := qtx.ListActiveAgentsByProfile(r.Context(), db.ListActiveAgentsByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
+		MaxRows:     maxReportedBlockingAgents,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check profile usage")
@@ -491,7 +521,8 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		if profileMissing {
 			profileName = ""
 		}
-		writeJSON(w, http.StatusConflict, profileDeleteBlockedByAgents(profileName, blockingAgents))
+		writeJSON(w, http.StatusConflict,
+			profileDeleteBlockedByAgents(profileName, blockingAgents, blockingAgents[0].TotalCount))
 		return
 	}
 
