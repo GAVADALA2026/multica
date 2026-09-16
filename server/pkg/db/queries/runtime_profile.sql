@@ -81,13 +81,32 @@ DELETE FROM agent_runtime
 WHERE profile_id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
--- name: CountAgentsByProfile :one
--- Counts active (non-archived) agents bound to any runtime instance of this
--- profile. The profile-delete path uses this to refuse deletion (409) while
--- agents still depend on it, mirroring the runtime-delete guard.
-SELECT count(*) FROM agent a
+-- name: ListActiveAgentsByProfile :many
+-- Active (non-archived) agents bound to any runtime instance of this profile.
+-- The profile-delete path uses this to refuse deletion (409) while agents
+-- still depend on it, mirroring the runtime-delete guard.
+--
+-- It returns the rows rather than a count because the refusal has to name
+-- them: a profile spans every machine that registered it, so the agents
+-- blocking the delete are routinely bound to a different machine than the one
+-- the user was trying to clean up, and a bare count gives them no way to tell
+-- (GH #8456). Carrying the runtime is what lets the message say which machine.
+--
+-- Deliberately not filtered by kind: it defines when deletion is refused, and
+-- narrowing it to user agents here would quietly let a profile with a bound
+-- system agent through.
+SELECT
+    a.id,
+    a.name,
+    a.kind,
+    ar.id AS runtime_id,
+    ar.name AS runtime_name,
+    ar.custom_name AS runtime_custom_name,
+    ar.status AS runtime_status
+FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL;
+WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+ORDER BY ar.name ASC, a.name ASC;
 
 -- name: ListAgentRuntimeIDsByProfile :many
 -- Enumerates the runtime instance rows registered against a profile. The

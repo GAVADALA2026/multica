@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -340,6 +341,70 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runtimeProfileToResponse(profile))
 }
 
+// maxNamedBlockingAgents caps how many agents the refusal spells out before it
+// falls back to a count. Enough to recognise the machine they sit on without
+// turning a CLI error into a wall of text; the full set is on the response.
+const maxNamedBlockingAgents = 5
+
+// profileDeleteBlockedByAgents explains which agents are keeping this profile
+// alive and, crucially, which machine each one is on.
+//
+// A profile is workspace-wide, so its bound agents are frequently on a
+// different machine than the stale instance the user is actually trying to
+// clean up. The old message said only "active agents are still bound to its
+// runtimes", which left that user with no way to tell whether the blocker was
+// the dead machine or the healthy one — and the natural next move, unbinding
+// agents that were working fine, is exactly the damage worth preventing
+// (GH #8456).
+func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow) map[string]any {
+	byRuntime := make([]string, 0, len(agents))
+	seen := 0
+	for _, a := range agents {
+		if seen >= maxNamedBlockingAgents {
+			break
+		}
+		runtimeName := a.RuntimeName
+		if a.RuntimeCustomName.Valid && strings.TrimSpace(a.RuntimeCustomName.String) != "" {
+			runtimeName = a.RuntimeCustomName.String
+		}
+		byRuntime = append(byRuntime, fmt.Sprintf("%q on %q (%s)", a.Name, runtimeName, a.RuntimeStatus))
+		seen++
+	}
+	listed := strings.Join(byRuntime, ", ")
+	if remaining := len(agents) - seen; remaining > 0 {
+		listed = fmt.Sprintf("%s, and %d more", listed, remaining)
+	}
+
+	subject := "this custom runtime profile"
+	if strings.TrimSpace(profileName) != "" {
+		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
+	}
+
+	resp := make([]map[string]any, len(agents))
+	for i, a := range agents {
+		resp[i] = map[string]any{
+			"id":           uuidToString(a.ID),
+			"name":         a.Name,
+			"kind":         a.Kind,
+			"runtime_id":   uuidToString(a.RuntimeID),
+			"runtime_name": a.RuntimeName,
+			// Deliberately separate from runtime_name: a client that renders
+			// its own copy shows custom_name ?? name, same as everywhere else.
+			"runtime_custom_name": textToPtr(a.RuntimeCustomName),
+			"runtime_status":      a.RuntimeStatus,
+		}
+	}
+
+	return map[string]any{
+		"error": fmt.Sprintf(
+			"cannot delete %s: %d active agent(s) are still bound to its runtimes — %s. Reassign or archive them first. Deleting this profile removes its runtime on every machine that registered it, so agents on a machine you did not intend to touch will be affected too.",
+			subject, len(agents), listed,
+		),
+		"code":          "runtime_profile_has_active_agents",
+		"active_agents": resp,
+	}
+}
+
 // DeleteRuntimeProfile removes a profile and, in the same transaction, the
 // agent_runtime instance rows registered against it. Migration 120 dropped the
 // DB ON DELETE CASCADE, so this app-layer cleanup is what prevents orphaned
@@ -381,7 +446,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	// a conflicting KEY SHARE lock in its own transaction, so it cannot insert
 	// a runtime after the plan and have that row escape deletion. If the profile
 	// row is already gone, still clean up any orphaned profile_id rows.
-	_, profileErr := qtx.LockRuntimeProfileForDelete(r.Context(), db.LockRuntimeProfileForDeleteParams{
+	profile, profileErr := qtx.LockRuntimeProfileForDelete(r.Context(), db.LockRuntimeProfileForDeleteParams{
 		ID:          profileUUID,
 		WorkspaceID: wsUUID,
 	})
@@ -413,7 +478,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	agentCount, err := qtx.CountAgentsByProfile(r.Context(), db.CountAgentsByProfileParams{
+	blockingAgents, err := qtx.ListActiveAgentsByProfile(r.Context(), db.ListActiveAgentsByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
 	})
@@ -421,8 +486,12 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to check profile usage")
 		return
 	}
-	if agentCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime profile: active agents are still bound to its runtimes")
+	if len(blockingAgents) > 0 {
+		profileName := profile.DisplayName
+		if profileMissing {
+			profileName = ""
+		}
+		writeJSON(w, http.StatusConflict, profileDeleteBlockedByAgents(profileName, blockingAgents))
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -689,20 +690,117 @@ func (h *Handler) requireRuntimeReadAccess(w http.ResponseWriter, r *http.Reques
 	return rt, member, true
 }
 
-func (h *Handler) runtimeHasLiveProfile(ctx context.Context, rt db.AgentRuntime) (bool, error) {
+// runtimeLiveProfile returns the custom runtime profile that owns rt, if that
+// profile still exists in the same workspace. A profile-backed instance whose
+// profile is gone is an orphan and stays directly deletable (MUL-4158).
+//
+// The profile row itself — not just "one exists" — is what the caller needs:
+// the refusal it writes names the profile, so the user can tell which shared
+// definition they would be reaching for if they followed the old advice.
+func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (db.RuntimeProfile, bool, error) {
 	if !rt.ProfileID.Valid {
-		return false, nil
+		return db.RuntimeProfile{}, false, nil
 	}
-	if _, err := h.Queries.GetRuntimeProfileForWorkspace(ctx, db.GetRuntimeProfileForWorkspaceParams{
+	profile, err := h.Queries.GetRuntimeProfileForWorkspace(ctx, db.GetRuntimeProfileForWorkspaceParams{
 		ID:          rt.ProfileID,
 		WorkspaceID: rt.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return db.RuntimeProfile{}, false, nil
 		}
-		return false, err
+		return db.RuntimeProfile{}, false, err
 	}
-	return true, nil
+	return profile, true, nil
+}
+
+// profileInstanceDeleteRefusal explains why this one runtime row cannot be
+// deleted on its own, and — the part that matters — what the user should
+// actually do instead.
+//
+// The previous wording said only "delete its runtime profile instead", which
+// is actively harmful advice for the case that produces this error most often
+// (GH #8456, #6671): a retired machine's leftover row inside a profile that
+// other, healthy machines still use. Following it means reaching for a
+// workspace-wide delete that takes those machines' runtimes with it, and that
+// a bound agent will refuse anyway. So the refusal now leads with the outcome
+// the user wants — an offline row is reclaimed automatically — and states the
+// blast radius of the profile delete rather than recommending it.
+// activeAgents is the number of non-archived user agents bound to rt, matching
+// the predicate retention GC applies. It decides whether the promise of
+// automatic cleanup is one this server can actually keep: GC skips a runtime
+// that still has a bound agent, so telling that user to sit and wait would be
+// a new piece of wrong advice replacing the old one.
+func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, activeAgents int) map[string]any {
+	ttlDays := service.OfflineRuntimeTTLDays()
+	name := rt.Name
+	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
+		name = rt.CustomName.String
+	}
+
+	lead := fmt.Sprintf(
+		"cannot delete %q on its own: it is registered from the custom runtime profile %q.",
+		name, profile.DisplayName,
+	)
+	scope := "Deleting the profile instead would remove this runtime on every machine that registered it, not just this one."
+
+	var outlook string
+	switch {
+	case rt.Status == "online":
+		outlook = fmt.Sprintf(
+			"It is still online, so its daemon would register it again. Stop that daemon first; Multica then removes the runtime automatically after %d days offline, once no agent is bound to it and nothing is still running on it.",
+			ttlDays,
+		)
+	case activeAgents > 0:
+		outlook = fmt.Sprintf(
+			"It is offline, but %d agent(s) are still bound to it, which holds it in place. Reassign or archive them and Multica removes the runtime automatically after %d days offline.",
+			activeAgents, ttlDays,
+		)
+	case activeAgents == 0:
+		outlook = fmt.Sprintf(
+			"It is offline with no agents bound, so Multica removes it automatically after %d days offline — this row will be reclaimed without any action from you.",
+			ttlDays,
+		)
+	default:
+		// Count unavailable; promise only what holds regardless of it.
+		outlook = fmt.Sprintf(
+			"It is offline, and Multica removes offline runtimes automatically after %d days, once no agent is bound to them and nothing is still running on them.",
+			ttlDays,
+		)
+	}
+
+	msg := strings.Join([]string{lead, outlook, scope}, " ")
+
+	resp := map[string]any{
+		"error": msg,
+		"code":  "runtime_profile_instance_delete_unsupported",
+		// Structured companions to the sentence above so a client can render
+		// its own localized copy instead of echoing the English (see
+		// writeErrorCode's rationale). The sentence stays the fallback.
+		"profile_id":              uuidToString(profile.ID),
+		"profile_name":            profile.DisplayName,
+		"runtime_status":          rt.Status,
+		"last_seen_at":            timestampToPtr(rt.LastSeenAt),
+		"auto_cleanup_after_days": ttlDays,
+	}
+	if activeAgents >= 0 {
+		resp["active_agent_count"] = activeAgents
+	}
+	return resp
+}
+
+// profileInstanceRefusalActiveAgents counts what would block retention GC from
+// reclaiming this runtime. A read failure is not worth failing the request
+// over: it only costs the refusal its most specific sentence, so report it as
+// "unknown" (-1) and let the caller fall back to the cautious wording.
+func (h *Handler) profileInstanceRefusalActiveAgents(ctx context.Context, runtimeID pgtype.UUID) int {
+	agents, err := h.Queries.ListActiveAgentsByRuntime(ctx, runtimeID)
+	if err != nil {
+		slog.Warn("profile instance refusal: active agent lookup failed",
+			"runtime_id", uuidToString(runtimeID), "error", err)
+		return -1
+	}
+	return len(agents)
 }
 
 // canUseRuntimeForAgent reports whether a workspace member is allowed to
@@ -858,16 +956,13 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 
-	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	profile, hasLiveProfile, err := h.runtimeLiveProfile(r.Context(), rt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
 		return
 	}
 	if hasLiveProfile {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
-			"code":  "runtime_profile_instance_delete_unsupported",
-		})
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, h.profileInstanceRefusalActiveAgents(r.Context(), rt.ID)))
 		return
 	}
 	if rt.ProfileID.Valid {
@@ -1078,16 +1173,13 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	}
 	userID := uuidToString(member.UserID)
 
-	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	profile, hasLiveProfile, err := h.runtimeLiveProfile(r.Context(), rt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
 		return
 	}
 	if hasLiveProfile {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
-			"code":  "runtime_profile_instance_delete_unsupported",
-		})
+		writeJSON(w, http.StatusConflict, profileInstanceDeleteRefusal(rt, profile, h.profileInstanceRefusalActiveAgents(r.Context(), rt.ID)))
 		return
 	}
 	if rt.ProfileID.Valid {

@@ -11,27 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countAgentsByProfile = `-- name: CountAgentsByProfile :one
-SELECT count(*) FROM agent a
-JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
-`
-
-type CountAgentsByProfileParams struct {
-	ProfileID   pgtype.UUID `json:"profile_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Counts active (non-archived) agents bound to any runtime instance of this
-// profile. The profile-delete path uses this to refuse deletion (409) while
-// agents still depend on it, mirroring the runtime-delete guard.
-func (q *Queries) CountAgentsByProfile(ctx context.Context, arg CountAgentsByProfileParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createRuntimeProfile = `-- name: CreateRuntimeProfile :one
 
 INSERT INTO runtime_profile (
@@ -210,6 +189,77 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listActiveAgentsByProfile = `-- name: ListActiveAgentsByProfile :many
+SELECT
+    a.id,
+    a.name,
+    a.kind,
+    ar.id AS runtime_id,
+    ar.name AS runtime_name,
+    ar.custom_name AS runtime_custom_name,
+    ar.status AS runtime_status
+FROM agent a
+JOIN agent_runtime ar ON ar.id = a.runtime_id
+WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+ORDER BY ar.name ASC, a.name ASC
+`
+
+type ListActiveAgentsByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListActiveAgentsByProfileRow struct {
+	ID                pgtype.UUID `json:"id"`
+	Name              string      `json:"name"`
+	Kind              string      `json:"kind"`
+	RuntimeID         pgtype.UUID `json:"runtime_id"`
+	RuntimeName       string      `json:"runtime_name"`
+	RuntimeCustomName pgtype.Text `json:"runtime_custom_name"`
+	RuntimeStatus     string      `json:"runtime_status"`
+}
+
+// Active (non-archived) agents bound to any runtime instance of this profile.
+// The profile-delete path uses this to refuse deletion (409) while agents
+// still depend on it, mirroring the runtime-delete guard.
+//
+// It returns the rows rather than a count because the refusal has to name
+// them: a profile spans every machine that registered it, so the agents
+// blocking the delete are routinely bound to a different machine than the one
+// the user was trying to clean up, and a bare count gives them no way to tell
+// (GH #8456). Carrying the runtime is what lets the message say which machine.
+//
+// Deliberately not filtered by kind: it defines when deletion is refused, and
+// narrowing it to user agents here would quietly let a profile with a bound
+// system agent through.
+func (q *Queries) ListActiveAgentsByProfile(ctx context.Context, arg ListActiveAgentsByProfileParams) ([]ListActiveAgentsByProfileRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveAgentsByProfileRow{}
+	for rows.Next() {
+		var i ListActiveAgentsByProfileRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.RuntimeID,
+			&i.RuntimeName,
+			&i.RuntimeCustomName,
+			&i.RuntimeStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentRuntimeIDsByProfile = `-- name: ListAgentRuntimeIDsByProfile :many
