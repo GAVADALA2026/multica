@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -726,6 +727,74 @@ func TestValidateThinkingLevelOmpEmptyModel(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Errorf("ValidateThinkingLevelWith(omp, %q, %q) = %v, want %v", tc.model, tc.value, got, tc.want)
+		}
+	}
+}
+
+// TestValidateThinkingLevelOmpEmptyModelIsDeterministic pins the ORDER of the
+// empty-model rejection, not just its result. The check must happen before any
+// catalog read: on a discovery error the daemon's guard passes the level through
+// to the CLI, so an omp agent with no pinned model would still have shipped an
+// effort omp resolves against a different model. Asserting the loader is never
+// called is the only way to pin that ordering — a test that merely returns false
+// would pass with the check on either side of the load.
+func TestValidateThinkingLevelOmpEmptyModelIsDeterministic(t *testing.T) {
+	t.Parallel()
+	called := false
+	failing := func() (Catalog, error) {
+		called = true
+		return Catalog{}, errors.New("omp discovery failed")
+	}
+	got, err := ValidateThinkingLevelWith(failing, "omp", "", "max")
+	if err != nil {
+		t.Fatalf("ValidateThinkingLevelWith(omp, \"\", max) returned error %v, want a deterministic false", err)
+	}
+	if got {
+		t.Error("ValidateThinkingLevelWith(omp, \"\", max) = true, want false")
+	}
+	if called {
+		t.Error("catalog loader was called; the empty-model rejection must precede discovery")
+	}
+	// The empty "use the runtime default" sentinel still short-circuits ahead of
+	// everything, so it must not reach the loader either.
+	called = false
+	got, err = ValidateThinkingLevelWith(failing, "omp", "", "")
+	if err != nil || !got {
+		t.Errorf("ValidateThinkingLevelWith(omp, \"\", \"\") = (%v, %v), want (true, nil)", got, err)
+	}
+	if called {
+		t.Error("empty thinking level must not trigger discovery")
+	}
+}
+
+// TestThinkingRequiresExplicitModelPredicates pins which providers need a pinned
+// model, and the narrower set whose invalid combination the API refuses to store.
+// codex is deliberately in the first set only: agents already hold an effort with
+// an empty model, so 400ing that pair would block unrelated edits to them.
+func TestThinkingRequiresExplicitModelPredicates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		provider      string
+		needsModel    bool
+		rejectedAtAPI bool
+	}{
+		{provider: "omp", needsModel: true, rejectedAtAPI: true},
+		{provider: "codex", needsModel: true, rejectedAtAPI: false},
+		{provider: "pi", needsModel: false, rejectedAtAPI: false},
+		{provider: "claude", needsModel: false, rejectedAtAPI: false},
+		{provider: "opencode", needsModel: false, rejectedAtAPI: false},
+		{provider: "", needsModel: false, rejectedAtAPI: false},
+	} {
+		if got := ThinkingRequiresExplicitModel(tc.provider); got != tc.needsModel {
+			t.Errorf("ThinkingRequiresExplicitModel(%q) = %v, want %v", tc.provider, got, tc.needsModel)
+		}
+		if got := ThinkingLevelRejectedWithoutModel(tc.provider); got != tc.rejectedAtAPI {
+			t.Errorf("ThinkingLevelRejectedWithoutModel(%q) = %v, want %v", tc.provider, got, tc.rejectedAtAPI)
+		}
+		// The API-level refusal is a subset: anything it rejects must also be a
+		// provider that genuinely needs a pinned model.
+		if ThinkingLevelRejectedWithoutModel(tc.provider) && !ThinkingRequiresExplicitModel(tc.provider) {
+			t.Errorf("provider %q is rejected at the API but does not require an explicit model", tc.provider)
 		}
 	}
 }
