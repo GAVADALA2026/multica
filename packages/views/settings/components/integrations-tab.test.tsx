@@ -136,6 +136,13 @@ describe("Integration directory", () => {
       screen.queryByRole("link", { name: /Composio/ }),
     ).not.toBeInTheDocument();
   });
+  it("keeps hiding Composio when an older server reports 503", () => {
+    state.error = new ApiError("unavailable", 503, "Service Unavailable");
+    renderWithI18n(<IntegrationsTab />);
+    expect(
+      screen.queryByRole("link", { name: /Composio/ }),
+    ).not.toBeInTheDocument();
+  });
   it("only offers self-hosted Git providers when the deployment enables them", () => {
     const { unmount } = renderWithI18n(<IntegrationsTab />);
     expect(

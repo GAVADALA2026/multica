@@ -604,7 +604,7 @@ describe("BillingTab", () => {
     expect(await screen.findByText(copy)).toBeInTheDocument();
   });
 
-  it("maps a disabled billing capability to unavailable instead of a permission error", async () => {
+  it("explains that a disabled billing capability requires an administrator", async () => {
     const user = userEvent.setup();
     mocks.checkout.mockRejectedValue(
       new ApiError("request failed", 403, "Forbidden", {
@@ -617,7 +617,9 @@ describe("BillingTab", () => {
     await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
 
     expect(
-      await screen.findByText("Billing is temporarily unavailable. Retry in a moment."),
+      await screen.findByText(
+        "Workspace subscriptions are not enabled for this deployment. Contact your administrator.",
+      ),
     ).toBeInTheDocument();
   });
 

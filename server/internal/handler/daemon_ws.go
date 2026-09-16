@@ -11,7 +11,7 @@ import (
 
 func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 	if h.DaemonHub == nil {
-		writeFeatureDisabled(w, "daemon_websocket_not_configured", "daemon websocket unavailable")
+		writeErrorCode(w, http.StatusInternalServerError, "daemon_websocket_misconfigured", "daemon websocket unavailable")
 		return
 	}
 
