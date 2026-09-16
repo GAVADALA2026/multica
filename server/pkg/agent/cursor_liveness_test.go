@@ -175,17 +175,17 @@ func runFakeCursorStream(mode string) {
 	fmt.Println(`{"type":"thinking","subtype":"delta","text":"ready"}`)
 	fmt.Println(`{"type":"thinking","subtype":"completed"}`)
 	if mode == "finish" {
-		// Keep the parent alive until the test has consumed "ready", which
-		// follows background ownership capture. Exiting before that point
-		// reparents the shell and tests unverified ownership, not cleanup.
-		gate := filepath.Join(os.Getenv("CURSOR_FAKE_DIR"), "finish-ready")
-		deadline := time.Now().Add(5 * time.Second)
+		// Finalization tests an already-owned background shell. Keep the fake
+		// CLI alive until the consumer has processed the launch event; exiting
+		// here first reparents the shell and correctly fails ancestry validation.
+		gate := filepath.Join(os.Getenv("CURSOR_FAKE_DIR"), "finish.release")
+		deadline := time.Now().Add(10 * time.Second)
 		for {
 			if _, err := os.Stat(gate); err == nil {
 				break
 			}
 			if time.Now().After(deadline) {
-				panic("test did not acknowledge background ownership")
+				panic("test consumer did not acknowledge background ownership")
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -270,10 +270,13 @@ func TestCursorBackgroundLifecycle(t *testing.T) {
 			}
 			switch mode {
 			case "finish":
+				// The ready message follows synchronous ownership capture. A
+				// rejected launch has already released its tool count, so this
+				// also proves that finalization will exercise owned-process cleanup.
 				if count, _ := session.ToolActivity(); count != 1 {
-					t.Fatalf("background ownership was not captured: count=%d", count)
+					t.Fatalf("background shell was not retained before finalization: count=%d", count)
 				}
-				if err := os.WriteFile(filepath.Join(dir, "finish-ready"), nil, 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "finish.release"), nil, 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "budget", "multiple":
