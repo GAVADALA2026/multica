@@ -49,6 +49,7 @@
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/surface/*": "./issues/surface/*.ts",
     "./issues/config": "./issues/config/index.ts",
+    "./issues/workflow-lane-layout": "./issues/workflow-lane-layout.ts",
     "./issues/config/status": "./issues/config/status.ts",
     "./issues/config/priority": "./issues/config/priority.ts",
     "./issues/stores": "./issues/stores/index.ts",

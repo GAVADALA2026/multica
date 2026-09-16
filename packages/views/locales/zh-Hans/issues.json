@@ -350,6 +350,9 @@
   },
   "board": {
     "legacy_workflow": "旧版工作流",
+    "resize_lane": "调整 {{name}} 泳道高度",
+    "resize_lane_hint": "拖动调整高度，也可使用方向键；双击恢复自动高度。",
+    "reset_lane_height": "恢复 {{name}} 的自动高度",
     "more_workflows": "显示更多工作流",
     "choose_workflow_project": "请选择使用这套工作流的项目（或无项目），以在此状态列创建任务。",
     "hidden_columns_label": "隐藏的列",

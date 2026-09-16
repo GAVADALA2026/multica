@@ -50,10 +50,47 @@ describe("workflow board", () => {
     renderBoard({ ...branches, descriptors: branches.descriptors.slice(0, 1) });
     expect(screen.queryByRole("button", { name: "Engineering 51" })).toBeNull();
     expect(screen.getByTestId("lane-board")).toBeInTheDocument();
+    expect(screen.queryByRole("separator")).toBeNull();
     cleanup();
     renderBoard({ ...branches, descriptors: branches.descriptors.slice(0, 1), hasMoreGroups: true });
     expect(screen.getByRole("button", { name: "Engineering 51" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show more workflows" }));
     expect(branches.loadMoreGroups).toHaveBeenCalledOnce();
+  });
+  it("resizes one lane with the keyboard, retains it across collapse, and resets to automatic height", () => {
+    const { store } = renderBoard();
+    const handle = screen.getByRole("separator", { name: "Resize Engineering lane" });
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(store.getState().workflowLaneHeights).toEqual({ "workflow:0": 840 });
+    expect(store.getState().statusFilters).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Engineering 51" }));
+    fireEvent.click(screen.getByRole("button", { name: "Engineering 51" }));
+    const body = document.getElementById(screen.getByRole("separator", { name: "Resize Engineering lane" }).getAttribute("aria-controls")!);
+    expect(body).toHaveStyle({ height: "840px" });
+    fireEvent.click(screen.getByRole("button", { name: "Reset Engineering to automatic height" }));
+    expect(store.getState().workflowLaneHeights).toEqual({});
+  });
+  it("commits pointer resizing on release and cancels interrupted gestures", () => {
+    const { store } = renderBoard();
+    // jsdom has no PointerEvent; a MouseEvent subclass supplies pointerId.
+    const pointer = (type: string, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientY: y, button: 0 });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      return event;
+    };
+    const handle = screen.getByRole("separator", { name: "Resize Engineering lane" });
+    handle.setPointerCapture = vi.fn();
+    handle.releasePointerCapture = vi.fn();
+    fireEvent(handle, pointer("pointerdown", 100));
+    fireEvent(handle, pointer("pointermove", 200));
+    expect(store.getState().workflowLaneHeights).toEqual({});
+    fireEvent(handle, pointer("pointerup", 200));
+    expect(store.getState().workflowLaneHeights).toEqual({ "workflow:0": 900 });
+    fireEvent(handle, pointer("pointerdown", 200));
+    fireEvent(handle, pointer("pointermove", 300));
+    fireEvent(handle, pointer("pointercancel", 300));
+    expect(store.getState().workflowLaneHeights).toEqual({ "workflow:0": 900 });
+    fireEvent.doubleClick(handle);
+    expect(store.getState().workflowLaneHeights).toEqual({});
   });
 });

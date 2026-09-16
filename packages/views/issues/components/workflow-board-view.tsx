@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, type ComponentProps } from "react";
-import { ChevronDown, ChevronRight, Workflow } from "lucide-react";
 import type { IssueTableGroupDescriptor } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { Button } from "@multica/ui/components/ui/button";
 import { BoardView } from "./board-view";
+import { WorkflowLaneFrame } from "./workflow-lane-frame";
 import { useT } from "../../i18n";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
 import { workflowLaneBranches } from "../utils/workflow-lanes";
@@ -37,8 +37,8 @@ function WorkflowLane({ lane, branches, ...props }: Props & {
 
 export function WorkflowBoardView(props: Props) {
   const { t } = useT("issues");
-  const collapsed = useViewStore((s) => s.collapsedWorkflowLanes);
-  const toggle = useViewStore((s) => s.toggleWorkflowLaneCollapsed);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const hiddenStatuses = useViewStore((s) => s.hiddenStatuses);
   const branches = props.groupBranches;
   if (!branches) return null;
   const lanes = branches.descriptors.filter((lane) => lane.value.kind === "workflow");
@@ -50,24 +50,19 @@ export function WorkflowBoardView(props: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
       {lanes.map((lane) => {
-        const isCollapsed = !single && collapsed.includes(lane.key);
         const name = lane.value.kind === "workflow" ? lane.value.name : "";
-        return (
-          <section key={lane.key} className={single ? "flex min-h-0 flex-1 flex-col" : "shrink-0 border-b border-border pb-3"}>
-            {!single && (
-              <button type="button" aria-label={`${name || t(($) => $.board.legacy_workflow)} ${lane.count}`} aria-expanded={!isCollapsed} onClick={() => toggle(lane.key)}
-                className="flex w-full items-center gap-2 px-4 py-3 text-body font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {isCollapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                <Workflow className="size-4 text-muted-foreground" />
-                <span className="truncate">{name || t(($) => $.board.legacy_workflow)}</span>
-                <span className="text-caption font-normal tabular-nums text-muted-foreground">{lane.count}</span>
-              </button>
-            )}
-            {!isCollapsed && <div className={single ? "flex min-h-0 flex-1" : "flex h-80 min-h-0"}>
-              <WorkflowLane {...props} lane={lane} branches={branches} />
-            </div>}
-          </section>
-        );
+        const board = <WorkflowLane {...props} lane={lane} branches={branches} />;
+        if (single) return <section key={lane.key} className="flex min-h-0 flex-1 flex-col">{board}</section>;
+        return <WorkflowLaneFrame key={lane.key} laneKey={lane.key}
+          name={name || t(($) => $.board.legacy_workflow)} count={lane.count}
+          maxColumnCount={Math.max(0, ...(lane.secondary_groups ?? []).filter(({ value }) => {
+            if (value.kind !== "workflow_status") return false;
+            const keys = [value.workflow_status_id, value.status].filter((key): key is string => !!key);
+            const selected = keys.some((key) => statusFilters.includes(key));
+            return selected || (statusFilters.length === 0 && !keys.some((key) => hiddenStatuses.includes(key)));
+          }).map((cell) => cell.count))}>
+          {board}
+        </WorkflowLaneFrame>;
       })}
       {(branches.hasMoreGroups || branches.isError) && (
         <div className="flex shrink-0 justify-center p-3">

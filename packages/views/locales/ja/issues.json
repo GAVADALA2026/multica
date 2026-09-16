@@ -350,6 +350,9 @@
   },
   "board": {
     "legacy_workflow": "以前のワークフロー",
+    "resize_lane": "{{name}} レーンの高さを調整",
+    "resize_lane_hint": "ドラッグまたは矢印キーで調整。ダブルクリックで自動の高さに戻します。",
+    "reset_lane_height": "{{name}} を自動の高さに戻す",
     "more_workflows": "他のワークフローを表示",
     "choose_workflow_project": "この列に課題を作成するには、このワークフローを使用するプロジェクト（またはプロジェクトなし）を選択してください。",
     "hidden_columns_label": "非表示の列",

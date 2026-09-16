@@ -7,6 +7,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { IssueStatus, IssuePriority, PropertyFilterValue } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
+import { clampWorkflowLaneHeight } from "../workflow-lane-layout";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
@@ -295,6 +296,8 @@ export interface IssueViewState {
    *  no-X lane and `"__orphans__"` for the parent-grouping fallback. */
   collapsedWorkflowLanes: string[];
   toggleWorkflowLaneCollapsed: (key: string) => void;
+  workflowLaneHeights: Record<string, number>;
+  setWorkflowLaneHeight: (key: string, height: number | null) => void;
   collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
   /** Ordered table columns. Title is mandatory and normalized to the front. */
   tableColumns: TableColumnConfig[];
@@ -379,6 +382,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedWorkflowLanes: [],
+  workflowLaneHeights: {},
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
   tableGrouping: "none",
@@ -583,6 +587,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       ? state.collapsedWorkflowLanes.filter((id) => id !== key)
       : [...state.collapsedWorkflowLanes, key],
   })),
+  setWorkflowLaneHeight: (key, height) => set((state) => {
+    if (height !== null && !Number.isFinite(height)) return state;
+    const heights = { ...state.workflowLaneHeights };
+    if (height === null) delete heights[key];
+    else heights[key] = clampWorkflowLaneHeight(height);
+    return { workflowLaneHeights: heights };
+  }),
   toggleSwimlaneCollapsed: (key) =>
     set((state) => {
       const grouping = state.swimlaneGrouping;
@@ -676,6 +687,7 @@ export const viewStorePersistOptions = (name: string) => ({
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
     collapsedWorkflowLanes: state.collapsedWorkflowLanes,
+    workflowLaneHeights: state.workflowLaneHeights,
     collapsedSwimlanes: state.collapsedSwimlanes,
     tableColumns: state.tableColumns,
     tableGrouping: state.tableGrouping,
@@ -752,6 +764,11 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     collapsedWorkflowLanes: Array.isArray(p.collapsedWorkflowLanes)
       ? p.collapsedWorkflowLanes.filter((id): id is string => typeof id === "string")
       : current.collapsedWorkflowLanes,
+    workflowLaneHeights: isRecord(p.workflowLaneHeights)
+      ? Object.fromEntries(Object.entries(p.workflowLaneHeights).filter(
+          (entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]),
+        ).map(([key, height]) => [key, clampWorkflowLaneHeight(height)]))
+      : current.workflowLaneHeights,
     hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
     listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {
