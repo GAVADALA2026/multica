@@ -20,19 +20,37 @@ import (
 // coerced: the two runs did not compare the same things, so neither
 // "unchanged" nor a changed-field list would be true. Unknown degrades to the
 // unconditional issue read, which is the behaviour that predates this column.
-const issueSnapshotVersion = 1
+//
+// v2 dropped assignee and priority from the compared set (see below).
+const issueSnapshotVersion = 2
 
-// Compared field names, in the fixed order they are reported. The agent is
-// told exactly this set was compared, so a field absent here must never be
-// implied to have been checked: labels, parent, due date, stage, project and
-// metadata are all deliberately out of scope, and an issue whose ONLY change is
-// one of them is reported as unchanged.
+// Compared field names, in the fixed order they are reported.
+//
+// The set answers exactly one question — "must the agent run `issue get`
+// again?" — so a field earns a place here only if changing it would alter what
+// the agent does AND the per-turn message does not already carry its current
+// value:
+//
+//   - title, description: the task itself, and reachable only by reading the
+//     issue. Both must be compared.
+//   - status: also shipped as a current value, so comparing it is strictly
+//     redundant for "what is it now". It stays because "changed: status" is the
+//     clearest available signal that somebody intervened between the runs — a
+//     push back from in_review to todo means the delivery was rejected — and
+//     carrying it costs nothing.
+//   - assignee: the agent only needs "is this mine now", which the current
+//     value answers outright. Not compared; still shipped.
+//   - priority: reachable only by reading, but it does not change what the
+//     agent does. Not compared.
+//
+// The agent is told exactly this set was compared, so a field absent here must
+// never be implied to have been checked: assignee, priority, labels, parent,
+// due date, stage, project and metadata are all out of scope, and an issue
+// whose ONLY change is one of them is reported as unchanged.
 const (
 	issueFieldTitle       = "title"
 	issueFieldDescription = "description"
 	issueFieldStatus      = "status"
-	issueFieldAssignee    = "assignee"
-	issueFieldPriority    = "priority"
 )
 
 // issueStateSnapshot is the comparison key for one claim's view of an issue.
@@ -40,15 +58,14 @@ const (
 // Title and description are stored as SHA-256 hex, not as text: the column
 // exists to answer "did this move", and a second copy of every issue body in
 // the task queue would be both a storage cost and a place for issue text to
-// leak from. Status, assignee and priority are short enums/ids, so they are
-// stored raw — that also lets the claim report the CURRENT status and assignee
-// to the agent without a second read.
+// leak from. Status is a short key, so it is stored raw.
+//
+// The claim's CURRENT status and assignee reach the agent as their own response
+// fields, read straight off the issue row — they are not sourced from here, and
+// narrowing this struct does not affect them.
 type issueStateSnapshot struct {
 	Version           int    `json:"v"`
 	Status            string `json:"status"`
-	AssigneeType      string `json:"assignee_type,omitempty"`
-	AssigneeID        string `json:"assignee_id,omitempty"`
-	Priority          string `json:"priority"`
 	TitleSHA256       string `json:"title_sha256"`
 	DescriptionSHA256 string `json:"description_sha256"`
 }
@@ -60,31 +77,17 @@ func sha256Hex(s string) string {
 
 // buildIssueStateSnapshot captures the compared fields of an issue as of now.
 func buildIssueStateSnapshot(issue db.Issue) issueStateSnapshot {
-	snap := issueStateSnapshot{
+	return issueStateSnapshot{
 		Version:           issueSnapshotVersion,
 		Status:            issue.Status,
-		Priority:          issue.Priority,
 		TitleSHA256:       sha256Hex(issue.Title),
 		DescriptionSHA256: sha256Hex(issue.Description.String),
 	}
-	// An unassigned issue and an issue assigned to nobody-in-particular must
-	// hash the same way, so read through the pgtype validity rather than
-	// letting an invalid column contribute a zero UUID string.
-	if issue.AssigneeType.Valid {
-		snap.AssigneeType = issue.AssigneeType.String
-	}
-	if issue.AssigneeID.Valid {
-		snap.AssigneeID = uuidToString(issue.AssigneeID)
-	}
-	return snap
 }
 
 // changedFieldsSince reports which compared fields differ from prev, in the
-// fixed order above. An empty result means every compared field matched.
-//
-// Assignee is ONE field: type and id only mean something together, and a
-// member→agent reassignment that kept a coincidentally equal id half is still
-// one reassignment to report.
+// fixed order above. An empty result means every compared field matched — and
+// says nothing about the fields outside the set.
 func (s issueStateSnapshot) changedFieldsSince(prev issueStateSnapshot) []string {
 	var changed []string
 	if s.TitleSHA256 != prev.TitleSHA256 {
@@ -95,12 +98,6 @@ func (s issueStateSnapshot) changedFieldsSince(prev issueStateSnapshot) []string
 	}
 	if s.Status != prev.Status {
 		changed = append(changed, issueFieldStatus)
-	}
-	if s.AssigneeType != prev.AssigneeType || s.AssigneeID != prev.AssigneeID {
-		changed = append(changed, issueFieldAssignee)
-	}
-	if s.Priority != prev.Priority {
-		changed = append(changed, issueFieldPriority)
 	}
 	return changed
 }

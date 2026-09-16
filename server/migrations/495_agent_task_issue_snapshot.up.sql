@@ -17,11 +17,19 @@
 -- priority, and the first one missed would report "unchanged" forever with no
 -- symptom. A snapshot taken at claim time has exactly one writer.
 --
--- Shape is {"v":1,...}: version, status, assignee_type, assignee_id, priority,
--- and sha256 of title and description. Hashes, not bodies — this column is a
--- comparison key, never a second copy of the issue text. `v` gates the
--- comparison: a snapshot written by a different version is treated as unknown,
--- which degrades to the pre-existing "read the issue" instruction.
+-- Shape is {"v":2,...}: version, status, and sha256 of title and description.
+-- Hashes, not bodies — this column is a comparison key, never a second copy of
+-- the issue text. `v` gates the comparison: a snapshot written by a different
+-- version is treated as unknown, which degrades to the pre-existing "read the
+-- issue" instruction, so narrowing or widening the set is always safe.
+--
+-- The set is deliberately smaller than "the issue": it answers only "must the
+-- agent read the issue again?", so a field belongs here only if changing it
+-- alters what the agent does AND its current value is not already in the
+-- per-turn message. Assignee and priority fail that test — the claim ships the
+-- current assignee outright, and priority does not change the agent's work —
+-- so v2 dropped them. Labels, parent, due date, stage, project and metadata
+-- were never in the set.
 --
 -- Nullable, and NULL is the normal state for every row written before this
 -- migration. A reader must treat NULL as "not compared", never as "unchanged".
