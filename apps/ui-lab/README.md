@@ -74,8 +74,10 @@ clearing browser data or changing ports. All sample edits stay inside the frame.
   This is a visual workbench, not a full backend simulator. Other groupings,
   advanced filter combinations, uploads and agent execution are not supported.
 - `--issue-row-height` is used by the production `ListRow`. Its default remains
-  36px; virtualization measures actual row heights. Table and board density are
-  independent. Other design changes still export to the shared token file.
+  36px. First-paint spacers use the same token before scroll restoration;
+  virtualization starts from the rendered seed row height and measures subsequent
+  changes. Table and board density are independent. Other design changes still
+  export to the shared token file.
 - The frame's sidebar follows product breakpoints. Use the real sidebar toggle
   when the preview width triggers automatic collapse. Theme, portals and fonts
   are isolated from the workbench controls and the original comparison frame.
@@ -196,6 +198,9 @@ Tabs, Input, focus and error roles to editable tokens. It mounts production
 Button, Tabs and Input; hover/press/focus come from real browser interactions,
 with local disabled/error toggles. Click a mapping token to edit it. The controls
 keep their current production styles instead of simulating states with Lab CSS.
+
+The light brand defaults to `#0070E3`. Dark mode retains its brighter source
+brand because the same token also paints body-text links on dark surfaces.
 
 Contrast is measured from computed styles after transitions, recalculated on
 interaction, token edits and theme changes. The checker composites nested alpha
