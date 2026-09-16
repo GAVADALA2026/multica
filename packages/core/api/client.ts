@@ -1,5 +1,5 @@
-import type { IssueWakeup } from "../types/issue-wakeup";
-import { IssueWakeupSchema } from "./schemas";
+import type { IssueWakeup, IssueWakeupSummaryRow } from "../types/issue-wakeup";
+import { IssueWakeupSchema, IssueWakeupSummaryRowSchema } from "./schemas";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -1073,6 +1073,13 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/wakeups`);
     const parsed = parseWithFallback<IssueWakeup[] | null>(raw, IssueWakeupSchema.array(), null, { endpoint: "GET /api/issues/:id/wakeups" });
     if (!parsed) throw new Error("Could not load wakeups");
+    return parsed;
+  }
+
+  async listIssueWakeupSummaries(): Promise<IssueWakeupSummaryRow[]> {
+    const raw = await this.fetch<unknown>("/api/issue-wakeup-summaries");
+    const parsed = parseWithFallback<IssueWakeupSummaryRow[] | null>(raw, IssueWakeupSummaryRowSchema.array(), null, { endpoint: "GET /api/issue-wakeup-summaries" });
+    if (!parsed) throw new Error("Could not load wakeup summaries");
     return parsed;
   }
 

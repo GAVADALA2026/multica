@@ -44,6 +44,49 @@ func (h *Handler) ListIssueWakeups(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []db.ListIssueWakeupsRow{}
 	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, 500, "failed to resolve agent access")
+		return
+	}
+	for i := range rows {
+		if _, visible := allowed[uuidToString(rows[i].FilterAgentID)]; !visible {
+			rows[i].FilterAgentName = pgtype.Text{}
+		}
+	}
+	writeJSON(w, 200, rows)
+}
+
+func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, 500, "failed to resolve agent access")
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(allowed))
+	for id := range allowed {
+		ids = append(ids, parseUUID(id))
+	}
+	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids})
+	if err != nil {
+		wakeupError(w, err)
+		return
+	}
+	if rows == nil {
+		rows = []db.ListWorkspaceWakeupSummaryRowsRow{}
+	}
 	writeJSON(w, 200, rows)
 }
 

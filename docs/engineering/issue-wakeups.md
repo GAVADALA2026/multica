@@ -8,11 +8,23 @@ process, business-condition evaluator, or second run lifecycle.
 ## Product contract
 
 The shared web/Desktop issue sidebar lists event and time wakeups together,
-including the target agent, instruction, source, next time and latest run.
-The switch withdraws a configuration's unclaimed work. Running or already
+as two-line trigger/target summaries. Instructions, full filters, errors and
+latest-run transcript are in the details popover; Turn off stays directly
+available beside the row and withdraws a configuration's unclaimed work.
+Ended configurations are collapsed by default. A consumed one-shot remains
+in the current group while its run is queued, deferred, dispatched or running.
+Running or already
 claimed tasks use the normal Stop controls. Terminal lifecycle categories
 (`done` and `closed`, including custom statuses) disable all configurations;
 reopening does not reactivate them.
+
+Board and list activity cues prioritize current runs, mark wakeup-origin runs,
+and show future wakeups as a separate count. Without an active run they show the
+next scheduled time (including a date when needed) or waiting for an event.
+A shared workspace summary request contains exact enabled counts and at most
+three previews per issue, never prompts or history. Access follows agent
+visibility and workspace membership. The issue surface polls once every ten
+seconds; cards select their own rows from that shared cache.
 
 Agents manage configurations with `multica issue wakeup`:
 
@@ -149,6 +161,12 @@ their own writes cannot feed back without attribution. Before rolling applicatio
 code back, disable subscriptions using the expanded catalog; before rolling the
 capture migration back, drain their inputs as well. The down migration restores
 the original five-event capture behavior and retains configuration/receipt data.
+
+Migration 503 adds a concurrent partial index for enabled workspace summaries.
+It can be rolled back independently of configuration data. Deploy the server
+before the UI: an older server lacks the summary endpoint, so cards cannot
+show future wakeups until it is upgraded. Existing task activity still works.
+New detail fields are optional for rolling compatibility.
 
 Integration coverage includes transaction rollback, already-terminal registration,
 source scope, one-shot deduplication, independent comment/assign input, merging,

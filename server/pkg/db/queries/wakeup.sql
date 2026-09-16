@@ -2,8 +2,30 @@
 INSERT INTO issue_wakeup(id,workspace_id,issue_id,agent_id,created_by,source_task_id,parent_comment_id,instruction,kind,mode,event_types,filter_agent_id,filter_task_id,interval_seconds,cron_expression,timezone,next_fire_at)
 VALUES(@id,@workspace_id,@issue_id,@agent_id,@created_by,sqlc.narg(source_task_id),sqlc.narg(parent_comment_id),@instruction,@kind,@mode,@event_types,sqlc.narg(filter_agent_id),sqlc.narg(filter_task_id),sqlc.narg(interval_seconds),sqlc.narg(cron_expression),@timezone,sqlc.narg(next_fire_at)) RETURNING *;
 -- name: ListIssueWakeups :many
-SELECT w.*, a.name AS agent_name FROM issue_wakeup w JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
+SELECT w.*, a.name AS agent_name, source.name AS filter_agent_name, t.status AS last_task_status
+FROM issue_wakeup w JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
+LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id
+LEFT JOIN agent_task_queue t ON t.id=w.last_task_id AND t.issue_id=w.issue_id AND t.agent_id=w.agent_id
 WHERE w.workspace_id= @workspace_id AND w.issue_id= @issue_id ORDER BY w.created_at,w.id;
+
+-- name: ListWorkspaceWakeupSummaryRows :many
+-- No prompts/history; at most three previews per issue plus exact counts.
+WITH ranked AS (
+ SELECT w.issue_id,w.id,w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,
+  w.filter_task_id,source.name AS filter_agent_name,w.interval_seconds,w.cron_expression,w.timezone,w.next_fire_at,
+  count(*) OVER(PARTITION BY w.issue_id) AS active_count,
+  count(*) FILTER(WHERE w.kind='event') OVER(PARTITION BY w.issue_id) AS event_count,
+  row_number() OVER(PARTITION BY w.issue_id ORDER BY w.next_fire_at NULLS LAST,w.created_at,w.id) AS rank
+ FROM issue_wakeup w
+ JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id
+ JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
+ LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY(@agent_ids::uuid[])
+ WHERE w.workspace_id= @workspace_id AND w.enabled AND w.agent_id=ANY(@agent_ids::uuid[])
+  AND i.status NOT IN ('done','cancelled')
+  AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
+)
+SELECT issue_id,id,agent_id,agent_name,kind,mode,event_types,filter_task_id,filter_agent_name,interval_seconds,cron_expression,timezone,next_fire_at,active_count,event_count
+FROM ranked WHERE rank<=3 ORDER BY issue_id,rank;
 -- name: GetIssueWakeup :one
 SELECT * FROM issue_wakeup WHERE id= @id AND workspace_id= @workspace_id;
 -- name: LockIssueWakeup :one

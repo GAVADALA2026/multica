@@ -966,6 +966,15 @@
     "reaction_added": "Reaction added",
     "reaction_removed": "Reaction removed",
     "attachment_attached": "Attachment added",
-    "attachment_detached": "Attachment removed"
+    "attachment_detached": "Attachment removed",
+    "at_time": "Wake at {{time}}",
+    "wake_agent": "Wake {{agent}}",
+    "needs_attention": "Needs attention",
+    "turn_off": "Turn off",
+    "ended": "Ended {{count}}",
+    "waiting_event": "Waiting for event",
+    "triggered_by_wakeup": "Triggered by wakeup",
+    "upcoming": "Upcoming wakeups: {{count}}",
+    "more": "{{count}} more"
   }
 }

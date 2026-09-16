@@ -2604,13 +2604,14 @@ ORDER BY atq.agent_id, bucket;
 -- grows with how much terminal history the workspace has accumulated. The
 -- (created_at, id) tie-break makes the pick deterministic when completed_at
 -- ties or is NULL — plain completed_at DESC returned an arbitrary row there.
--- Row shape and row set are unchanged.
+-- Deferred wakeup retries also remain visible as queued work.
 --
 -- Both halves JOIN / scan agent because agent_task_queue has no workspace_id.
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND (atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    OR (atq.status='deferred' AND atq.context->>'wakeup_id' IS NOT NULL))
 
 UNION ALL
 

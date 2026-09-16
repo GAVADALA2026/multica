@@ -17,4 +17,27 @@ export interface IssueWakeup {
   disabled_at: string | null;
   last_task_id: string | null;
   last_error: string | null;
+  filter_agent_name?: string | null;
+  last_task_status?: string | null;
+}
+
+export type WakeupPreview = Pick<
+  IssueWakeup,
+  | "id"
+  | "issue_id"
+  | "agent_id"
+  | "agent_name"
+  | "kind"
+  | "mode"
+  | "event_types"
+  | "filter_task_id"
+  | "filter_agent_name"
+  | "interval_seconds"
+  | "cron_expression"
+  | "timezone"
+  | "next_fire_at"
+>;
+export interface IssueWakeupSummaryRow extends WakeupPreview {
+  active_count: number;
+  event_count: number;
 }

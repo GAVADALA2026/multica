@@ -935,6 +935,15 @@
     "reaction_added": "リアクションを追加",
     "reaction_removed": "リアクションを削除",
     "attachment_attached": "添付ファイルを追加",
-    "attachment_detached": "添付ファイルを削除"
+    "attachment_detached": "添付ファイルを削除",
+    "at_time": "{{time}} に起動",
+    "wake_agent": "{{agent}} を起動",
+    "needs_attention": "対応が必要",
+    "turn_off": "オフにする",
+    "ended": "終了済み {{count}}",
+    "waiting_event": "イベント待ち",
+    "triggered_by_wakeup": "自動起動による実行",
+    "upcoming": "今後の起動：{{count}}",
+    "more": "ほか {{count}} 件"
   }
 }

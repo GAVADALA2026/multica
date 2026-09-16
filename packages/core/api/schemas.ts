@@ -1762,6 +1762,7 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+  wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
   id: z.string(),
@@ -3429,4 +3430,11 @@ export const IssueWakeupSchema = z.object({
   interval_seconds: z.number().nullable(), cron_expression: z.string().nullable(), timezone: z.string(),
   next_fire_at: z.string().nullable(), enabled: z.boolean(), disabled_at: z.string().nullable(),
   last_task_id: z.string().nullable(), last_error: z.string().nullable(),
+  filter_agent_name: z.string().nullable().optional(), last_task_status: z.string().nullable().optional(),
 });
+
+export const IssueWakeupSummaryRowSchema = IssueWakeupSchema.pick({
+  id: true, issue_id: true, agent_id: true, agent_name: true, kind: true, mode: true,
+  event_types: true, filter_task_id: true, filter_agent_name: true, interval_seconds: true,
+  cron_expression: true, timezone: true, next_fire_at: true,
+}).extend({ active_count: z.number().int().positive(), event_count: z.number().int().nonnegative() });

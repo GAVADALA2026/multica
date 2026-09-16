@@ -1,5 +1,18 @@
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "../api";
+
+export function workspaceWakeupSummariesOptions(workspaceId: string) {
+  return queryOptions({
+    queryKey: ["issue-wakeup-summaries", workspaceId],
+    queryFn: () => api.listIssueWakeupSummaries(),
+    enabled: !!workspaceId,
+    staleTime: 10_000,
+  });
+}
 
 export function issueWakeupsOptions(workspaceId: string, issueId: string) {
   return queryOptions({
@@ -14,6 +27,15 @@ export function useDisableIssueWakeup(workspaceId: string, issueId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.disableIssueWakeup(issueId, id),
-    onSuccess: () => client.invalidateQueries({ queryKey: issueWakeupsOptions(workspaceId, issueId).queryKey }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: issueWakeupsOptions(workspaceId, issueId).queryKey,
+        }),
+        client.invalidateQueries({
+          queryKey: workspaceWakeupSummariesOptions(workspaceId).queryKey,
+        }),
+      ]);
+    },
   });
 }

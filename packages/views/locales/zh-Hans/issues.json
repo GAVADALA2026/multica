@@ -935,6 +935,15 @@
     "reaction_added": "新增表态",
     "reaction_removed": "移除表态",
     "attachment_attached": "关联附件",
-    "attachment_detached": "移除附件"
+    "attachment_detached": "移除附件",
+    "at_time": "{{time}} 唤醒",
+    "wake_agent": "唤醒 {{agent}}",
+    "needs_attention": "需要处理",
+    "turn_off": "关闭",
+    "ended": "已结束 {{count}}",
+    "waiting_event": "等待事件",
+    "triggered_by_wakeup": "由唤醒触发",
+    "upcoming": "后续唤醒：{{count}}",
+    "more": "另有 {{count}} 条"
   }
 }

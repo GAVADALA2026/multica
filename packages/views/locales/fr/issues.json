@@ -966,6 +966,15 @@
     "reaction_added": "Réaction ajoutée",
     "reaction_removed": "Réaction supprimée",
     "attachment_attached": "Pièce jointe ajoutée",
-    "attachment_detached": "Pièce jointe retirée"
+    "attachment_detached": "Pièce jointe retirée",
+    "at_time": "Réveil à {{time}}",
+    "wake_agent": "Réveiller {{agent}}",
+    "needs_attention": "Action requise",
+    "turn_off": "Désactiver",
+    "ended": "Terminés : {{count}}",
+    "waiting_event": "En attente d’un événement",
+    "triggered_by_wakeup": "Déclenché par un réveil",
+    "upcoming": "Réveils à venir : {{count}}",
+    "more": "{{count}} de plus"
   }
 }
