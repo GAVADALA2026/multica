@@ -9,8 +9,26 @@ formulae, and container images.
 
 The macOS Desktop artifacts are still signed and notarized on the designated
 release Mac. Use the repository's
-[`release-desktop`](../.agents/skills/release-desktop/SKILL.md) skill after the
-matching GitHub Release and CLI assets exist.
+[`release-desktop`](release-desktop/SKILL.md) runbook after the matching GitHub
+Release and CLI assets exist.
+
+The workspace `Release Desktop` skill is the executable copy of this runbook;
+repository files are not registered as workspace skills automatically. After a
+change to the runbook merges, its creator or a workspace owner/admin must check
+out the merged `main` branch and synchronize it before the next macOS release:
+
+```bash
+SKILL_ID=$(multica skill list --output json | jq -r \
+  '[.[] | select(.name == "Release Desktop")] | if length == 1 then .[0].id else error("expected exactly one Release Desktop skill") end')
+multica skill update "$SKILL_ID" \
+  --content-file .github/release-desktop/SKILL.md \
+  --output json
+multica skill get "$SKILL_ID" --output json
+shasum -a 256 .github/release-desktop/SKILL.md
+```
+
+Updating the existing skill preserves its ID and agent bindings. Confirm the
+returned `content_hash` changed to the merged runbook's hash before releasing.
 
 The verification job runs the Go tests and `govulncheck` before any publishing
 job starts. The vulnerability scan is fail-closed by default.
