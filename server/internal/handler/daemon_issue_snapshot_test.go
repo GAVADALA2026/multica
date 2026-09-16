@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // seedPriorRunWithSnapshot creates the terminal prior task this agent's next
@@ -298,10 +299,11 @@ func TestClaimTaskByRuntime_DeltasDateFromTheResumedRun(t *testing.T) {
 			// The run we will resume. Its snapshot says the description was
 			// "older instructions" — which is NOT what the issue says now.
 			olderID := dbfx.Task(t, agentID, testutil.Cols{
-				"runtime_id":     runtimeID,
-				"issue_id":       issueID,
-				"status":         "failed",
-				"failure_reason": "agent_error.unknown",
+				"runtime_id": runtimeID,
+				"issue_id":   issueID,
+				// Completed: it finished a turn, so it proved its prompt
+				// reached the session and may date a delta.
+				"status":         "completed",
 				"session_id":     "older-healthy-session",
 				"work_dir":       "/tmp/resumed-anchor-workdir",
 				"started_at":     testutil.Raw("now() - interval '2 hours'"),
@@ -523,5 +525,94 @@ func TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope(t *testing.T) {
 	if resp.Task.IssueAssigneeType != "agent" || resp.Task.IssueAssigneeID != agentID {
 		t.Errorf("current assignee must still ship: type=%q id=%q, want agent/%s",
 			resp.Task.IssueAssigneeType, resp.Task.IssueAssigneeID, agentID)
+	}
+}
+
+// TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads closes the
+// last window in "which run may date a delta", and it is a step later than the
+// never-started case above.
+//
+// A snapshot is written at CLAIM time. The daemon then writes started_at
+// (TaskService.StartTask) and only afterwards launches the provider, so a run
+// can carry both a snapshot and a started_at while the prompt never reached the
+// session: the daemon exits during prepare and orphan recovery marks the row
+// failed. Anchoring there reports "unchanged" across a real edit AND hides
+// every comment older than that row's start.
+//
+// Nothing on the row separates "failed after the provider ran" from "failed
+// before it ran" — session_id is inherited by CreateRetryTask at insert, and
+// started_at precedes the launch — so only a COMPLETED run may date a delta.
+//
+// The fixture drives the real path: CreateRetryTask → claim → StartTask →
+// RecoverOrphanedTasksForRuntime → follow-up claim (from Niko's review repro).
+func TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "before-provider snapshot runtime")
+	const name = "before-provider snapshot agent"
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
+
+	triggerID := dbfx.Comment(t, issueID, "original trigger", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '3 hours'"),
+	})
+	// The run whose session everything below inherits. Its memory — and its
+	// snapshot — say "old requirements".
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "issue_id": issueID,
+		"status": "failed", "failure_reason": "provider_network",
+		"session_id": "session-before-edit", "work_dir": "/tmp/before-provider-snapshot",
+		"trigger_comment_id": triggerID,
+		"started_at":         testutil.Raw("now() - interval '2 hours'"),
+		"completed_at":       testutil.Raw("now() - interval '110 minutes'"),
+		"issue_snapshot":     issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "old requirements", "in_progress"),
+	})
+	// A comment that session never saw.
+	dbfx.Comment(t, issueID, "instructions the old session has never seen", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '30 minutes'"),
+	})
+
+	// The retry inherits the session and is claimed, which writes ITS snapshot —
+	// of the issue as it is NOW.
+	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(parentID)})
+	if err != nil {
+		t.Fatalf("create retry task: %v", err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE id = $1`, child.ID)
+	dbfx.Cleanup(t, `DELETE FROM task_token WHERE task_id = $1`, child.ID)
+	if first := claimCommentTask(t, runtimeID, "before-provider-claim").Task; first.ID != uuidToString(child.ID) {
+		t.Fatalf("fixture did not claim the retry child: got %s", first.ID)
+	}
+
+	// started_at lands here. The provider never launches.
+	if started, err := testHandler.TaskService.StartTask(ctx, child.ID); err != nil || !started.StartedAt.Valid {
+		t.Fatalf("StartTask did not record started_at: %v", err)
+	}
+	recovered, err := testHandler.Queries.RecoverOrphanedTasksForRuntime(ctx, parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("recover orphaned tasks: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != child.ID {
+		t.Fatalf("expected recovery of the started retry, got %+v", recovered)
+	}
+	// The fixture's whole point: a row that is failed, carries the inherited
+	// session, HAS started_at, and has a snapshot of the current issue.
+	if failed := recovered[0]; !failed.StartedAt.Valid || failed.SessionID.String != "session-before-edit" {
+		t.Fatalf("fixture must preserve the inherited session with started_at: %+v", failed)
+	}
+
+	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+	got := claimCommentTask(t, runtimeID, "after-provider-gap").Task
+	if got.PriorSessionID != "session-before-edit" {
+		t.Fatalf("fixture did not resume the inherited session: %+v", got)
+	}
+	if got.IssueStateDeltaKnown {
+		t.Errorf("a run that never reached the provider must not date the issue delta: known=%v changed=%v",
+			got.IssueStateDeltaKnown, got.IssueChangedFields)
+	}
+	if got.DeltaKnown {
+		t.Errorf("a run that never reached the provider must not date the comment delta either: known=%v count=%d since=%q",
+			got.DeltaKnown, got.NewCommentCount, got.NewCommentsSince)
 	}
 }

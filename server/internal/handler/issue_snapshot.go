@@ -125,6 +125,11 @@ func decodeIssueStateSnapshot(raw []byte) (issueStateSnapshot, bool) {
 	return snap, true
 }
 
+// taskStatusCompleted is the only terminal status that PROVES a run delivered
+// its prompt to the provider. The distinction matters because the row is a
+// delta anchor, not just a session pointer — see resumedRunAnchor.
+const taskStatusCompleted = "completed"
+
 // resumedRunAnchor is the prior run whose provider session THIS claim hands
 // back, and therefore the only run either of a claim's two deltas may be
 // measured from.
@@ -142,15 +147,42 @@ func decodeIssueStateSnapshot(raw []byte) (issueStateSnapshot, bool) {
 // neither delta is computed and the daemon falls back to the reads it has
 // always performed.
 type resumedRunAnchor struct {
-	// StartedAt dates the comment delta, and gates BOTH deltas. It is invalid
-	// for a row that was claimed but never ran — a retry child that inherited
-	// the session, had its snapshot written at claim, then failed during
-	// prepare. Such a row's snapshot describes an issue the session's memory
-	// never saw, so it may date nothing.
+	// StartedAt dates the comment delta.
 	StartedAt pgtype.Timestamptz
 	// IssueSnapshot is the issue state that run was handed at ITS claim. Empty
 	// for a run that predates the column.
 	IssueSnapshot []byte
+}
+
+// newResumedRunAnchor returns the anchor for a resume source, or nil when that
+// source cannot date a delta.
+//
+// A snapshot is written at CLAIM time, so its existence proves only that the
+// server built a payload — not that the agent ever saw it. Between those two
+// points the daemon writes started_at (TaskService.StartTask) and only then
+// launches the provider, so a run can carry a snapshot AND a started_at and
+// still have died before the prompt reached the session: the daemon exits
+// during prepare, the runtime drops, and orphan recovery marks the row failed.
+// Its snapshot then describes an issue that session never saw, and comparing
+// against it reports "unchanged" across a real edit — plus a comment anchor
+// that hides every comment older than it.
+//
+// Nothing on the row distinguishes "failed after the provider ran" from "failed
+// before it ran": session_id is inherited by CreateRetryTask at insert, and
+// started_at precedes the launch. The only terminal status that PROVES delivery
+// is 'completed' — a run cannot finish a turn it never started.
+//
+// So failed and cancelled sources date nothing. Their SESSION is still resumed
+// (GetLastTaskSession accepts them on purpose, and that behaviour is unchanged);
+// the run simply performs the context reads it always did. That is the cheap
+// side of the trade: those paths are the ones already recovering from a
+// problem, and the optimization's main case — an ordinary follow-up after a
+// healthy run — is untouched.
+func newResumedRunAnchor(status string, startedAt pgtype.Timestamptz, snapshot []byte) *resumedRunAnchor {
+	if status != taskStatusCompleted || !startedAt.Valid {
+		return nil
+	}
+	return &resumedRunAnchor{StartedAt: startedAt, IssueSnapshot: snapshot}
 }
 
 // commentCountScope carries the issue/workspace/trigger identity the comment

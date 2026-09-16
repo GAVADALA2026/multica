@@ -4373,7 +4373,7 @@ WITH retired_sessions AS (
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
-SELECT session_id, work_dir, runtime_id, started_at, issue_snapshot FROM latest_per_session
+SELECT session_id, work_dir, runtime_id, status, started_at, issue_snapshot FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
@@ -4422,6 +4422,7 @@ type GetLastTaskSessionRow struct {
 	SessionID     pgtype.Text        `json:"session_id"`
 	WorkDir       pgtype.Text        `json:"work_dir"`
 	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	Status        string             `json:"status"`
 	StartedAt     pgtype.Timestamptz `json:"started_at"`
 	IssueSnapshot []byte             `json:"issue_snapshot"`
 }
@@ -4535,10 +4536,14 @@ type GetLastTaskSessionRow struct {
 // healthy. retired_session_id records the abandonment itself, so one row
 // retiring a session removes it from every later lookup no matter how many
 // clean rows still reference it.
-// started_at and issue_snapshot ride along because the row this query picks IS
-// the run whose context the next turn continues, and both of a claim's deltas
-// must be measured from THAT run rather than from whichever run started last
-// (MUL-7344). The two are not always the same row: this query skips poisoned
+// status, started_at and issue_snapshot ride along because the row this query
+// picks IS the run whose context the next turn continues, and both of a claim's
+// deltas must be measured from THAT run rather than from whichever run started
+// last (MUL-7344). status is what says the run actually delivered its prompt to
+// the provider: this query deliberately accepts failed and cancelled rows so
+// their SESSION stays resumable, but such a row may have died before the agent
+// ever ran, and its snapshot would then describe an issue the session never
+// saw. The two are not always the same row: this query skips poisoned
 // and retired sessions, so it can legitimately return an OLDER run than the
 // newest one. Measuring against the newest one would then tell an agent whose
 // resumed memory predates an edit that the issue is unchanged.
@@ -4549,6 +4554,7 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 		&i.SessionID,
 		&i.WorkDir,
 		&i.RuntimeID,
+		&i.Status,
 		&i.StartedAt,
 		&i.IssueSnapshot,
 	)

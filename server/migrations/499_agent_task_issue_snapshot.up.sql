@@ -13,9 +13,9 @@
 --
 -- One writer per row is why the column lives here and not on `issue`: a
 -- content_revision on the issue row would have to be bumped by every one of the
--- dozen-odd writers that touch a title, description, status, assignee or
--- priority, and the first one missed would report "unchanged" forever with no
--- symptom. A snapshot taken at claim time has exactly one writer.
+-- dozen-odd writers that touch any compared field, and the first one missed
+-- would report "unchanged" forever with no symptom. A snapshot taken at claim
+-- time has exactly one writer, whatever the compared set happens to be.
 --
 -- Shape is {"v":1,...}: version, status, and sha256 of title and description.
 -- Hashes, not bodies — this column is a comparison key, never a second copy of

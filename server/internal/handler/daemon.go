@@ -2806,8 +2806,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.PriorSessionID = src.SessionID.String
 					// The deltas date from the run we actually resume, which on
 					// this path is the operator-chosen source — routinely NOT
-					// the newest run on the issue (MUL-7344).
-					resumeAnchor = &resumedRunAnchor{StartedAt: src.StartedAt, IssueSnapshot: src.IssueSnapshot}
+					// the newest run on the issue. nil unless that run proved it
+					// delivered its prompt to the provider (MUL-7344).
+					resumeAnchor = newResumedRunAnchor(src.Status, src.StartedAt, src.IssueSnapshot)
 				}
 				// MUL-5305: if the source task withheld its Codex session because
 				// the rollout was missing, this rerun has nothing resumable from it
@@ -2841,8 +2842,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
 					// and retired sessions, so `prior` can be an older run than
-					// the newest one on the issue (MUL-7344).
-					resumeAnchor = &resumedRunAnchor{StartedAt: prior.StartedAt, IssueSnapshot: prior.IssueSnapshot}
+					// the newest one on the issue; it also accepts failed and
+					// cancelled rows, which keep the session resumable but prove
+					// nothing about delivery (MUL-7344).
+					resumeAnchor = newResumedRunAnchor(prior.Status, prior.StartedAt, prior.IssueSnapshot)
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
@@ -2884,15 +2887,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// the resumed session can be older than the newest run; the daemon
 		// applies it as its own separate gate.
 		//
-		// The anchor row must also have STARTED. GetLastTaskSession returns the
-		// session's latest terminal row, and that row can be a retry child that
-		// inherited the session, was claimed (so its snapshot was written) and
-		// then failed before the agent ever ran — runtime offline during
-		// prepare, cancelled while dispatched. Its snapshot then describes an
-		// issue the session's memory never saw, and comparing against it would
-		// report "unchanged" across an edit made after the last run that
-		// actually executed. A never-started row dates neither delta.
-		if resumeAnchor != nil && resumeAnchor.StartedAt.Valid {
+		// newResumedRunAnchor already rejected every source that cannot date a
+		// delta — anything that did not finish a turn, and so never proved the
+		// prompt reached the session. A non-nil anchor here is a completed run.
+		if resumeAnchor != nil {
 			if prev, ok := decodeIssueStateSnapshot(resumeAnchor.IssueSnapshot); ok {
 				resp.IssueStateDeltaKnown = true
 				resp.IssueChangedFields = currentSnapshot.changedFieldsSince(prev)
