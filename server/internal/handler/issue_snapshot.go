@@ -21,8 +21,11 @@ import (
 // "unchanged" nor a changed-field list would be true. Unknown degrades to the
 // unconditional issue read, which is the behaviour that predates this column.
 //
-// v2 dropped assignee and priority from the compared set (see below).
-const issueSnapshotVersion = 2
+// This is version 1 — the first shape the column has ever held. The set below
+// was narrowed during review, before any of this shipped, so no stored row has
+// ever carried a wider one and there is nothing for a bump to protect. The
+// version earns its place from here on, not retroactively.
+const issueSnapshotVersion = 1
 
 // Compared field names, in the fixed order they are reported.
 //

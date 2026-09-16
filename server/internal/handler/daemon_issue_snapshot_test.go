@@ -485,7 +485,7 @@ func TestClaimTaskByRuntime_NoAdoptedSessionHasNoDeltas(t *testing.T) {
 	}
 }
 
-// TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope pins the v2 narrowing.
+// TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope pins the compared set.
 // Reassigning an issue or changing its priority does not change what the agent
 // has to read, so neither is compared — an issue whose ONLY change is one of
 // them is reported as unchanged, and the prompt says which three fields were
@@ -516,7 +516,7 @@ func TestClaimTaskByRuntime_AssigneeAndPriorityAreOutOfScope(t *testing.T) {
 		t.Fatalf("the comparison must still run")
 	}
 	if len(resp.Task.IssueChangedFields) != 0 {
-		t.Errorf("issue_changed_fields = %v, want empty — assignee and priority are out of scope in v2",
+		t.Errorf("issue_changed_fields = %v, want empty — assignee and priority are out of the compared set",
 			resp.Task.IssueChangedFields)
 	}
 	// The value the agent actually needs is still delivered.
