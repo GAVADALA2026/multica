@@ -604,6 +604,23 @@ describe("BillingTab", () => {
     expect(await screen.findByText(copy)).toBeInTheDocument();
   });
 
+  it("maps a disabled billing capability to unavailable instead of a permission error", async () => {
+    const user = userEvent.setup();
+    mocks.checkout.mockRejectedValue(
+      new ApiError("request failed", 403, "Forbidden", {
+        code: "workspace_subscriptions_disabled",
+      }),
+    );
+    renderWithI18n(<BillingTab />);
+
+    await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+    await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+    expect(
+      await screen.findByText("Billing is temporarily unavailable. Retry in a moment."),
+    ).toBeInTheDocument();
+  });
+
   it("consumes cancel callback params once while preserving the active tab", () => {
     navigationState.search =
       "tab=billing&result=cancel&session_id=cs_test_1&source=email";

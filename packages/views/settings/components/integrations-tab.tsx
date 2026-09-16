@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { ArrowLeft, ChevronRight, FolderGit2, Blocks } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError } from "@multica/core/api";
+import { errorCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -64,7 +64,7 @@ export function IntegrationsTab() {
   });
   const composioAvailable =
     composioEnabled &&
-    !(toolkits.error instanceof ApiError && toolkits.error.status === 503);
+    errorCode(toolkits.error) !== "composio_not_configured";
 
   // Reuse the detail pages' query caches. Never report a failed or pending read
   // as disconnected, and do not issue deployment-disabled integration queries.
