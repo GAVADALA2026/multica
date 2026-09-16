@@ -40,7 +40,7 @@ it.each(["empty", "error"])(
   "keeps wakeups reachable when autopilots are %s",
   async (state) => {
     if (state === "empty")
-      vi.mocked(api.listAutopilots).mockResolvedValue({ autopilots: [] });
+      vi.mocked(api.listAutopilots).mockResolvedValue({ autopilots: [], total: 0 });
     else
       vi.mocked(api.listAutopilots).mockRejectedValue(
         new Error("Autopilots unavailable"),
@@ -60,7 +60,7 @@ it.each(["empty", "error"])(
     expect(await screen.findByText("Wakeup inventory")).toBeVisible();
     expect(screen.queryByRole("button", { name: "New autopilot" })).toBeNull();
     fireEvent.click(
-      screen.getByRole("tab", { name: "Autopilot", exact: true }),
+      screen.getByRole("tab", { name: "Autopilot" }),
     );
     expect(
       await screen.findByRole("button", { name: "New autopilot" }),

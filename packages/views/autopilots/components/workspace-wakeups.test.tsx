@@ -158,7 +158,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
   ).toBeVisible();
   expect(disable).not.toHaveBeenCalled();
   fireEvent.click(
-    screen.getByRole("button", { name: "Turn off", exact: true }),
+    screen.getByRole("button", { name: "Turn off" }),
   );
   await screen.findByText("Turned off: 1. Failed: 1.");
   expect(disable.mock.calls).toEqual([
@@ -176,7 +176,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
 it("resets page and selection on scope or search changes and sends bounded page requests", async () => {
   mount();
   await screen.findByText("Issue a");
-  fireEvent.click(screen.getByRole("button", { name: "Next", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await waitFor(() => expect(queries.at(-1)?.offset).toBe(50));
   await screen.findByText("Issue a");
   fireEvent.click(
@@ -196,7 +196,7 @@ it("resets page and selection on scope or search changes and sends bounded page 
   fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "CI & release" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
   await waitFor(() => expect(queries.at(-1)?.search).toBe("CI & release"));
 });
 

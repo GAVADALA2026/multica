@@ -143,7 +143,7 @@ func TestWorkspaceWakeupsInventory(t *testing.T) {
 			t.Fatal("private source exposed")
 		}
 	}
-	dbfx.Exec(t, "UPDATE agent_task_queue SET originator_user_id=$2 WHERE id=$1", run, outsider)
+	dbfx.Exec(t, "UPDATE agent_task_queue SET originator_user_id=$2,accountable_user_id=$2 WHERE id=$1", run, outsider)
 	trusted := newRequest("GET", "/?scope=all", nil)
 	trusted.Header.Set("X-Agent-ID", agent)
 	trusted.Header.Set("X-Task-ID", run)
