@@ -101,13 +101,14 @@ export function InboxFilterMenu({
   const inboxStatusKeys = useMemo(
     () => [
       ...new Set([
+        ...filters.statuses,
         ...Object.keys(facets?.statuses ?? {}),
         ...items.flatMap((item) =>
           item.issue_status == null ? [] : [item.issue_status],
         ),
       ]),
     ],
-    [items, facets],
+    [items, facets, filters.statuses],
   );
   const statusOptions = useStatusOptions(wsId, inboxStatusKeys);
   const effectiveFilters = useMemo(

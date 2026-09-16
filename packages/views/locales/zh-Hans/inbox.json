@@ -28,6 +28,7 @@
     "open_in_new_tab": "在新标签页打开"
   },
   "list": {
+    "loading_selection": "正在加载通知…",
     "empty": "暂无通知",
     "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
@@ -99,6 +100,7 @@
     "unarchived": "已恢复通知"
   },
   "errors": {
+    "archived_lookup_failed": "无法加载链接指向的通知",
     "source_context_retry_failed": "无法使用原始上下文重试",
     "source_context_retry_unavailable": "该上下文已无法重试，请从派生起点重新发起。",
     "mark_read_failed": "标为已读失败",

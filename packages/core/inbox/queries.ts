@@ -25,11 +25,9 @@ export function inboxListOptions(wsId: string) {
 }
 
 /**
- * Archived notifications, backing the inbox's "Archived" sub-view. A separate
- * cache entry from the main list rather than one flat cache split locally
- * (which is what chat does): the archive grows without end, so it is fetched
- * from its own capped endpoint, and the server — not the client — decides
- * which issues belong in which list.
+ * @deprecated Legacy array endpoint, capped at 200 groups. New archive
+ * consumers must use archivedInboxPagesOptions for the complete archive.
+ * Retained for compatibility with legacy cache consumers.
  */
 export function archivedInboxListOptions(wsId: string) {
   return queryOptions({

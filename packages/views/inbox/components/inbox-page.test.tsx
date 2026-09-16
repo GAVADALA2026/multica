@@ -23,6 +23,7 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
 };
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
+const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
@@ -31,6 +32,7 @@ vi.mock("@tanstack/react-query", () => ({
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
+    ...(options.queryKey.includes("lookup") ? lookupState : {}),
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
@@ -270,6 +272,9 @@ function reset() {
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
+  lookupState.isLoading = false;
+  lookupState.isError = false;
+  lookupState.refetch.mockClear();
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
@@ -439,6 +444,55 @@ describe("InboxPage", () => {
     expect(replace).not.toHaveBeenCalled();
     expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue", highlightCommentId: "old-comment" });
     expect(queryCalls.find((q) => q.queryKey.includes("lookup"))?.enabled).toBe(true);
+  });
+
+  describe.each([PHONE, DESKTOP])("archive deep links at width %s", (width) => {
+    function setupLookup() {
+      reset();
+      layout.width = width;
+      searchParams = new URLSearchParams("view=archived&issue=old-issue");
+      listData.archived = [item({ id: "recent", issue_id: "recent-issue", archived: true })];
+      listData.lookup = [];
+    }
+
+    it("keeps loaded rows visible while resolving the selection, then opens its detail", () => {
+      setupLookup();
+      lookupState.isLoading = true;
+      const { rerender } = render(<InboxPage />);
+      expect(screen.getByTestId("row")).toHaveTextContent("recent");
+      expect(replace).not.toHaveBeenCalled();
+      expect(issueDetailProps).toHaveLength(0);
+
+      lookupState.isLoading = false;
+      listData.lookup = [item({ id: "older", issue_id: "old-issue", archived: true })];
+      rerender(<InboxPage />);
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue" });
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("keeps the list usable on lookup failure and retries only the lookup", () => {
+      setupLookup();
+      lookupState.isError = true;
+      render(<InboxPage />);
+      expect(screen.getByTestId("row")).toHaveTextContent("recent");
+      expect(replace).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("alert").querySelector("button")!);
+      expect(lookupState.refetch).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByTestId("row"));
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "recent-issue" });
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("only falls back to the issue after the lookup confirms the group is absent", () => {
+      setupLookup();
+      lookupState.isLoading = true;
+      const { rerender } = render(<InboxPage />);
+      expect(replace).not.toHaveBeenCalled();
+      lookupState.isLoading = false;
+      rerender(<InboxPage />);
+      expect(replace).toHaveBeenCalledWith("/acme/issues/old-issue");
+    });
   });
 
   it("renders the archived list when the URL asks for it", () => {

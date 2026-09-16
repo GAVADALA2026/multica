@@ -28,6 +28,7 @@
     "open_in_new_tab": "新しいタブで開く"
   },
   "list": {
+    "loading_selection": "通知を読み込み中…",
     "empty": "通知はありません",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
@@ -99,6 +100,7 @@
     "unarchived": "通知を元に戻しました"
   },
   "errors": {
+    "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
     "source_context_retry_failed": "元のコンテキストで再試行できませんでした",
     "source_context_retry_unavailable": "このコンテキストは再試行できません。分岐点からやり直してください。",
     "mark_read_failed": "既読にできませんでした",

@@ -235,10 +235,12 @@ export function InboxPage() {
     if (selectionFilteredOut) setSelectedKey("");
   }, [selectionFilteredOut, setSelectedKey]);
 
-  // Whether the list currently on screen has finished its first load. The
-  // fallback waits for a targeted lookup as well: a page miss is not evidence
-  // that the selected notification is absent from the archive.
-  const viewLoading = isArchivedView ? archivedLoading || (!!selectedKey && !selectedOnPage && lookup.isLoading) : loading;
+  // A targeted lookup must not hide pages that have already loaded. Its
+  // pending/error states only block resolution of the off-page selection.
+  const viewLoading = isArchivedView ? archivedLoading : loading;
+  const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
+  const lookupLoading = needsLookup && lookup.isLoading;
+  const lookupError = needsLookup && lookup.isError && !selected;
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -247,7 +249,7 @@ export function InboxPage() {
   // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
-    if (viewLoading || (isArchivedView && (archivedError || lookup.isError))) return;
+    if (viewLoading || lookupLoading || lookupError || (isArchivedView && archivedError)) return;
     if (!selectedKey) return;
     if (selected) return;
     if (selectionFilteredOut) return;
@@ -260,7 +262,8 @@ export function InboxPage() {
     viewLoading,
     isArchivedView,
     archivedError,
-    lookup.isError,
+    lookupLoading,
+    lookupError,
     selectedKey,
     selected,
     selectionFilteredOut,
@@ -567,15 +570,14 @@ export function InboxPage() {
     </button>
   );
 
-  const list = isArchivedView && (archivedError || lookup.isError) ? (
+  const list = isArchivedView && archivedError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
         <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => {
-          if (lookup.isError) void lookup.refetch();
-          else void archiveQuery.refetch();
-        }}>{t(($) => $.list.retry)}</Button>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => void archiveQuery.refetch()}>
+          {t(($) => $.list.retry)}
+        </Button>
       </div>
     </div>
   ) : (
@@ -621,6 +623,21 @@ export function InboxPage() {
     <>
       {listHeader}
       {isArchivedView && archivedBackRow}
+      {lookupLoading && (
+        <p role="status" className="shrink-0 border-b px-3 py-2 text-caption text-muted-foreground">
+          {t(($) => $.list.loading_selection)}
+        </p>
+      )}
+      {lookupError && (
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          <p className="flex-1 text-caption text-muted-foreground">
+            {t(($) => $.errors.archived_lookup_failed)}
+          </p>
+          <Button variant="outline" size="sm" disabled={lookup.isFetching} onClick={() => void lookup.refetch()}>
+            {t(($) => $.list.retry)}
+          </Button>
+        </div>
+      )}
       {list}
     </>
   );

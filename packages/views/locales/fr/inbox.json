@@ -30,6 +30,7 @@
     "open_in_new_tab": "Ouvrir dans un nouvel onglet"
   },
   "list": {
+    "loading_selection": "Chargement de la notification…",
     "empty": "Aucune notification",
     "mark_done_tooltip": "Marquer comme traité",
     "archive_tooltip": "Archiver",
@@ -101,6 +102,7 @@
     "unarchived": "Notification restaurée"
   },
   "errors": {
+    "archived_lookup_failed": "Échec du chargement de la notification liée",
     "source_context_retry_failed": "Impossible de réessayer avec le contexte d'origine",
     "source_context_retry_unavailable": "Ce contexte ne peut plus être réutilisé pour une nouvelle tentative. Recommencez depuis le point de branchement.",
     "mark_read_failed": "Échec du marquage comme lu",
