@@ -107,21 +107,56 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- locked, and the response is buffered whole before it is written, so an
 -- unbounded read here would make both the time under lock and the response body
 -- grow with the number of agents a profile has accumulated across machines.
--- total_count is a window function, evaluated before LIMIT, so it stays exact.
+--
+-- The per-class counts are what let the refusal stay correct while bounded.
+-- Rows are ordered by machine and name, so which blockers land inside the LIMIT
+-- is arbitrary with respect to class: twenty ordinary agents can push the one
+-- Mika to position 21. A message whose advice came from the visible rows would
+-- then tell the user to archive all of them — the unactionable instruction this
+-- whole change removes, just deferred. So the recovery paths are chosen from
+-- these counts and only the names come from the rows.
+--
+-- Every count is a window function over the pre-LIMIT result, so they stay
+-- exact no matter how small max_rows is. blocker_class is emitted per row as
+-- well, giving the classification one definition that the Go classifier is
+-- pinned against in tests.
+WITH blockers AS (
+    SELECT
+        a.id,
+        a.name,
+        a.kind,
+        a.system_key,
+        ar.id AS runtime_id,
+        ar.name AS runtime_name,
+        ar.custom_name AS runtime_custom_name,
+        ar.status AS runtime_status,
+        CASE
+            WHEN a.system_key IS NULL OR btrim(a.system_key) = '' THEN 'user'
+            WHEN btrim(a.system_key) = 'mika' THEN 'mika'
+            WHEN btrim(a.system_key) LIKE 'agent_builder:%' THEN 'agent_builder'
+            ELSE 'other_system'
+        END AS blocker_class
+    FROM agent a
+    JOIN agent_runtime ar ON ar.id = a.runtime_id
+    WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+)
 SELECT
-    a.id,
-    a.name,
-    a.kind,
-    a.system_key,
-    ar.id AS runtime_id,
-    ar.name AS runtime_name,
-    ar.custom_name AS runtime_custom_name,
-    ar.status AS runtime_status,
-    count(*) OVER () AS total_count
-FROM agent a
-JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
-ORDER BY ar.name ASC, a.name ASC
+    id,
+    name,
+    kind,
+    system_key,
+    runtime_id,
+    runtime_name,
+    runtime_custom_name,
+    runtime_status,
+    blocker_class,
+    count(*) OVER () AS total_count,
+    count(*) FILTER (WHERE blocker_class = 'user') OVER () AS user_count,
+    count(*) FILTER (WHERE blocker_class = 'mika') OVER () AS mika_count,
+    count(*) FILTER (WHERE blocker_class = 'agent_builder') OVER () AS agent_builder_count,
+    count(*) FILTER (WHERE blocker_class = 'other_system') OVER () AS other_system_count
+FROM blockers
+ORDER BY runtime_name ASC, name ASC
 LIMIT @max_rows::int;
 
 -- name: ListAgentRuntimeIDsByProfile :many

@@ -363,14 +363,35 @@ const maxReportedBlockingAgents = 20
 // the dead machine or the healthy one — and the natural next move, unbinding
 // agents that were working fine, is exactly the damage worth preventing
 // (GH #8456).
-// agents is the bounded sample the query returned; total is the exact number of
-// blockers, which can exceed it.
-func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow, total int64) map[string]any {
-	classes := make(map[blockingAgentClass]bool, 2)
+// agents is the bounded sample the query returned; its first row carries the
+// full-set totals every caller here needs.
+//
+// The recovery paths come from those totals, never from the sample. Which rows
+// survive the LIMIT is arbitrary with respect to class — twenty ordinary agents
+// sorting first push the one Mika to position 21 — so advice derived from the
+// visible rows would tell the user to archive blockers that cannot be archived,
+// which is the defect this whole change set removes.
+func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow) map[string]any {
+	if len(agents) == 0 {
+		// Caller only builds a refusal when there is at least one blocker.
+		return map[string]any{
+			"error": "cannot delete this custom runtime profile: active agents are still bound to its runtimes.",
+			"code":  "runtime_profile_has_active_agents",
+		}
+	}
+	summary := agents[0]
+	total := summary.TotalCount
+
+	classes := map[blockingAgentClass]bool{
+		blockingAgentUser:           summary.UserCount > 0,
+		blockingAgentMika:           summary.MikaCount > 0,
+		blockingAgentBuilderCarrier: summary.AgentBuilderCount > 0,
+		blockingAgentOtherSystem:    summary.OtherSystemCount > 0,
+	}
+
 	named := make([]string, 0, maxNamedBlockingAgents)
 	for _, a := range agents {
-		class := classifyBlockingAgent(a.SystemKey)
-		classes[class] = true
+		class := blockingAgentClassFromKey(a.BlockerClass)
 		if len(named) >= maxNamedBlockingAgents {
 			continue
 		}
@@ -390,10 +411,6 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
 	}
 
-	// Remedies are derived from the sample, so a class present only beyond the
-	// cap can go unmentioned. Acceptable: every clause it could add is a reason
-	// the delete cannot proceed, and the user still has to clear the blockers
-	// they can see first, which brings the rest into the sample.
 	remedies := blockingAgentRemedies(classes)
 	if len(remedies) == 0 {
 		remedies = []string{"None of them can be released from here."}
@@ -521,8 +538,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		if profileMissing {
 			profileName = ""
 		}
-		writeJSON(w, http.StatusConflict,
-			profileDeleteBlockedByAgents(profileName, blockingAgents, blockingAgents[0].TotalCount))
+		writeJSON(w, http.StatusConflict, profileDeleteBlockedByAgents(profileName, blockingAgents))
 		return
 	}
 

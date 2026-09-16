@@ -41,6 +41,31 @@ const (
 	blockingAgentOtherSystem
 )
 
+// Class keys shared with the SQL CASE in ListActiveAgentsByProfile. That query
+// has to classify server-side so its per-class counts can cover rows the LIMIT
+// excludes, which means the mapping exists in two places; these constants give
+// both the same vocabulary, and TestBlockingAgentClassMatchesSQLClassification
+// pins them to each other.
+const (
+	blockingAgentClassKeyUser        = "user"
+	blockingAgentClassKeyMika        = "mika"
+	blockingAgentClassKeyBuilder     = "agent_builder"
+	blockingAgentClassKeyOtherSystem = "other_system"
+)
+
+func blockingAgentClassFromKey(key string) blockingAgentClass {
+	switch key {
+	case blockingAgentClassKeyMika:
+		return blockingAgentMika
+	case blockingAgentClassKeyBuilder:
+		return blockingAgentBuilderCarrier
+	case blockingAgentClassKeyOtherSystem:
+		return blockingAgentOtherSystem
+	default:
+		return blockingAgentUser
+	}
+}
+
 func classifyBlockingAgent(systemKey pgtype.Text) blockingAgentClass {
 	key := strings.TrimSpace(systemKey.String)
 	if !systemKey.Valid || key == "" {

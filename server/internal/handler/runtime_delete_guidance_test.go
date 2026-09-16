@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // The refusals these tests cover are the ones a user acts on. A profile spans
@@ -518,4 +519,125 @@ func deleteProfileExpectingConflict(t *testing.T, ctx context.Context, profileID
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 	return decodeConflict(t, w)
+}
+
+// The remedies must come from the whole blocker set, not the sample. Sorting
+// puts the sample's contents outside the caller's control, so a class can fall
+// entirely past the cap: twenty ordinary agents that sort first push Mika to
+// position 21, and a message built from the sample would then tell the user to
+// archive all 21 — the exact unactionable instruction this change removes, just
+// deferred until they have worked through the first twenty.
+func TestDeleteRuntimeProfile_RemedyCoversBlockersBeyondTheSample(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Beyond Sample Profile", "codex", "beyond-sample")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BEYOND-HOST", "codex")
+	// "Agent NNN" sorts before "Mika ...", filling the whole sample.
+	for i := 0; i < maxReportedBlockingAgents; i++ {
+		_ = createCascadeFixtureAgent(t, ctx, runtimeID, fmt.Sprintf("Agent %03d", i))
+	}
+	createSystemFixtureAgent(t, ctx, runtimeID, "Mika (beyond sample)", "user", "mika")
+
+	body := deleteProfileExpectingConflict(t, ctx, profileID)
+	msg := conflictMessage(t, body)
+
+	if !strings.Contains(msg, "Mika is built into Multica") {
+		t.Fatalf("Mika is blocker #21 and must still be reported, got: %s", msg)
+	}
+	if strings.Contains(msg, "Reassign or archive them first.") {
+		t.Fatalf("the blanket remedy must not cover a Mika the sample never showed: %s", msg)
+	}
+	if got, _ := body["active_agent_count"].(float64); int(got) != maxReportedBlockingAgents+1 {
+		t.Fatalf("active_agent_count = %v", got)
+	}
+}
+
+// Same boundary for a builder carrier: its remedy is a different surface
+// entirely, so losing it past the cap strands the user just as badly.
+func TestDeleteRuntimeProfile_BuilderCarrierBeyondTheSampleStillReported(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Beyond Sample Builder", "codex", "beyond-builder")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BEYOND-BUILD-HOST", "codex")
+	for i := 0; i < maxReportedBlockingAgents; i++ {
+		_ = createCascadeFixtureAgent(t, ctx, runtimeID, fmt.Sprintf("Agent %03d", i))
+	}
+	// "zzz-" sorts last, so the carrier lands past the cap.
+	createSystemFixtureAgent(t, ctx, runtimeID,
+		"zzz-multica-agent-builder-flow9", "system", "agent_builder:flow9")
+
+	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
+	if !strings.Contains(msg, "Agent Builder session") {
+		t.Fatalf("builder carrier is blocker #21 and must still be reported, got: %s", msg)
+	}
+}
+
+// The class mapping exists twice — the SQL CASE in ListActiveAgentsByProfile,
+// because per-class counts have to cover rows the LIMIT excludes, and
+// classifyBlockingAgent in Go for the instance path, which reads plain agent
+// rows. This pins them to each other: if a future system_key is added to one
+// and not the other, the refusal would name a remedy for the wrong blocker.
+func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Classifier Pin Profile", "codex", "classifier-pin")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "CLASSIFIER-HOST", "codex")
+
+	_ = createCascadeFixtureAgent(t, ctx, runtimeID, "Pin Ordinary")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Mika", "user", "mika")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Builder", "system", "agent_builder:pinflow")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Future", "system", "some_future_facility")
+
+	rows, err := testHandler.Queries.ListActiveAgentsByProfile(ctx, db.ListActiveAgentsByProfileParams{
+		ProfileID:   parseUUID(profileID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		MaxRows:     maxReportedBlockingAgents,
+	})
+	if err != nil {
+		t.Fatalf("list blockers: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 blockers, got %d", len(rows))
+	}
+
+	for _, row := range rows {
+		fromSQL := blockingAgentClassFromKey(row.BlockerClass)
+		fromGo := classifyBlockingAgent(row.SystemKey)
+		if fromSQL != fromGo {
+			t.Fatalf("%q (system_key=%q): SQL says %q -> %v, Go says %v",
+				row.Name, row.SystemKey.String, row.BlockerClass, fromSQL, fromGo)
+		}
+	}
+
+	// And the per-class counts have to agree with the rows they summarise.
+	summary := rows[0]
+	for _, tc := range []struct {
+		name  string
+		got   int64
+		class blockingAgentClass
+	}{
+		{"user", summary.UserCount, blockingAgentUser},
+		{"mika", summary.MikaCount, blockingAgentMika},
+		{"agent_builder", summary.AgentBuilderCount, blockingAgentBuilderCarrier},
+		{"other_system", summary.OtherSystemCount, blockingAgentOtherSystem},
+	} {
+		var want int64
+		for _, row := range rows {
+			if classifyBlockingAgent(row.SystemKey) == tc.class {
+				want++
+			}
+		}
+		if tc.got != want {
+			t.Fatalf("%s_count = %d, rows of that class = %d", tc.name, tc.got, want)
+		}
+	}
 }
