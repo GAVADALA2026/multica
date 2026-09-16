@@ -944,6 +944,17 @@
     "waiting_event": "イベント待ち",
     "triggered_by_wakeup": "自動起動による実行",
     "upcoming": "今後の起動：{{count}}",
-    "more": "ほか {{count}} 件"
+    "more": "ほか {{count}} 件",
+    "toggle": "{{agent}} の起動",
+    "enable_error": "有効にできませんでした。更新して再試行してください。",
+    "withdraw": "待機中の実行を取消",
+    "resubscribe": "再購読",
+    "reschedule": "再予約",
+    "future_time": "未来の日時を選択してください。",
+    "local_time": "日時（{{timezone}}）",
+    "closed_hint": "課題が完了またはキャンセル済みのため、有効にできません。",
+    "completed": "完了",
+    "expired": "期限切れ",
+    "disabled_state": "無効"
   }
 }

@@ -975,6 +975,17 @@
     "waiting_event": "En attente d’un événement",
     "triggered_by_wakeup": "Déclenché par un réveil",
     "upcoming": "Réveils à venir : {{count}}",
-    "more": "{{count}} de plus"
+    "more": "{{count}} de plus",
+    "toggle": "Réveil de {{agent}}",
+    "enable_error": "Activation impossible. Actualisez puis réessayez.",
+    "withdraw": "Annuler l’exécution en attente",
+    "resubscribe": "Se réabonner",
+    "reschedule": "Reprogrammer",
+    "future_time": "Choisissez une date future.",
+    "local_time": "Date ({{timezone}})",
+    "closed_hint": "Impossible d’activer les réveils pour une tâche terminée ou annulée.",
+    "completed": "Terminé",
+    "expired": "Expiré",
+    "disabled_state": "Désactivé"
   }
 }

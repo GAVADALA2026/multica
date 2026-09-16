@@ -63,6 +63,34 @@ func TestIssueWakeupAPIAndTrustedOrigin(t *testing.T) {
 	if _, err := svc.Disable(context.Background(), parseUUID(issue), result.ID, parseUUID(testUserID)); err != nil {
 		t.Fatal(err)
 	}
+	for _, tc := range []struct {
+		trusted  bool
+		revision int64
+		want     int
+	}{
+		{false, 0, 400}, {true, result.Revision, 403}, {false, result.Revision, 200}, {false, result.Revision, 409},
+	} {
+		req := withURLParams(newRequest("POST", "/", map[string]any{"revision": tc.revision}), "id", issue, "wakeupID", uuidToString(result.ID))
+		req.Header.Set("X-Task-ID", forged)
+		if tc.trusted {
+			req.Header.Set("X-Agent-ID", agent)
+			req.Header.Set("X-Actor-Source", "task_token")
+		}
+		rec := httptest.NewRecorder()
+		testHandler.EnableIssueWakeup(rec, req)
+		if rec.Code != tc.want {
+			t.Fatalf("enable %d: %s", rec.Code, rec.Body.String())
+		}
+		if tc.want == 200 {
+			var enabled db.IssueWakeup
+			if err := json.Unmarshal(rec.Body.Bytes(), &enabled); err != nil {
+				t.Fatal(err)
+			}
+			if !enabled.Enabled || enabled.SourceTaskID.Valid {
+				t.Fatal("enable trusted a forged source")
+			}
+		}
+	}
 }
 
 func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {

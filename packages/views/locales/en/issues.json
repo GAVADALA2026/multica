@@ -975,6 +975,17 @@
     "waiting_event": "Waiting for event",
     "triggered_by_wakeup": "Triggered by wakeup",
     "upcoming": "Upcoming wakeups: {{count}}",
-    "more": "{{count}} more"
+    "more": "{{count}} more",
+    "toggle": "Wakeup for {{agent}}",
+    "enable_error": "Could not enable wakeup. Refresh and try again.",
+    "withdraw": "Cancel pending run",
+    "resubscribe": "Resubscribe",
+    "reschedule": "Reschedule",
+    "future_time": "Choose a future time.",
+    "local_time": "Time ({{timezone}})",
+    "closed_hint": "Wakeups cannot be enabled while this issue is completed or canceled.",
+    "completed": "Completed",
+    "expired": "Expired",
+    "disabled_state": "Turned off"
   }
 }

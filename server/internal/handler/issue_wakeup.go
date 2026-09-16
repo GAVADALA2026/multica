@@ -20,6 +20,8 @@ func wakeupError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, service.ErrWakeupConflict):
+		writeError(w, 409, err.Error())
 	case errors.Is(err, service.ErrWakeupInput):
 		writeError(w, 400, err.Error())
 	case errors.Is(err, service.ErrWakeupForbidden):
@@ -164,4 +166,35 @@ func (h *Handler) wakeupSourceTaskID(r *http.Request) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return h.commentSourceTaskID(r)
+}
+
+func (h *Handler) EnableIssueWakeup(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	var in service.WakeupEnableInput
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeError(w, 400, "invalid enable body")
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originator == "" {
+		writeError(w, 403, "a human originator is required")
+		return
+	}
+	svc := service.IssueWakeupService{Tasks: h.TaskService}
+	result, err := svc.Enable(r.Context(), issue.ID, parseUUID(originator), h.wakeupSourceTaskID(r), id, in)
+	if err != nil {
+		wakeupError(w, err)
+		return
+	}
+	writeJSON(w, 200, result)
 }

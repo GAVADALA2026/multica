@@ -1,16 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Clock3, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
   issueWakeupsOptions,
   useDisableIssueWakeup,
+  useEnableIssueWakeup,
   issueTasksOptions,
 } from "@multica/core/issues";
 import type { AgentTask, IssueWakeup } from "@multica/core/types";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { Input } from "@multica/ui/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Popover,
@@ -22,6 +31,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { useT } from "../../i18n";
 import {
   isCurrentWakeup,
+  isActiveWakeupRun,
   useWakeupText,
   wakeupRun,
 } from "./wakeup-presentation";
@@ -31,11 +41,15 @@ function WakeupRow({
   task,
   pending,
   onDisable,
+  onEnable,
+  closed,
 }: {
   wakeup: IssueWakeup;
   task?: AgentTask;
   pending: boolean;
   onDisable: () => void;
+  closed: boolean;
+  onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
@@ -44,9 +58,20 @@ function WakeupRow({
     !wakeup.disabled_at &&
     (wakeup.enabled ||
       (["queued", "deferred"].includes(status ?? "") && !task?.started_at));
+  const activeRun = isActiveWakeupRun(status);
+  const consumed =
+    !wakeup.enabled &&
+    wakeup.mode === "once" &&
+    (!wakeup.disabled_at || !!wakeup.last_task_id);
+  const expired =
+    wakeup.kind === "at" &&
+    (!wakeup.next_fire_at ||
+      new Date(wakeup.next_fire_at).getTime() <= Date.now());
+  const needsRearm = !wakeup.enabled && (consumed || expired);
+  const canEnable = !closed && (!activeRun || wakeup.mode === "continuous");
   const Icon = wakeup.kind === "event" ? Bell : Clock3;
   return (
-    <div className="flex items-start gap-1">
+    <div className="flex items-start gap-1" aria-busy={pending}>
       <Popover>
         <PopoverTrigger
           render={
@@ -67,6 +92,19 @@ function WakeupRow({
             <span className="block truncate text-muted-foreground">
               {t(($) => $.wakeups.wake_agent, { agent: wakeup.agent_name })} ·{" "}
               {text.schedule(wakeup)}
+              {!wakeup.enabled && !activeRun && (
+                <>
+                  {" "}
+                  ·{" "}
+                  {status === "completed"
+                    ? t(($) => $.wakeups.completed)
+                    : expired
+                      ? t(($) => $.wakeups.expired)
+                      : wakeup.disabled_at
+                        ? t(($) => $.wakeups.disabled_state)
+                        : t(($) => $.wakeups.completed)}
+                </>
+              )}
             </span>
             {wakeup.last_error && (
               <span className="block text-destructive">
@@ -129,23 +167,63 @@ function WakeupRow({
           )}
         </PopoverContent>
       </Popover>
-      {canDisable && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="min-h-11 shrink-0 px-2 text-caption text-muted-foreground"
-          disabled={pending}
-          aria-label={t(($) => $.wakeups.disable, { agent: wakeup.agent_name })}
-          onClick={onDisable}
-        >
-          {t(($) => $.wakeups.turn_off)}
-        </Button>
-      )}
+      <div className="flex min-h-11 shrink-0 items-center px-2">
+        {wakeup.enabled || (!needsRearm && !canDisable) ? (
+          <Switch
+            checked={wakeup.enabled}
+            disabled={pending || (!wakeup.enabled && !canEnable)}
+            aria-label={t(($) => $.wakeups.toggle, {
+              agent: wakeup.agent_name,
+            })}
+            onCheckedChange={(checked) => {
+              if (checked)
+                void onEnable().catch(() =>
+                  toast.error(t(($) => $.wakeups.enable_error)),
+                );
+              else onDisable();
+            }}
+          />
+        ) : canDisable ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={onDisable}
+          >
+            {t(($) => $.wakeups.withdraw)}
+          </Button>
+        ) : wakeup.kind === "at" ? (
+          <RescheduleWakeup
+            disabled={pending || !canEnable}
+            pending={pending}
+            onSubmit={(at) => onEnable({ at, rearm: true })}
+          />
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pending || !canEnable}
+            onClick={() =>
+              void onEnable({ rearm: true }).catch(() =>
+                toast.error(t(($) => $.wakeups.enable_error)),
+              )
+            }
+          >
+            {t(($) => $.wakeups.resubscribe)}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
 
-export function WakeupsSection({ issueId }: { issueId: string }) {
+export function WakeupsSection({
+  issueId,
+  closed = false,
+}: {
+  issueId: string;
+  closed?: boolean;
+}) {
   const { t } = useT("issues");
   const workspaceId = useCurrentWorkspace()?.id ?? "";
   const [open, setOpen] = useState(true);
@@ -157,6 +235,7 @@ export function WakeupsSection({ issueId }: { issueId: string }) {
   } = useQuery(issueWakeupsOptions(workspaceId, issueId));
   const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
   const disable = useDisableIssueWakeup(workspaceId, issueId);
+  const enable = useEnableIssueWakeup(workspaceId, issueId);
   if (!data.length && !isError) return null;
   const current = data.filter((w) => isCurrentWakeup(w, wakeupRun(w, tasks)));
   const history = data.filter((w) => !isCurrentWakeup(w, wakeupRun(w, tasks)));
@@ -165,10 +244,19 @@ export function WakeupsSection({ issueId }: { issueId: string }) {
       key={wakeup.id}
       wakeup={wakeup}
       task={wakeupRun(wakeup, tasks)}
-      pending={disable.isPending}
+      pending={disable.isPending || enable.isPending}
+      closed={closed}
+      onEnable={async (input = {}) => {
+        await enable.mutateAsync({
+          id: wakeup.id,
+          revision: wakeup.revision ?? 0,
+          ...input,
+        });
+      }}
       onDisable={() =>
         disable.mutate(wakeup.id, {
           onError: () => toast.error(t(($) => $.wakeups.disable_error)),
+          onSuccess: () => setHistoryOpen(true),
         })
       }
     />
@@ -201,6 +289,11 @@ export function WakeupsSection({ issueId }: { issueId: string }) {
               {t(($) => $.wakeups.retry)}
             </button>
           )}
+          {closed && (
+            <p className="px-2 text-caption text-muted-foreground">
+              {t(($) => $.wakeups.closed_hint)}
+            </p>
+          )}
           {current.map(row)}
           {history.length > 0 && (
             <>
@@ -222,5 +315,94 @@ export function WakeupsSection({ issueId }: { issueId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+function RescheduleWakeup({
+  disabled,
+  pending,
+  onSubmit,
+}: {
+  disabled: boolean;
+  pending: boolean;
+  onSubmit: (at: string) => Promise<void>;
+}) {
+  const { t } = useT("issues");
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={disabled}
+        onClick={() => {
+          setError("");
+          setValue("");
+          setOpen(true);
+        }}
+      >
+        {t(($) => $.wakeups.reschedule)}
+      </Button>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.wakeups.reschedule)}</DialogTitle>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (pending) return;
+            const date = new Date(value);
+            if (
+              !Number.isFinite(date.getTime()) ||
+              date.getTime() <= Date.now()
+            ) {
+              setError(t(($) => $.wakeups.future_time));
+              return;
+            }
+            try {
+              await onSubmit(date.toISOString());
+              setOpen(false);
+            } catch {
+              setError(t(($) => $.wakeups.enable_error));
+            }
+          }}
+        >
+          <label htmlFor={id} className="text-caption">
+            {t(($) => $.wakeups.local_time, {
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            })}
+          </label>
+          <Input
+            id={id}
+            type="datetime-local"
+            required
+            value={value}
+            disabled={pending}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setError("");
+            }}
+          />
+          {error && (
+            <p
+              id={`${id}-error`}
+              role="alert"
+              className="text-caption text-destructive"
+            >
+              {error}
+            </p>
+          )}
+          <Button type="submit" disabled={pending}>
+            {t(($) => $.wakeups.reschedule)}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

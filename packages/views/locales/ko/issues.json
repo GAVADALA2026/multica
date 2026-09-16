@@ -944,6 +944,17 @@
     "waiting_event": "이벤트 대기 중",
     "triggered_by_wakeup": "자동 깨우기로 시작됨",
     "upcoming": "예정된 깨우기: {{count}}",
-    "more": "{{count}}개 더"
+    "more": "{{count}}개 더",
+    "toggle": "{{agent}} 깨우기",
+    "enable_error": "활성화하지 못했습니다. 새로고침 후 다시 시도하세요.",
+    "withdraw": "대기 실행 취소",
+    "resubscribe": "다시 구독",
+    "reschedule": "다시 예약",
+    "future_time": "미래 시간을 선택하세요.",
+    "local_time": "시간 ({{timezone}})",
+    "closed_hint": "이슈가 완료되거나 취소되어 활성화할 수 없습니다.",
+    "completed": "완료됨",
+    "expired": "만료됨",
+    "disabled_state": "꺼짐"
   }
 }

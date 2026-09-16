@@ -944,6 +944,17 @@
     "waiting_event": "等待事件",
     "triggered_by_wakeup": "由唤醒触发",
     "upcoming": "后续唤醒：{{count}}",
-    "more": "另有 {{count}} 条"
+    "more": "另有 {{count}} 条",
+    "toggle": "{{agent}} 的唤醒",
+    "enable_error": "启用失败，请刷新后重试。",
+    "withdraw": "取消待执行",
+    "resubscribe": "重新订阅",
+    "reschedule": "重新安排",
+    "future_time": "请选择未来的时间。",
+    "local_time": "时间（{{timezone}}）",
+    "closed_hint": "任务已完成或取消，无法启用唤醒。",
+    "completed": "已完成",
+    "expired": "已过期",
+    "disabled_state": "已关闭"
   }
 }

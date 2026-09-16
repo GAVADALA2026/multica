@@ -2501,7 +2501,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           click an action they cannot run, and the refusal is explained at run
           time rather than by a silently shorter list. */}
       <QuickActionsSection issueId={issue.id} />
-      <WakeupsSection issueId={issue.id} />
+      <WakeupsSection issueId={issue.id} closed={["done", "closed"].includes(resolveStatusCategory(issue.status))} />
       <PluginPanelSection issueId={issue.id} />
 
       {/* Parent issue — standalone section, only when the issue has a

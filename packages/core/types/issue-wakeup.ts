@@ -14,6 +14,7 @@ export interface IssueWakeup {
   timezone: string;
   next_fire_at: string | null;
   enabled: boolean;
+  revision?: number;
   disabled_at: string | null;
   last_task_id: string | null;
   last_error: string | null;

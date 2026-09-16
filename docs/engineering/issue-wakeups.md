@@ -9,8 +9,10 @@ process, business-condition evaluator, or second run lifecycle.
 
 The shared web/Desktop issue sidebar lists event and time wakeups together,
 as two-line trigger/target summaries. Instructions, full filters, errors and
-latest-run transcript are in the details popover; Turn off stays directly
-available beside the row and withdraws a configuration's unclaimed work.
+latest-run transcript are in the details popover. A directly visible toggle
+controls enabled configurations and restores manually disabled subscriptions or
+recurring schedules. Consumed one-shots offer Cancel pending run while unclaimed,
+then Resubscribe (events) or Reschedule (time), rather than a misleading toggle.
 Ended configurations are collapsed by default. A consumed one-shot remains
 in the current group while its run is queued, deferred, dispatched or running.
 Running or already
@@ -25,6 +27,21 @@ A shared workspace summary request contains exact enabled counts and at most
 three previews per issue, never prompts or history. Access follows agent
 visibility and workspace membership. The issue surface polls once every ten
 seconds; cards select their own rows from that shared cache.
+
+Restoring an interval schedules from now; cron uses its next future occurrence,
+without replaying missed times. An unconsumed future one-shot can be toggled back
+on; expired or consumed time wakeups require choosing a new future time. One-shot
+rearming is refused while a previous run is active. Closed issues cannot enable
+wakeups; reopening an issue still requires manual enable.
+
+The additive `POST /api/issues/{id}/wakeups/{wakeupID}/enable` accepts the observed
+`revision`, plus optional `rearm` and future `at`. It loads stored configuration
+under the existing issue/configuration locks and reuses Save's validation,
+authorization, receipt cleanup and revision fencing. A stale revision returns
+409, and a repeated already-enabled request with the current revision is a no-op.
+Clients do not resend instructions, filters or thread references. The new UI
+requires this endpoint for restore; deploy the server first. Old clients and the
+existing full-config CLI update continue to work without a migration.
 
 Agents manage configurations with `multica issue wakeup`:
 

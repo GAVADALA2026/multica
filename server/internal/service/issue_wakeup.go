@@ -20,6 +20,7 @@ import (
 )
 
 var ErrWakeupInput = errors.New("invalid wakeup")
+var ErrWakeupConflict = errors.New("wakeup changed; refresh and retry")
 var ErrWakeupForbidden = errors.New("wakeup permission denied")
 
 // WakeupEventTypes is independent of plugin availability. These facts have
@@ -148,8 +149,24 @@ func (s *IssueWakeupService) Create(ctx context.Context, issueID, member, source
 	return s.Save(ctx, issueID, member, source, pgtype.UUID{}, in)
 }
 
+type WakeupEnableInput struct {
+	Revision int64      `json:"revision"`
+	At       *time.Time `json:"at,omitempty"`
+	Rearm    bool       `json:"rearm,omitempty"`
+}
+
+// Enable reads the configuration under Save's locks; clients never round-trip
+// instructions or filters. The revision fences stale toggles and duplicate rearm.
+func (s *IssueWakeupService) Enable(ctx context.Context, issueID, member, source, id pgtype.UUID, in WakeupEnableInput) (db.IssueWakeup, error) {
+	return s.save(ctx, issueID, member, source, id, WakeupInput{}, &in)
+}
+
 // Save replaces a subscription explicitly; revisions fence obsolete queued work.
 func (s *IssueWakeupService) Save(ctx context.Context, issueID, member, source, existingID pgtype.UUID, in WakeupInput) (db.IssueWakeup, error) {
+	return s.save(ctx, issueID, member, source, existingID, in, nil)
+}
+
+func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, existingID pgtype.UUID, in WakeupInput, enable *WakeupEnableInput) (db.IssueWakeup, error) {
 	var out db.IssueWakeup
 	tx, err := s.Tasks.TxStarter.Begin(ctx)
 	if err != nil {
@@ -175,6 +192,56 @@ func (s *IssueWakeupService) Save(ctx context.Context, issueID, member, source, 
 	var now time.Time
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
 		return out, err
+	}
+
+	if enable != nil {
+		old, e := q.LockIssueWakeup(ctx, existingID)
+		if e != nil {
+			return out, e
+		}
+		if old.IssueID != issueID || old.WorkspaceID != issue.WorkspaceID {
+			return out, pgx.ErrNoRows
+		}
+		if enable.Revision < 1 {
+			return out, fmt.Errorf("%w: revision is required", ErrWakeupInput)
+		}
+		if old.Revision != enable.Revision {
+			return out, ErrWakeupConflict
+		}
+		optionalID := func(id pgtype.UUID) string {
+			if id.Valid {
+				return util.UUIDToString(id)
+			}
+			return ""
+		}
+		in = WakeupInput{AgentID: optionalID(old.AgentID), Instruction: old.Instruction, Kind: old.Kind, Mode: old.Mode, EventTypes: old.EventTypes, FilterAgentID: optionalID(old.FilterAgentID), FilterTaskID: optionalID(old.FilterTaskID), ParentCommentID: optionalID(old.ParentCommentID), IntervalSeconds: old.IntervalSeconds.Int64, CronExpression: old.CronExpression.String, Timezone: old.Timezone}
+		if enable.At != nil && old.Kind != "at" {
+			return out, fmt.Errorf("%w: only single-time wakeups accept a new time", ErrWakeupInput)
+		}
+		if !old.Enabled && old.Mode == "once" && (!old.DisabledAt.Valid || old.LastTaskID.Valid) {
+			if !enable.Rearm {
+				return out, fmt.Errorf("%w: consumed one-shot requires explicit rearm", ErrWakeupInput)
+			}
+			var activeRun bool
+			if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=$1 AND context->>'wakeup_id'=$2 AND status IN ('queued','deferred','dispatched','running','waiting_local_directory'))", issueID, optionalID(old.ID)).Scan(&activeRun); e != nil {
+				return out, e
+			}
+			if activeRun {
+				return out, fmt.Errorf("%w: previous run is still active", ErrWakeupConflict)
+			}
+		}
+		if old.Kind == "at" {
+			if old.NextFireAt.Valid {
+				at := old.NextFireAt.Time
+				in.At = &at
+			}
+			if enable.At != nil {
+				in.At = enable.At
+			}
+			if !old.Enabled && (in.At == nil || !in.At.After(now)) {
+				return out, fmt.Errorf("%w: choose a future time", ErrWakeupInput)
+			}
+		}
 	}
 	next, err := s.Validate(&in, now)
 	if err != nil {
@@ -235,6 +302,12 @@ func (s *IssueWakeupService) Save(ctx context.Context, issueID, member, source, 
 		}
 		if old.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
 			return out, ErrWakeupForbidden
+		}
+		if enable != nil && old.Enabled {
+			if enable.Rearm || enable.At != nil {
+				return out, ErrWakeupConflict
+			}
+			return old, tx.Commit(ctx)
 		}
 		if err = q.DiscardWakeupReceipts(ctx, old.ID); err != nil {
 			return out, err

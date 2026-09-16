@@ -3430,6 +3430,7 @@ export const IssueWakeupSchema = z.object({
   interval_seconds: z.number().nullable(), cron_expression: z.string().nullable(), timezone: z.string(),
   next_fire_at: z.string().nullable(), enabled: z.boolean(), disabled_at: z.string().nullable(),
   last_task_id: z.string().nullable(), last_error: z.string().nullable(),
+  revision: z.number().int().positive().optional(),
   filter_agent_name: z.string().nullable().optional(), last_task_status: z.string().nullable().optional(),
 });
 
