@@ -4635,10 +4635,28 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 // failed, completed) while a task is executing mid-flight.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-
-	// Verify the caller owns this task's workspace.
-	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
 	if !ok {
+		return
+	}
+
+	// This endpoint is polled by every in-flight daemon task. Load only the
+	// status and the owning agent's workspace instead of the full task plus its
+	// optional issue / chat / autopilot source chain.
+	task, err := h.Queries.GetAgentTaskStatus(r.Context(), taskUUID)
+	if err != nil {
+		// A missing row is the daemon's hard interruption signal. Keep transient
+		// database failures distinct so a brief outage cannot kill healthy work.
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		slog.Warn("get agent task status failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load task")
+		return
+	}
+
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(task.WorkspaceID)) {
 		return
 	}
 

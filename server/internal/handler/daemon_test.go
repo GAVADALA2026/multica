@@ -1121,7 +1121,7 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 }
 
 // TestGetTaskStatus_TransientDBError_Returns500 verifies that a transient DB
-// error from GetAgentTask is reported as 500 rather than 404. The daemon
+// error from GetAgentTaskStatus is reported as 500 rather than 404. The daemon
 // uses 404+"task not found" as a hard cancel signal; a transient lookup
 // failure must therefore not be smuggled into that body, otherwise a single
 // DB hiccup would kill an in-flight agent.
