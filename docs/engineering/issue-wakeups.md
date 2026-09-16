@@ -195,3 +195,28 @@ Expanded-event integration tests execute writes for every advertised event and
 cover attachment rebinding, repeated queue transitions, tombstone cleanup,
 meaningful-change suppression, rollback, actor/author distinction, forged source
 headers, metadata redaction and self-loop suppression on HTTP mutations.
+
+## Workspace management
+
+Web and Desktop expose **Issue wakeups** inside the Autopilot page (`?tab=wakeups`).
+The tab remains available without any autopilots. `GET /api/issue-wakeups` returns
+an access-filtered inventory with counts, agent filter choices, and offset
+pagination (50 by default, maximum 100). Scope, trigger kind, target agent, and
+literal case-insensitive search run on the server; page rows and counts share
+one database snapshot. Prompts are omitted from this collection response.
+
+Active means an enabled rule on an open issue **or** an unfinished run, including
+consumed one-shot rules and manually disabled rules with running work. The query
+looks up runs by their wakeup context, so a retry remains visible even if the
+rule's last-task pointer refers to an older attempt. Configuration state and run
+state are separate columns. Rules on terminal issues appear under Ended once
+all their runs finish. Counts include only agents visible to the requester;
+private source-agent and source-run references are redacted.
+
+The sidebar and inventory share enable, resubscribe, reschedule, and withdrawal
+controls. Batch disable is limited to explicitly selected enabled rules on the
+current page. It confirms that already-started runs continue, sends bounded
+sequential calls to the existing authorized disable endpoint, and retains only
+failed selections for retry. The inventory polls every ten seconds; mutations
+invalidate inventory, sidebar, board summaries, and task caches. No scheduler or
+Autopilot execution semantics change.

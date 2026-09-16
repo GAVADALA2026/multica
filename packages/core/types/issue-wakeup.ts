@@ -42,3 +42,27 @@ export interface IssueWakeupSummaryRow extends WakeupPreview {
   active_count: number;
   event_count: number;
 }
+
+export type WakeupScope = "active" | "all" | "disabled" | "ended";
+export interface WorkspaceWakeup extends Omit<IssueWakeup, "instruction"> {
+  issue_title: string;
+  issue_identifier: string;
+  issue_closed: boolean;
+  can_manage: boolean;
+  active_runs: number;
+  task: import("./agent").AgentTask | null;
+}
+export interface WorkspaceWakeupPage {
+  items: WorkspaceWakeup[];
+  total: number;
+  counts: Record<WakeupScope, number>;
+  agents: { id: string; name: string }[];
+}
+export interface WorkspaceWakeupFilters {
+  scope: WakeupScope;
+  kind: "all" | "event" | "at" | "recurring";
+  search: string;
+  agent_id: string;
+  offset: number;
+  limit: number;
+}

@@ -461,5 +461,47 @@
       "confirm": "Supprimer définitivement",
       "deleting": "Suppression…"
     }
+  },
+  "wakeups": {
+    "title": "Réveils de tâches",
+    "scope": "Périmètre",
+    "issue": "Tâche",
+    "trigger": "Déclencheur",
+    "next": "Prochain réveil",
+    "enabled": "Activé",
+    "all_triggers": "Tous les déclencheurs",
+    "event": "Événement",
+    "at": "Ponctuel",
+    "recurring": "Récurrent",
+    "all_agents": "Tous les agents",
+    "search": "Rechercher des tâches ou agents",
+    "search_action": "Rechercher",
+    "running": "En cours",
+    "active_runs": "{{count}} exécutions actives",
+    "issue_closed": "Tâche fermée",
+    "read_only": "Seuls le créateur ou un administrateur peuvent gérer ce réveil",
+    "select_row": "Sélectionner {{issue}}, {{agent}}",
+    "select_page": "Sélectionner les réveils activés sur cette page",
+    "load_error": "Impossible de charger les réveils",
+    "loading": "Chargement des réveils…",
+    "empty": "Aucun réveil correspondant",
+    "selected": "{{count}} sélectionnés",
+    "disable_selected": "Désactiver la sélection",
+    "clear": "Effacer la sélection",
+    "results": "Page {{page}} · {{count}} résultats",
+    "previous": "Précédent",
+    "next_page": "Suivant",
+    "confirm_title": "Désactiver {{count}} réveils ?",
+    "confirm_body": "Les prochains déclenchements seront arrêtés et les exécutions non prises en charge seront retirées. Les exécutions déjà démarrées continueront ; arrêtez-les depuis le journal de la tâche.",
+    "cancel": "Annuler",
+    "confirm": "Désactiver",
+    "disabling": "Désactivation…",
+    "batch_result": "Désactivés : {{succeeded}}. Échecs : {{failed}}.",
+    "scopes": {
+      "active": "Actifs",
+      "all": "Tous",
+      "disabled": "Désactivés",
+      "ended": "Terminés"
+    }
   }
 }

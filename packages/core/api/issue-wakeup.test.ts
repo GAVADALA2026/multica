@@ -47,6 +47,47 @@ it("preserves empty summaries", async () => {
   await expect(client.listIssueWakeupSummaries()).resolves.toEqual([]);
 });
 
+const inventoryFilters = {
+  scope: "active",
+  kind: "all",
+  search: "",
+  agent_id: "",
+  offset: 0,
+  limit: 50,
+} as const;
+it("rejects malformed workspace inventory rather than hiding ongoing work", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [], total: "0" })),
+      ),
+  );
+  await expect(client.listWorkspaceWakeups(inventoryFilters)).rejects.toThrow(
+    "Could not load workspace wakeups",
+  );
+});
+it("preserves an empty page and its inventory counts", async () => {
+  const page = {
+    items: [],
+    total: 101,
+    counts: { all: 101, active: 100, disabled: 1, ended: 0 },
+    agents: [],
+  };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(page)));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(
+    client.listWorkspaceWakeups({
+      ...inventoryFilters,
+      offset: 150,
+      search: "CI & release",
+    }),
+  ).resolves.toEqual(page);
+  expect(fetcher.mock.calls[0]![0]).toContain("search=CI+%26+release");
+  expect(fetcher.mock.calls[0]![0]).toContain("offset=150");
+});
+
 it("preserves wakeup origin while accepting old task responses", () => {
   expect(
     AgentTaskSchema.parse({ id: "run", wakeup_id: "wake", status: "deferred" }),
