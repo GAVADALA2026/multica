@@ -2,6 +2,7 @@ package repocache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -247,5 +248,115 @@ func TestCheckoutIdentityRejectsForeignWorktree(t *testing.T) {
 	gitDir := gitIdentityCommand(t, "-C", foreign, "rev-parse", "--absolute-git-dir")
 	if _, err := os.Stat(filepath.Join(gitDir, "config.worktree")); !os.IsNotExist(err) {
 		t.Fatalf("foreign worktree config was written: %v", err)
+	}
+}
+
+func TestCheckoutIdentityEnabledWithSharedConfigLocked(t *testing.T) {
+	identityTestEnvironment(t)
+	f := newExistingCheckoutFixture(t, false)
+	first := f.checkout(t, firstTaskID, false)
+	firstWorkDir := f.workDir
+	f.workDir = t.TempDir()
+	second := f.checkout(t, secondTaskID, false)
+	secondWorkDir := f.workDir
+	bare := f.cache.Lookup("ws-1", f.source)
+	lockPath := filepath.Join(bare, "config.lock")
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lock.WriteString("sibling writer"); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(lockPath)
+
+	// Reusing either checkout needs no common config write after migration.
+	// Create them before taking the lock: Git itself can require that lock
+	// when initially recording the new branches' upstream configuration.
+	f.workDir = firstWorkDir
+	f.checkout(t, firstTaskID, false)
+	f.workDir = secondWorkDir
+	f.checkout(t, secondTaskID, false)
+	for _, path := range []string{first.Path, second.Path} {
+		assertCommitIdentity(t, path, "User", "user@example.com")
+	}
+	contents, err := os.ReadFile(lockPath)
+	if err != nil || string(contents) != "sibling writer" {
+		t.Fatalf("sibling writer's lock changed: %q, %v", contents, err)
+	}
+}
+
+func TestEditGitConfigFilePreservesNextWriterLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	lockPath := path + ".lock"
+	err := editGitConfigFileWithRename(path, func([]byte, string) ([]byte, error) {
+		return []byte("[user]\nname = User\n"), nil
+	}, func(oldPath, newPath string) error {
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return err
+		}
+		// A subsequent writer can acquire the path immediately after rename,
+		// before the publisher returns and its deferred cleanup runs.
+		next, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		_, writeErr := next.WriteString("next writer")
+		closeErr := next.Close()
+		return errors.Join(writeErr, closeErr)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(lockPath)
+	if err != nil || string(contents) != "next writer" {
+		t.Fatalf("next writer's lock changed: %q, %v", contents, err)
+	}
+	if third, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600); !os.IsExist(err) {
+		if third != nil {
+			third.Close()
+		}
+		t.Fatalf("third writer should remain excluded, got %v", err)
+	}
+}
+
+func TestEditGitConfigFileRollback(t *testing.T) {
+	for _, outcome := range []string{"unchanged", "edit error", "rename error"} {
+		t.Run(outcome, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config")
+			original := "[user]\nname = Original\n"
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("injected failure")
+			err := editGitConfigFileWithRename(path, func(contents []byte, _ string) ([]byte, error) {
+				if outcome == "unchanged" {
+					return contents, nil
+				}
+				if outcome == "edit error" {
+					return nil, failure
+				}
+				return []byte("[user]\nname = Updated\n"), nil
+			}, func(string, string) error {
+				if outcome != "rename error" {
+					t.Fatal("unexpected publish on rollback path")
+				}
+				return failure
+			})
+			if outcome == "unchanged" && err != nil || outcome != "unchanged" && !errors.Is(err, failure) {
+				t.Fatalf("edit error = %v for %s", err, outcome)
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil || string(contents) != original {
+				t.Fatalf("config changed on rollback: %q, %v", contents, err)
+			}
+			if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+				t.Fatalf("owned lock not cleaned up: %v", err)
+			}
+		})
 	}
 }

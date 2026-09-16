@@ -93,14 +93,16 @@ func quoteGitConfig(value string) string {
 // existing linked worktrees never see the bare cache's core.bare=true applied
 // to themselves. No shared identity keys are removed or rewritten.
 func enableWorktreeConfigContext(ctx context.Context, barePath string) error {
-	return editGitConfigFile(filepath.Join(barePath, "config"), func(contents []byte, lockPath string) ([]byte, error) {
-		out, err := runGitOutputContext(ctx, "config", "--file", lockPath, "--bool", "--get", "extensions.worktreeConfig")
-		if err == nil && strings.TrimSpace(string(out)) == "true" {
-			return contents, nil
-		}
-		var exitErr *exec.ExitError
-		if err != nil && !(errors.As(err, &exitErr) && exitErr.ExitCode() == 1) {
-			return nil, err
+	configPath := filepath.Join(barePath, "config")
+	// Once migrated, identity setup only needs private worktree files. Do not
+	// compete with agent-side git config writers for the common config lock.
+	if enabled, err := worktreeConfigEnabledContext(ctx, configPath); err != nil || enabled {
+		return err
+	}
+	return editGitConfigFile(configPath, func(contents []byte, lockPath string) ([]byte, error) {
+		// Another writer may have enabled it before we acquired the lock.
+		if enabled, err := worktreeConfigEnabledContext(ctx, lockPath); err != nil || enabled {
+			return contents, err
 		}
 		for _, key := range []string{"core.bare", "core.worktree"} {
 			out, err := runGitOutputContext(ctx, "config", "--file", lockPath, "--get", key)
@@ -126,15 +128,34 @@ func enableWorktreeConfigContext(ctx context.Context, barePath string) error {
 	})
 }
 
+func worktreeConfigEnabledContext(ctx context.Context, path string) (bool, error) {
+	out, err := runGitOutputContext(ctx, "config", "--file", path, "--bool", "--get", "extensions.worktreeConfig")
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return strings.TrimSpace(string(out)) == "true", err
+}
+
 // Follow Git's lockfile protocol and atomically publish a complete config.
 // This also respects concurrent user `git config` writes outside our repo lock.
 func editGitConfigFile(path string, edit func([]byte, string) ([]byte, error)) error {
+	return editGitConfigFileWithRename(path, edit, os.Rename)
+}
+
+// The rename argument lets tests place another writer exactly at lock handoff.
+func editGitConfigFileWithRename(path string, edit func([]byte, string) ([]byte, error), rename func(string, string) error) error {
 	lockPath := path + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("lock Git config: %w", err)
 	}
-	defer os.Remove(lockPath)
+	owned := true
+	defer func() {
+		if owned {
+			_ = os.Remove(lockPath)
+		}
+	}()
 	contents, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		f.Close()
@@ -164,5 +185,11 @@ func editGitConfigFile(path string, edit func([]byte, string) ([]byte, error)) e
 	if err := os.WriteFile(lockPath, updated, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(lockPath, path)
+	if err := rename(lockPath, path); err != nil {
+		return err
+	}
+	// Rename consumes our lock. Its old path may already belong to another
+	// writer, so deferred cleanup must only unlink on rollback, never publish.
+	owned = false
+	return nil
 }

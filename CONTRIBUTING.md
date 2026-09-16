@@ -254,6 +254,8 @@ Linked worktrees mask the shared cache's `user`, `author`, and `committer`
 name/email settings with private defaults in `multica-identity.config`, included
 first by their `config.worktree`. Repeating checkout refreshes these defaults;
 explicit worktree settings and Git command/environment overrides take precedence.
+Conditional identities are snapshots: switching branches or changing global
+config takes effect in these defaults on the next checkout call, not at commit time.
 Use `git config --worktree user.name "Your Name"` and
 `git config --worktree user.email "you@example.com"` for an intentional checkout
 override. Plain `git config` and `--local` write to the shared cache in linked
