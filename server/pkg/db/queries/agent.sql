@@ -1135,6 +1135,7 @@ WITH retired_sessions AS (
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
         t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
+        t.started_at, t.issue_snapshot,
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
@@ -1143,7 +1144,14 @@ WITH retired_sessions AS (
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
-SELECT session_id, work_dir, runtime_id FROM latest_per_session
+-- started_at and issue_snapshot ride along because the row this query picks IS
+-- the run whose context the next turn continues, and both of a claim's deltas
+-- must be measured from THAT run rather than from whichever run started last
+-- (MUL-7344). The two are not always the same row: this query skips poisoned
+-- and retired sessions, so it can legitimately return an OLDER run than the
+-- newest one. Measuring against the newest one would then tell an agent whose
+-- resumed memory predates an edit that the issue is unchanged.
+SELECT session_id, work_dir, runtime_id, started_at, issue_snapshot FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
@@ -1217,34 +1225,6 @@ WHERE chat_session_id = sqlc.arg('chat_session_id')
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
-LIMIT 1;
-
--- name: GetLastRunAnchorForIssueAndAgent :one
--- Returns everything a claim needs to know about this agent's PREVIOUS run on
--- this issue, in one row: when it started, and the issue state it was handed.
---
--- started_at is the "since" anchor for counting comments that arrived since
--- that run. MUST be started_at, never completed_at: a long run would otherwise
--- miss comments posted while it ran.
---
--- issue_snapshot is the comparable issue state recorded when that run was
--- claimed (MUL-7344). NULL means that run predates the column or its write lost
--- the CAS; the caller must report the comparison as not done, never as
--- unchanged.
---
--- The two deltas a claim reports — comments and issue state — deliberately
--- share this one anchor row. That is not only a saved round trip: it is what
--- makes "since your last run" mean ONE thing on a claim rather than two
--- separately-resolved things that could disagree. The shared read also shares a
--- failure mode, and both consumers degrade the same safe way (comment scan
--- required, issue comparison unknown).
---
--- Any terminal state counts as "a run happened". Tasks with no started_at
--- (never dispatched / the just-claimed current task) are excluded, so this
--- never returns the current claim's own row.
-SELECT started_at, issue_snapshot FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
-ORDER BY started_at DESC
 LIMIT 1;
 
 -- name: FailAgentTask :one

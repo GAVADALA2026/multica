@@ -20,6 +20,7 @@
 -- Nullable, and NULL is the normal state for every row written before this
 -- migration. A reader must treat NULL as "not compared", never as "unchanged".
 -- No index: every reader scopes by (agent_id, issue_id) and rides the same
--- index path as the comment delta's anchor, which it now shares a row with
--- (GetLastRunAnchorForIssueAndAgent).
+-- index path as the comment delta's anchor, which it shares a row with:
+-- both are read off the resumed run returned by GetLastTaskSession (or, for a
+-- manual rerun, the operator-chosen source task).
 ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS issue_snapshot JSONB;

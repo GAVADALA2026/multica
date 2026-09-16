@@ -6,19 +6,28 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// seedPriorRunWithSnapshot creates the terminal prior task that anchors this
-// agent's issue-state comparison, carrying the snapshot that run was handed.
-// Passing an empty snapshot models a run recorded before the column existed.
+// seedPriorRunWithSnapshot creates the terminal prior task this agent's next
+// claim will RESUME, carrying the snapshot that run was handed. Passing an
+// empty snapshot models a run recorded before the column existed.
+//
+// The session_id and matching runtime_id are load-bearing, not decoration: a
+// claim reports a delta only when it actually hands a resumed session back, and
+// that session has to come from THIS run for the delta to describe the context
+// the agent will continue from (MUL-7344). A prior run with no resumable
+// session is a cold start, and a cold start has no delta to report.
 func seedPriorRunWithSnapshot(t *testing.T, agentID, runtimeID, issueID, snapshot string) {
 	t.Helper()
 	cols := testutil.Cols{
 		"runtime_id":   runtimeID,
 		"issue_id":     issueID,
 		"status":       "completed",
+		"session_id":   "prior-run-session-" + issueID,
+		"work_dir":     "/tmp/prior-run-workdir",
 		"started_at":   testutil.Raw("now() - interval '1 hour'"),
 		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
 	}
@@ -213,11 +222,11 @@ func TestClaimTaskByRuntime_RecordsItsOwnIssueSnapshot(t *testing.T) {
 	}
 }
 
-// TestClaimTaskByRuntime_BothDeltasShareOneAnchor pins the merge: the comment
-// delta and the issue-state delta are resolved from the SAME prior-run row
-// (GetLastRunAnchorForIssueAndAgent), so "since your last run" is one fact on a
-// claim rather than two independently-resolved ones that could disagree — and a
-// comment-triggered claim reads that row once, not twice.
+// TestClaimTaskByRuntime_BothDeltasShareOneAnchor pins that the comment delta
+// and the issue-state delta are resolved from the SAME row — the resumed run's
+// — so "since your last run" is one fact on a claim rather than two
+// independently-resolved ones that could disagree. Both now ride the row
+// GetLastTaskSession already returns, so a claim reads no extra anchor at all.
 func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -239,13 +248,13 @@ func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
 
 	resp := claimCommentTask(t, runtimeID, "shared-anchor-claim")
 	if !resp.Task.DeltaKnown {
-		t.Errorf("new_comments_delta_known must be true — the shared anchor carries started_at")
+		t.Errorf("new_comments_delta_known must be true — the resumed run's row carries started_at")
 	}
 	if resp.Task.NewCommentCount != 1 {
 		t.Errorf("new_comment_count = %d, want 1", resp.Task.NewCommentCount)
 	}
 	if !resp.Task.IssueStateDeltaKnown {
-		t.Errorf("issue_state_delta_known must be true — the same anchor row carries the snapshot")
+		t.Errorf("issue_state_delta_known must be true — the same row carries the snapshot")
 	}
 	if len(resp.Task.IssueChangedFields) != 0 {
 		t.Errorf("issue_changed_fields = %v, want empty", resp.Task.IssueChangedFields)
@@ -254,5 +263,105 @@ func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
 	// that run's started_at, not this claim's own timestamp.
 	if resp.Task.NewCommentsSince == "" {
 		t.Errorf("new_comments_since must carry the shared anchor")
+	}
+}
+
+// TestClaimTaskByRuntime_DeltasDateFromTheResumedRun is the regression Niko's
+// review found, and it is the invariant the whole mechanism rests on: a claim
+// may only report a delta measured from the run whose session it hands back.
+//
+// "Newest run" and "resumed run" are different rows more often than they look.
+// GetLastTaskSession skips poisoned sessions, so a newer run that died on an
+// unprocessable conversation is passed over for an older healthy one; a manual
+// rerun resumes whatever source the operator clicked. In both cases the newest
+// run's snapshot describes an issue the resumed session never saw — so
+// comparing against it can report "unchanged" to an agent whose memory predates
+// the edit, which is the exact failure this mechanism exists to prevent, and
+// the only one with no symptom at runtime.
+//
+// Both sub-cases put the CURRENT issue in the state the newer run recorded, so
+// a claim that anchors on the newest run finds nothing changed and says so.
+func TestClaimTaskByRuntime_DeltasDateFromTheResumedRun(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, manualRerun := range []bool{false, true} {
+		label := "older healthy session after a poisoned newer run"
+		if manualRerun {
+			label = "manual rerun of an older run"
+		}
+		t.Run(label, func(t *testing.T) {
+			ctx := context.Background()
+			runtimeID := createClaimReclaimRuntime(t, ctx, "resumed anchor runtime "+label)
+			name := "resumed anchor agent " + label
+			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
+
+			// The run we will resume. Its snapshot says the description was
+			// "older instructions" — which is NOT what the issue says now.
+			olderID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "failed",
+				"failure_reason": "agent_error.unknown",
+				"session_id":     "older-healthy-session",
+				"work_dir":       "/tmp/resumed-anchor-workdir",
+				"started_at":     testutil.Raw("now() - interval '2 hours'"),
+				"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
+				"issue_snapshot": issueSnapshotJSON(t, 1, name+" issue", "older instructions", "in_progress", "none"),
+			})
+			// A NEWER run that saw the issue as it is now. Anchoring here is the
+			// bug: its session is not the one being resumed.
+			newer := testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "failed",
+				"failure_reason": "api_invalid_request", // poisons the session
+				"session_id":     "newer-unresumable-session",
+				"work_dir":       "/tmp/resumed-anchor-other-workdir",
+				"started_at":     testutil.Raw("now() - interval '1 hour'"),
+				"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
+				"issue_snapshot": issueSnapshotJSON(t, 1, name+" issue", "", "in_progress", "none"),
+			}
+			if manualRerun {
+				// Nothing wrong with the newer run here; the operator simply
+				// chose to resume the older one.
+				newer["status"] = "completed"
+				delete(newer, "failure_reason")
+			}
+			dbfx.Task(t, agentID, newer)
+
+			triggerID := dbfx.Comment(t, issueID, "continue")
+			current := testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": triggerID}
+			if manualRerun {
+				current["rerun_of_task_id"] = olderID
+				current["force_fresh_session"] = true
+			}
+			dbfx.Task(t, agentID, current)
+
+			resp := claimCommentTask(t, runtimeID, "resumed-anchor-claim")
+			if resp.Task.PriorSessionID != "older-healthy-session" {
+				t.Fatalf("fixture did not exercise the older-session resume path: prior_session_id = %q", resp.Task.PriorSessionID)
+			}
+			// The resumed run's snapshot says "older instructions"; the issue
+			// says something else now. That IS a change, and the claim must say
+			// so rather than comparing against the run it is not resuming.
+			if !resp.Task.IssueStateDeltaKnown {
+				t.Fatalf("the resumed run carries a snapshot, so the comparison must run")
+			}
+			if got := strings.Join(resp.Task.IssueChangedFields, ","); got != "description" {
+				t.Errorf("issue_changed_fields = %q, want \"description\" — measured from the RESUMED run, not the newest one", got)
+			}
+			// Same rule for the comment anchor: dating it from the newest run
+			// would hide comments the resumed session never saw.
+			if resp.Task.NewCommentsSince != "" {
+				since, err := time.Parse(time.RFC3339, resp.Task.NewCommentsSince)
+				if err != nil {
+					t.Fatalf("new_comments_since is not RFC3339: %v", err)
+				}
+				if time.Since(since) < 90*time.Minute {
+					t.Errorf("new_comments_since = %s — that is the newer run's start, not the resumed run's", resp.Task.NewCommentsSince)
+				}
+			}
+		})
 	}
 }

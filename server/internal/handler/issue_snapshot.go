@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -121,4 +123,38 @@ func decodeIssueStateSnapshot(raw []byte) (issueStateSnapshot, bool) {
 		return issueStateSnapshot{}, false
 	}
 	return snap, true
+}
+
+// resumedRunAnchor is the prior run whose provider session THIS claim hands
+// back, and therefore the only run either of a claim's two deltas may be
+// measured from.
+//
+// The distinction that makes this type necessary: "the run that started most
+// recently" and "the run whose session we resume" are not the same row.
+// GetLastTaskSession skips poisoned and retired sessions, and a manual rerun
+// resumes an operator-chosen source, so both legitimately hand back an OLDER
+// run. Measuring a delta against the newest run while resuming an older one
+// reports "unchanged" to an agent whose resumed memory predates the change —
+// the one failure mode this whole mechanism exists to avoid, and one with no
+// symptom at runtime (MUL-7344, found in review).
+//
+// A nil *resumedRunAnchor means this claim resumes nothing it can date, so
+// neither delta is computed and the daemon falls back to the reads it has
+// always performed.
+type resumedRunAnchor struct {
+	// StartedAt dates the comment delta. Invalid when the resumed run never
+	// started, which leaves the comment delta uncomputed.
+	StartedAt pgtype.Timestamptz
+	// IssueSnapshot is the issue state that run was handed at ITS claim. Empty
+	// for a run that predates the column.
+	IssueSnapshot []byte
+}
+
+// commentCountScope carries the issue/workspace/trigger identity the comment
+// delta needs, captured while the trigger comment is loaded and consumed once
+// the resume anchor is known.
+type commentCountScope struct {
+	AnchorID    pgtype.UUID
+	IssueID     pgtype.UUID
+	WorkspaceID pgtype.UUID
 }

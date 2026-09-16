@@ -4238,10 +4238,14 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment newcount agent")
 
 	// A prior run establishes the "since" anchor (its started_at, in the past).
+	// It must be RESUMABLE — the delta is measured from the run whose session
+	// the claim hands back, so a prior run with no session is a cold start and
+	// reports no delta at all (MUL-7344).
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id":   runtimeID,
 		"issue_id":     issueID,
 		"status":       "completed",
+		"session_id":   "newcount-prior-session",
 		"started_at":   testutil.Raw("now() - interval '1 hour'"),
 		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
 	})
@@ -4295,11 +4299,14 @@ func TestClaimTaskByRuntime_CommentTaskMarksComputedZeroDelta(t *testing.T) {
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Zero delta runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Zero delta agent")
 
-	// A prior run supplies the anchor, so the count query runs and returns 0.
+	// A prior RESUMABLE run supplies the anchor, so the count query runs and
+	// returns 0. Without a session there would be nothing to resume, hence no
+	// delta to report (MUL-7344).
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id":   runtimeID,
 		"issue_id":     issueID,
 		"status":       "completed",
+		"session_id":   "zero-delta-prior-session",
 		"started_at":   testutil.Raw("now() - interval '1 hour'"),
 		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
 	})

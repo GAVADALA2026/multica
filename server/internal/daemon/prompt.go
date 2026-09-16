@@ -420,7 +420,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			//   - A retry inherits the previous attempt's coalesced_comment_ids
 			//     verbatim (queries/agent.sql RetryTask), while the anchor is
 			//     recomputed from the last STARTED task's started_at
-			//     (GetLastRunAnchorForIssueAndAgent). An inherited id can
+			//     (the resumed run, via GetLastTaskSession). An inherited id can
 			//     therefore predate the anchor.
 			//   - The anchor is only populated when some comment landed after it,
 			//     which is independent of where these ids sit.

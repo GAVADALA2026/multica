@@ -2497,12 +2497,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if issue.AssigneeID.Valid {
 			resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
 		}
-		// Snapshot FIRST, compare SECOND, and never let the write of this
-		// claim's snapshot influence the read of the last one: they are
-		// different rows (the anchor query excludes tasks with no started_at,
-		// which includes this just-claimed one), so there is no ordering
-		// hazard, but the value must be built from the issue as loaded here so
-		// the next run compares against what THIS run was actually handed.
+		// This claim's own snapshot, recorded by FinalizeTaskClaim so a LATER
+		// run that resumes this one's session can compare against what THIS run
+		// was actually handed. Building it here, from the issue row already
+		// loaded, is what makes the snapshot mean "the issue as of this claim".
 		currentSnapshot := buildIssueStateSnapshot(issue)
 		if encoded, err := json.Marshal(currentSnapshot); err != nil {
 			// A snapshot that cannot be encoded is simply not recorded; the
@@ -2513,27 +2511,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		} else {
 			issueSnapshot = encoded
 		}
-		// ONE read of the previous run's anchor row, shared by both deltas this
-		// claim reports. The comment block further down reuses priorRunStartedAt
-		// rather than resolving the same row again — that is what makes "since
-		// your last run" a single fact on this claim instead of two
-		// separately-resolved ones that could disagree.
-		//
-		// Best-effort, exactly like the comment delta: any error leaves
-		// IssueStateDeltaKnown false, which the daemon reads as "not compared"
-		// and answers with the unconditional issue read. A first run on the
-		// issue returns no row (pgx.ErrNoRows) and takes the same path.
-		var priorRunStartedAt pgtype.Timestamptz
-		if anchor, err := h.Queries.GetLastRunAnchorForIssueAndAgent(r.Context(), db.GetLastRunAnchorForIssueAndAgentParams{
-			AgentID: task.AgentID,
-			IssueID: task.IssueID,
-		}); err == nil {
-			priorRunStartedAt = anchor.StartedAt
-			if prev, ok := decodeIssueStateSnapshot(anchor.IssueSnapshot); ok {
-				resp.IssueStateDeltaKnown = true
-				resp.IssueChangedFields = currentSnapshot.changedFieldsSince(prev)
-			}
-		}
+		// Both deltas are computed AFTER the resume source is resolved, further
+		// down, because both must be measured from the run whose session this
+		// claim actually hands back — see resumeAnchor there.
+		var commentDeltaScope *commentCountScope
+		var resumeAnchor *resumedRunAnchor
 
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -2762,26 +2744,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// to tell a computed zero from a failed read, because only the
 				// computed one may waive the workflow's comment scan (MUL-6984).
 				//
-				// The anchor itself was already resolved once above, with the
-				// issue-state snapshot it shares a row with (MUL-7344), so this
-				// block reads priorRunStartedAt instead of querying again. An
-				// invalid value means no prior run OR a failed anchor read; both
-				// leave NewCommentsDeltaKnown false, which is the same
-				// conservative reading the separate query produced.
-				if priorRunStartedAt.Valid {
-					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
-						AnchorID:    effectiveTriggerUUID,
-						IssueID:     comment.IssueID,
-						WorkspaceID: comment.WorkspaceID,
-						Since:       priorRunStartedAt,
-						AuthorID:    task.AgentID,
-					}); err == nil {
-						resp.NewCommentsDeltaKnown = true
-						if cnt > 0 {
-							resp.NewCommentCount = int(cnt)
-							resp.NewCommentsSince = priorRunStartedAt.Time.UTC().Format(time.RFC3339)
-						}
-					}
+				// The anchor is not known yet: it is the started_at of the run
+				// whose session this claim resumes, which is resolved further
+				// down (MUL-7344). Record what the count needs and run it there.
+				commentDeltaScope = &commentCountScope{
+					AnchorID:    effectiveTriggerUUID,
+					IssueID:     comment.IssueID,
+					WorkspaceID: comment.WorkspaceID,
 				}
 			}
 		}
@@ -2835,6 +2804,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
+					// The deltas date from the run we actually resume, which on
+					// this path is the operator-chosen source — routinely NOT
+					// the newest run on the issue (MUL-7344).
+					resumeAnchor = &resumedRunAnchor{StartedAt: src.StartedAt, IssueSnapshot: src.IssueSnapshot}
 				}
 				// MUL-5305: if the source task withheld its Codex session because
 				// the rollout was missing, this rerun has nothing resumable from it
@@ -2865,6 +2838,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
+					// Same rule as the rerun path: date the deltas from the run
+					// this session belongs to. GetLastTaskSession skips poisoned
+					// and retired sessions, so `prior` can be an older run than
+					// the newest one on the issue (MUL-7344).
+					resumeAnchor = &resumedRunAnchor{StartedAt: prior.StartedAt, IssueSnapshot: prior.IssueSnapshot}
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
@@ -2887,6 +2865,55 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// parent's workdir, never its session. A force_fresh task with no
 			// retry lineage still resumes nothing.
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
+		}
+
+		// Both deltas, now that the resume source is known (MUL-7344).
+		//
+		// resumeAnchor is non-nil only where a session was actually ADOPTED
+		// above, so the run being dated is the run whose context the agent will
+		// continue from. Every other path — no prior session, a session on
+		// another runtime, a forced-fresh retry, a rerun whose source failure
+		// poisoned the conversation — leaves it nil, reports neither delta, and
+		// the daemon falls back to the reads it has always performed. That is
+		// the conservative direction: the cost of not reporting is one extra
+		// read, while the cost of reporting against the wrong run is an agent
+		// continuing on stale requirements with nothing to signal it.
+		//
+		// PriorSessionResumeUnavailable is deliberately NOT consulted here. It
+		// flags a Codex rollout that went missing, which is only one of the ways
+		// the resumed session can be older than the newest run; the daemon
+		// applies it as its own separate gate.
+		if resumeAnchor != nil {
+			if prev, ok := decodeIssueStateSnapshot(resumeAnchor.IssueSnapshot); ok {
+				resp.IssueStateDeltaKnown = true
+				resp.IssueChangedFields = currentSnapshot.changedFieldsSince(prev)
+			}
+			// Comments that arrived issue-wide since the resumed run started
+			// (never completed_at: a long run would miss comments posted while
+			// it ran). Excludes the agent's own comments and the triggering
+			// comment itself, whose body is already injected into the prompt.
+			//
+			// NewCommentsDeltaKnown is set on the success path REGARDLESS of the
+			// count: it is the only thing separating "the server looked and
+			// there is nothing" from "the server could not look", and only the
+			// former may waive the workflow's comment scan (MUL-6984). The count
+			// fields stay suppressed at zero — there is no hint to render from a
+			// zero, and the anchor would only invite a read returning nothing.
+			if commentDeltaScope != nil && resumeAnchor.StartedAt.Valid {
+				if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
+					AnchorID:    commentDeltaScope.AnchorID,
+					IssueID:     commentDeltaScope.IssueID,
+					WorkspaceID: commentDeltaScope.WorkspaceID,
+					Since:       resumeAnchor.StartedAt,
+					AuthorID:    task.AgentID,
+				}); err == nil {
+					resp.NewCommentsDeltaKnown = true
+					if cnt > 0 {
+						resp.NewCommentCount = int(cnt)
+						resp.NewCommentsSince = resumeAnchor.StartedAt.Time.UTC().Format(time.RFC3339)
+					}
+				}
+			}
 		}
 	}
 
