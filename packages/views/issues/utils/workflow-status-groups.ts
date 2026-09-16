@@ -38,6 +38,10 @@ export function buildWorkflowStatusGroups(
     });
   }
 
+  const workflowIds = new Set([
+    ...statuses.map((node) => node.workflow_id),
+    ...descriptors.flatMap(({ value }) => value.kind === "workflow_status" && value.workflow_id ? [value.workflow_id] : []),
+  ]);
   for (const descriptor of descriptors) {
     const value = descriptor.value;
     if (value.kind !== "workflow_status") continue;
@@ -45,9 +49,10 @@ export function buildWorkflowStatusGroups(
     const existing = groups.get(id);
     groups.set(id, {
       id,
-      title: value.name,
       workflowStatusId: value.workflow_status_id ?? null,
       workflowId: value.workflow_id,
+      workflowName: value.workflow_name,
+      workflowDefault: value.is_default,
       workflowStatusLegacyKey: value.status || undefined,
       workflowStatusColor: value.color,
       workflowStatusIcon: value.icon,
@@ -58,6 +63,7 @@ export function buildWorkflowStatusGroups(
       createData: ownWorkflow && value.workflow_status_id && !value.archived
         ? { workflow_status_id: value.workflow_status_id } : undefined,
       ...existing,
+      title: workflowIds.size > 1 && value.workflow_name && !value.is_default ? `${value.workflow_name} / ${value.name}` : value.name,
       totalCount: descriptor.count,
     });
   }
@@ -65,6 +71,11 @@ export function buildWorkflowStatusGroups(
   return Array.from(groups.values()).toSorted((a, b) => {
     if (!!a.workflowStatusHistorical !== !!b.workflowStatusHistorical) {
       return a.workflowStatusHistorical ? 1 : -1;
+    }
+    if (a.workflowId !== b.workflowId) {
+      if (!!a.workflowDefault !== !!b.workflowDefault) return a.workflowDefault ? -1 : 1;
+      const order = (a.workflowName ?? "").localeCompare(b.workflowName ?? "") || (a.workflowId ?? "").localeCompare(b.workflowId ?? "");
+      if (order) return order;
     }
     const aPosition = a.workflowStatusPosition ?? Number.MAX_SAFE_INTEGER;
     const bPosition = b.workflowStatusPosition ?? Number.MAX_SAFE_INTEGER;
@@ -74,7 +85,7 @@ export function buildWorkflowStatusGroups(
 }
 
 /** Preserve counts for legacy saved filters while offering exact node choices. */
-export function workflowFacetForDisplay(facet: IssueTableFacet): IssueTableFacet {
+export function workflowFacetForDisplay(facet: IssueTableFacet, legacyFacet?: IssueTableFacet): IssueTableFacet {
   if (facet.kind !== "workflow_status") return facet;
   const legacyCounts = new Map<string, number>();
   for (const value of facet.values) {
@@ -83,6 +94,6 @@ export function workflowFacetForDisplay(facet: IssueTableFacet): IssueTableFacet
   }
   return { ...facet, kind: "status", values: [
     ...facet.values,
-    ...Array.from(legacyCounts, ([key, count]) => ({ key, count })),
+    ...(legacyFacet?.values ?? Array.from(legacyCounts, ([key, count]) => ({ key, count }))),
   ] };
 }

@@ -219,7 +219,7 @@ func TestIssueTableWorkflowStatusGroupsIsolateSameNameNodes(t *testing.T) {
 		t.Fatalf("status filter lost disjunctive choices: %#v", facets)
 	}
 	for _, value := range facets.Facets[0].Values {
-		if value.StatusNode == nil || value.StatusNode.WorkflowID == nil || value.StatusNode.Name == "Implementation" {
+		if value.StatusNode == nil || value.StatusNode.WorkflowID == nil || value.StatusNode.WorkflowName == "" || value.StatusNode.Name != "Implementation" {
 			t.Fatalf("facet missing qualified workflow label: %#v", value)
 		}
 	}

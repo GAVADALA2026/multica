@@ -305,6 +305,35 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.tableQuerySpec.scope.workflow_id).toBeUndefined();
   });
 
+  it.each(["list", "table", "swimlane"] as const)("keeps global %s native without forcing a project, including saved node filters", async (mode) => {
+    const nodeId = "22222222-2222-4222-8222-222222222222";
+    const groups = vi.fn(async () => ({ query_fingerprint: "test", total: 0, next_cursor: null, groups: [] }));
+    const facets = vi.fn(listIssueTableFacets);
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueWorkflow: async () => scopeWorkflow("workspace-workflow", nodeId),
+      listIssueTableGroups: groups, listIssueTableRows, listIssueTableFacets: facets,
+      getWorkspaceWorkingAgents, listProjects: async () => ({ projects: [], total: 0 }),
+    } as unknown as ApiClient);
+    const key = "global-native-" + mode;
+    const store = getIssueSurfaceViewStore(key);
+    store.getState().setViewMode(mode);
+    store.getState().toggleStatusFilter(nodeId);
+    const { result } = renderHook(() => useIssueSurfaceController({
+      scope: { type: "workspace" }, modes: ["list", "table", "swimlane"],
+    }), { wrapper: makeWrapper(qc, key) });
+    await waitFor(() => expect(result.current.filterWorkflowStatuses?.[0]?.id).toBe(nodeId));
+    expect(result.current.tableQuerySpec.scope).toEqual({ kind: "workspace" });
+    expect(result.current.tableQuerySpec.filters.workflow_status_ids).toEqual([nodeId]);
+    await waitFor(() => expect(facets).toHaveBeenCalledWith(expect.objectContaining({ facets: expect.arrayContaining([{ kind: "workflow_status" }]) })));
+    if (mode !== "table") {
+      await waitFor(() => expect(groups).toHaveBeenCalledWith(expect.objectContaining({ group: mode === "list"
+        ? { kind: "workflow_status" } : { kind: "compound", primary: "assignee", secondary: "workflow_status" } })));
+    }
+    act(() => store.getState().setViewMode(mode === "table" ? "list" : "table"));
+    expect(result.current.tableQuerySpec.filters.workflow_status_ids).toEqual([nodeId]);
+  });
+
   it("defaults the explicit Workspace selection to its own workflow", () => {
     qc.setQueryData(effectiveIssueWorkflowOptions("ws-1", null, true).queryKey, scopeWorkflow("workflow-workspace"));
     const { result } = renderHook(() => useIssueSurfaceController({
@@ -1317,7 +1346,7 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isEmpty).toBe(false);
     expect(listIssues).not.toHaveBeenCalled();
   });

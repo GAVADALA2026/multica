@@ -295,7 +295,8 @@ export interface IssueViewState {
    *  `swimlaneOrders`, plus the sentinel `"none"` for the pinned
    *  no-X lane and `"__orphans__"` for the parent-grouping fallback. */
   collapsedWorkflowLanes: string[];
-  toggleWorkflowLaneCollapsed: (key: string) => void;
+  expandedWorkflowLanes: string[];
+  toggleWorkflowLaneCollapsed: (key: string, defaultCollapsed?: boolean) => void;
   workflowLaneHeights: Record<string, number>;
   setWorkflowLaneHeight: (key: string, height: number | null) => void;
   collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
@@ -382,6 +383,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedWorkflowLanes: [],
+  expandedWorkflowLanes: [],
   workflowLaneHeights: {},
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
@@ -582,11 +584,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
     })),
-  toggleWorkflowLaneCollapsed: (key) => set((state) => ({
-    collapsedWorkflowLanes: state.collapsedWorkflowLanes.includes(key)
-      ? state.collapsedWorkflowLanes.filter((id) => id !== key)
-      : [...state.collapsedWorkflowLanes, key],
-  })),
+  toggleWorkflowLaneCollapsed: (key, defaultCollapsed = false) => set((state) => {
+    const collapsed = state.collapsedWorkflowLanes.includes(key) || (defaultCollapsed && !state.expandedWorkflowLanes.includes(key));
+    return {
+      collapsedWorkflowLanes: collapsed ? state.collapsedWorkflowLanes.filter((id) => id !== key) : [...state.collapsedWorkflowLanes, key],
+      expandedWorkflowLanes: collapsed ? [...new Set([...state.expandedWorkflowLanes, key])] : state.expandedWorkflowLanes.filter((id) => id !== key),
+    };
+  }),
   setWorkflowLaneHeight: (key, height) => set((state) => {
     if (height !== null && !Number.isFinite(height)) return state;
     const heights = { ...state.workflowLaneHeights };
@@ -687,6 +691,7 @@ export const viewStorePersistOptions = (name: string) => ({
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
     collapsedWorkflowLanes: state.collapsedWorkflowLanes,
+    expandedWorkflowLanes: state.expandedWorkflowLanes,
     workflowLaneHeights: state.workflowLaneHeights,
     collapsedSwimlanes: state.collapsedSwimlanes,
     tableColumns: state.tableColumns,
@@ -764,6 +769,7 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     collapsedWorkflowLanes: Array.isArray(p.collapsedWorkflowLanes)
       ? p.collapsedWorkflowLanes.filter((id): id is string => typeof id === "string")
       : current.collapsedWorkflowLanes,
+    expandedWorkflowLanes: Array.isArray(p.expandedWorkflowLanes) ? p.expandedWorkflowLanes.filter((id): id is string => typeof id === "string") : current.expandedWorkflowLanes,
     workflowLaneHeights: isRecord(p.workflowLaneHeights)
       ? Object.fromEntries(Object.entries(p.workflowLaneHeights).filter(
           (entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]),

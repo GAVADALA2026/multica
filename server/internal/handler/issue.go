@@ -160,9 +160,28 @@ func (h *Handler) issueStatusSortExpression(
 	if err != nil {
 		return "", err
 	}
+	rows, err := h.DB.Query(ctx, `SELECT s.id::text FROM issue_workflow_status s
+    JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
+    JOIN workspace ws ON ws.id=w.workspace_id WHERE s.workspace_id=$1
+    ORDER BY COALESCE(w.id=ws.default_issue_workflow_id,false) DESC, LOWER(w.name), w.id, s.position, s.id`, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	nodes := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		nodes = append(nodes, id)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(
-		"COALESCE(array_position(%s::text[], i.status), 100000)",
-		addArg(issueTableStatusOrder(entries)),
+		"CASE WHEN i.workflow_status_id IS NOT NULL THEN COALESCE(array_position(%s::text[], i.workflow_status_id::text), 100000) ELSE COALESCE(array_position(%s::text[], i.status), 100000) END",
+		addArg(nodes), addArg(issueTableStatusOrder(entries)),
 	), nil
 }
 

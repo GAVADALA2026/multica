@@ -203,7 +203,7 @@ export function applyIssueFilters(
 
     if (hideSubIssues && issue.parent_issue_id) return false;
 
-    if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
+    if (statusFilters.length > 0 && !statusFilters.includes(issue.status) && !statusFilters.includes(issue.workflow_status_id ?? ""))
       return false;
 
     if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))

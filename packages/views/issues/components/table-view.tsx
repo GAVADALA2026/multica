@@ -1,5 +1,6 @@
 "use client";
 
+import { issueWorkflowOptions } from "@multica/core/issue-workflows";
 import { useSurfaceWorkflow } from "../surface/workflow-context";
 import { useStatusLabel } from "../utils/status-label";
 import {
@@ -1790,7 +1791,8 @@ export function TableView({
         // of collapsing to the schema fallback or an empty label. (MUL-6243)
         return resolveStatusLabel(value.status);
       }
-      if (value.kind === "workflow_status" || value.kind === "workflow") return value.name;
+      if (value.kind === "workflow_status") return value.workflow_name && !value.is_default ? `${value.workflow_name} / ${value.name}` : value.name;
+      if (value.kind === "workflow") return value.name;
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)
@@ -2334,6 +2336,11 @@ export function TableView({
             )
           : Promise.resolve(getActorName),
       ]);
+      const workflowIds = [...new Set(rows.flatMap((issue) => issue.workflow_id ? [issue.workflow_id] : []))];
+      const workflows = csvColumns.some((column) => column.key === "status")
+        ? await Promise.all(workflowIds.map((id) => queryClient.fetchQuery(issueWorkflowOptions(wsId, id)))) : [];
+      const nodeLabels = new Map(workflows.flatMap((definition) => definition.statuses.map((node) => [node.id,
+        workflows.length > 1 && definition.workflow.scope_type !== "workspace" ? `${definition.workflow.name} / ${node.name}` : node.name] as const)));
       const headers = csvColumns.map((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
         if (propertyId) return exportPropertyById.get(propertyId)?.name ?? "";
@@ -2358,7 +2365,9 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return resolveStatusLabel(issue.status);
+              if (!issue.workflow_status_id) return resolveStatusLabel(issue.status);
+              if (!nodeLabels.has(issue.workflow_status_id)) throw new IssueTableExportIntegrityError();
+              return nodeLabels.get(issue.workflow_status_id)!;
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":

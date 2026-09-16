@@ -118,7 +118,9 @@ function ListViewImpl({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
-  const [collapsedWorkflowStatuses, setCollapsedWorkflowStatuses] = useState<string[]>([]);
+  const hiddenKeys = useViewStore((s) => s.hiddenStatuses);
+  const selectedKeys = useViewStore((s) => s.statusFilters);
+  const showStatus = useViewStore((s) => s.showStatus);
   const wsId = useWorkspaceId();
   const catalog = useIssueStatuses(wsId);
 
@@ -129,16 +131,23 @@ function ListViewImpl({
 
   const dragEnabled = !!onMoveIssue;
 
-  const groups = useMemo(
+  const allGroups = useMemo(
     () =>
       workflowStatuses === undefined
         ? buildListGroups(visibleStatuses)
         : buildWorkflowStatusGroups(
             workflowStatuses,
             groupBranches?.descriptors ?? [],
+            true,
           ),
     [groupBranches?.descriptors, workflowStatuses, visibleStatuses],
   );
+  const hiddenGroups = useMemo(() => allGroups.filter((group) => {
+    if (workflowStatuses === undefined) return false;
+    const keys = [group.workflowStatusId, group.workflowStatusLegacyKey].filter((key): key is string => !!key);
+    return keys.some((key) => hiddenKeys.includes(key)) && !keys.some((key) => selectedKeys.includes(key));
+  }), [allGroups, workflowStatuses, hiddenKeys, selectedKeys]);
+  const groups = useMemo(() => allGroups.filter((group) => !hiddenGroups.includes(group)), [allGroups, hiddenGroups]);
   const groupedIssues = useMemo(
     () => (groupBranches?.enabled ? groupBranches.issues : issues),
     [groupBranches, issues],
@@ -149,10 +158,10 @@ function ListViewImpl({
         .filter((group) =>
           workflowStatuses === undefined
             ? group.status != null && !listCollapsedStatuses.includes(group.status)
-            : !collapsedWorkflowStatuses.includes(group.id),
+            : ![group.workflowStatusId, group.workflowStatusLegacyKey].some((key) => !!key && listCollapsedStatuses.includes(key)),
         )
         .map((group) => group.id),
-    [collapsedWorkflowStatuses, groups, workflowStatuses, listCollapsedStatuses],
+    [groups, workflowStatuses, listCollapsedStatuses],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((g) => g.id)),
@@ -227,7 +236,9 @@ function ListViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
-        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        const target = groups.find((group) => group.id === overCol);
+        if (target?.workflowStatusArchived || (target?.workflowId && target.workflowId !== issueMapRef.current.get(activeId)?.workflow_id)) return prev;
+        const targetStatus = target?.status;
         if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
@@ -269,6 +280,12 @@ function ListViewImpl({
         return;
       }
 
+      const targetGroup = groupMap.get(overCol);
+      if (targetGroup?.workflowStatusArchived || (targetGroup?.workflowId && targetGroup.workflowId !== issueMapRef.current.get(activeId)?.workflow_id)) {
+        resetColumns();
+        return;
+      }
+
       let finalColumns = cols;
       if (activeCol === overCol && sortBy === "position") {
         const ids = cols[activeCol]!;
@@ -289,7 +306,7 @@ function ListViewImpl({
         return;
       }
       const finalGroup = groupMap.get(finalCol);
-      if (!finalGroup) {
+      if (!finalGroup || finalGroup.workflowStatusArchived || (finalGroup.workflowId && finalGroup.workflowId !== issueMapRef.current.get(activeId)?.workflow_id)) {
         resetColumns();
         return;
       }
@@ -410,17 +427,12 @@ function ListViewImpl({
             const wasExpanded = expandedGroupIds.includes(group.id);
             const isExpanded = value.includes(group.id);
             if (wasExpanded !== isExpanded) {
-              if (workflowStatuses === undefined && group.status) {
-                toggleListCollapsed(group.status);
-              } else {
-                setCollapsedWorkflowStatuses((current) =>
-                  isExpanded
-                    ? current.filter((id) => id !== group.id)
-                    : current.includes(group.id)
-                      ? current
-                      : [...current, group.id],
-                );
-              }
+              const key = workflowStatuses === undefined ? group.status : group.workflowStatusId ?? group.workflowStatusLegacyKey;
+              if (isExpanded) {
+                for (const collapsedKey of new Set([key, group.workflowStatusLegacyKey])) {
+                  if (collapsedKey && listCollapsedStatuses.includes(collapsedKey)) toggleListCollapsed(collapsedKey);
+                }
+              } else if (key) toggleListCollapsed(key);
             }
           }
         }}
@@ -451,6 +463,15 @@ function ListViewImpl({
           );
         })}
       </Accordion.Root>
+      {hiddenGroups.length > 0 && (
+        <div className="mt-4 px-1 pb-4">
+          {hiddenGroups.map((group) => <HiddenColumnRow key={group.id} status={group.workflowStatusId ?? group.workflowStatusLegacyKey ?? ""}
+            label={group.title} total={group.totalCount} onShow={() => {
+              if (group.workflowStatusId) showStatus(group.workflowStatusId);
+              if (group.workflowStatusLegacyKey) showStatus(group.workflowStatusLegacyKey);
+            }} />)}
+        </div>
+      )}
       {workflowStatuses === undefined && hiddenStatuses.length > 0 && (
         <div className="mt-4 px-1 pb-4">
           <HiddenColumnsPanel hiddenStatuses={hiddenStatuses} renderRow={(status) => (
@@ -686,6 +707,7 @@ function StatusAccordionItem({
                     onClick={() => {
                       const defaults = {
                         ...(group.createData ?? {}),
+                        ...(group.workflowId ? { required_workflow_id: group.workflowId, require_project_choice: !projectId, project_id: projectId ?? null } : {}),
                         ...(projectId ? { project_id: projectId } : {}),
                       };
                       onCreateIssue(defaults);

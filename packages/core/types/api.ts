@@ -393,11 +393,13 @@ export interface IssueTableParentRef {
 }
 
 export type IssueTableGroupValue =
-  | { kind: "workflow"; workflow_id: string | null; name: string }
+  | { kind: "workflow"; workflow_id: string | null; name: string; is_default?: boolean }
   | { kind: "status"; status: string }
   | {
       kind: "workflow_status";
       workflow_id?: string;
+      workflow_name?: string;
+      is_default?: boolean;
       workflow_status_id?: string;
       /** Legacy adapter key used by older create paths. */
       status: string;

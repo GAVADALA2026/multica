@@ -86,6 +86,8 @@ export interface BoardColumnGroup {
    * bucket; `undefined` means this is not a workflow-status column. */
   workflowStatusId?: string | null;
   workflowId?: string;
+  workflowName?: string;
+  workflowDefault?: boolean;
   workflowStatusLegacyKey?: string;
   workflowStatusColor?: string;
   workflowStatusIcon?: string;

@@ -72,6 +72,8 @@ const mockViewState: {
   cardProperties: Record<string, boolean>;
   cardPropertyIds: string[];
   listCollapsedStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
+  statusFilters: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
 } = {
@@ -80,6 +82,8 @@ const mockViewState: {
   cardProperties: {},
   cardPropertyIds: [],
   listCollapsedStatuses: [],
+  hiddenStatuses: [],
+  statusFilters: [],
   toggleListCollapsed: vi.fn((status: IssueStatus) => {
     mockViewState.listCollapsedStatuses =
       mockViewState.listCollapsedStatuses.includes(status)
@@ -320,6 +324,7 @@ describe("ListView status header collapse", () => {
 });
 
 describe("ListView project workflow status nodes", () => {
+  beforeEach(() => { mockViewState.listCollapsedStatuses = []; mockViewState.hiddenStatuses = []; mockViewState.statusFilters = []; });
   it("renders the concrete node name and rows from its stable-id branch", () => {
     const workflowIssue = {
       ...ISSUES[0],

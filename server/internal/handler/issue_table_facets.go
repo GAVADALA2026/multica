@@ -446,9 +446,10 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 		for _, value := range responses[index].Values {
 			ids = append(ids, value.Key)
 		}
+		ids = append(ids, request.Query.Filters.WorkflowStatusIDs...)
 		rows, err := h.DB.Query(r.Context(), `SELECT s.id::text, s.workflow_id::text,
-          COALESCE(s.legacy_status_key,''), w.name || ' / ' || s.name, s.color,
-          COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text
+          COALESCE(s.legacy_status_key,''), s.name, s.color,
+          COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text, w.name, COALESCE(w.id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1),false)
           FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
           WHERE s.workspace_id=$1 AND s.id::text=ANY($2::text[])`, base.args[0], ids)
 		if err != nil {
@@ -458,7 +459,7 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 		nodes := map[string]issueTableGroupValueResponse{}
 		for rows.Next() {
 			var node issueTableWorkflowStatusRef
-			if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt); err != nil {
+			if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt, &node.WorkflowName, &node.IsDefault); err != nil {
 				rows.Close()
 				writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
 				return
@@ -476,6 +477,16 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to resolve status filter labels")
 			return
+		}
+		present := map[string]bool{}
+		for _, value := range responses[index].Values {
+			present[value.Key] = true
+		}
+		for _, id := range request.Query.Filters.WorkflowStatusIDs {
+			if _, exists := nodes[id]; exists && !present[id] {
+				responses[index].Values = append(responses[index].Values, issueTableFacetValueResponse{Key: id, Count: 0})
+				present[id] = true
+			}
 		}
 		for i := range responses[index].Values {
 			if node, ok := nodes[responses[index].Values[i].Key]; ok {

@@ -627,3 +627,19 @@ describe("scalar operator filters", () => {
     expect(result.map((i) => i.id)).toEqual(["B"]);
   });
 });
+
+
+describe("workflow status filters", () => {
+  const rows = [
+    makeIssue({ id: "build", status: "in_progress", workflow_status_id: "node-build" }),
+    makeIssue({ id: "review", status: "in_progress", workflow_status_id: "node-review" }),
+    makeIssue({ id: "legacy", status: "todo" }),
+  ];
+  it("selects an exact node without selecting its same-phase sibling", () => {
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["node-review"] }).map((row) => row.id)).toEqual(["review"]);
+  });
+  it("preserves legacy saved filters and ORs them with native selections", () => {
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["in_progress"] }).map((row) => row.id)).toEqual(["build", "review"]);
+    expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["todo", "node-review"] }).map((row) => row.id)).toEqual(["review", "legacy"]);
+  });
+});

@@ -99,3 +99,11 @@ it("keeps aggregate counts for saved legacy filters alongside exact workflow nod
   expect(facet.values.find((value) => value.key === "in_review")?.count).toBe(9);
   expect(facet.values.find((value) => value.key === "a")?.count).toBe(3);
 });
+
+
+it("uses authoritative legacy projection counts instead of summing only alias-bearing nodes", () => {
+  const facet = workflowFacetForDisplay({ kind: "workflow_status", values: [
+    { key: "custom-node", count: 4, status_node: { kind: "workflow_status", name: "Review", status: "" } },
+  ] }, { kind: "status", values: [{ key: "in_progress", count: 4 }] });
+  expect(facet.values.find((value) => value.key === "in_progress")?.count).toBe(4);
+});

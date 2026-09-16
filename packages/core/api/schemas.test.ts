@@ -2312,9 +2312,11 @@ describe("issue workflow schemas", () => {
   it("validates workflow lane identity and tolerates absent or malformed optional facet metadata", () => {
     const payload = { query_fingerprint: "query", total: 1, next_cursor: null, groups: [{
       key: "workflow:one", count: 1, value: { kind: "workflow", workflow_id: "one", name: "Design" },
-      secondary_groups: [{ key: "opaque", count: 1, value: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Review" } }],
+      secondary_groups: [{ key: "opaque", count: 1, value: { kind: "workflow_status", workflow_id: "one", workflow_status_id: "review", name: "Review", workflow_name: 123, is_default: "yes" } }],
     }] };
-    expect(IssueTableGroupsResponseSchema.parse(payload).groups[0]?.secondary_groups?.[0]?.key).toBe("opaque");
+    const cell = IssueTableGroupsResponseSchema.parse(payload).groups[0]?.secondary_groups?.[0];
+    expect(cell?.key).toBe("opaque");
+    expect(cell?.value).toMatchObject({ name: "Review", workflow_name: undefined, is_default: undefined });
     expect(IssueTableGroupsResponseSchema.safeParse({ ...payload, groups: [{ ...payload.groups[0], value: { kind: "workflow", workflow_id: 12 } }] }).success).toBe(false);
     const facet = IssueTableFacetsResponseSchema.parse({ query_fingerprint: "query", total: 1, facets: [{
       kind: "workflow_status", values: [

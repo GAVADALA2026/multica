@@ -24,6 +24,8 @@ type issueTableGroupValueResponse struct {
 	Kind             string               `json:"kind"`
 	Status           string               `json:"status,omitempty"`
 	WorkflowID       *string              `json:"workflow_id,omitempty"`
+	WorkflowName     string               `json:"workflow_name,omitempty"`
+	IsDefault        bool                 `json:"is_default,omitempty"`
 	WorkflowStatusID *string              `json:"workflow_status_id,omitempty"`
 	Name             string               `json:"name,omitempty"`
 	Color            string               `json:"color,omitempty"`
@@ -52,11 +54,14 @@ type issueTableGroupContext struct {
 	Parent         *issueTableParentRef         `json:"parent,omitempty"`
 	WorkflowStatus *issueTableWorkflowStatusRef `json:"workflow_status,omitempty"`
 	WorkflowName   string                       `json:"workflow_name,omitempty"`
+	IsDefault      bool                         `json:"is_default,omitempty"`
 }
 
 type issueTableWorkflowStatusRef struct {
 	ID              string  `json:"id"`
 	WorkflowID      string  `json:"workflow_id"`
+	WorkflowName    string  `json:"workflow_name"`
+	IsDefault       bool    `json:"is_default"`
 	LegacyStatusKey string  `json:"legacy_status_key"`
 	Name            string  `json:"name"`
 	Color           string  `json:"color"`
@@ -344,7 +349,7 @@ END, ''))`,
 		var customKeys map[string]string
 		if secondaryWorkflow {
 			customKeys = map[string]string{}
-			rows, err := h.DB.Query(r.Context(), `SELECT id::text, workflow_id::text, COALESCE(legacy_status_key,''), name, color, COALESCE(icon,''), position, phase, archived_at::text FROM issue_workflow_status WHERE workspace_id=$1`, workspaceID)
+			rows, err := h.DB.Query(r.Context(), `SELECT s.id::text, s.workflow_id::text, COALESCE(s.legacy_status_key,''), s.name, s.color, COALESCE(s.icon,''), s.position, s.phase, s.archived_at::text, w.name, COALESCE(w.id=ws.default_issue_workflow_id,false) FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id JOIN workspace ws ON ws.id=w.workspace_id WHERE s.workspace_id=$1`, workspaceID)
 			if err != nil {
 				writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
 				return resolvedIssueTableGroup{}, false
@@ -352,7 +357,7 @@ END, ''))`,
 			defer rows.Close()
 			for rows.Next() {
 				var node issueTableWorkflowStatusRef
-				if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt); err != nil {
+				if err := rows.Scan(&node.ID, &node.WorkflowID, &node.LegacyStatusKey, &node.Name, &node.Color, &node.Icon, &node.Position, &node.Phase, &node.ArchivedAt, &node.WorkflowName, &node.IsDefault); err != nil {
 					writeIssueTableQueryFailure(w, r, "failed to resolve workflow columns")
 					return resolvedIssueTableGroup{}, false
 				}
@@ -581,9 +586,15 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 			return fmt.Sprintf("COALESCE(array_position(%s::text[], group_value), 100000)", addArg(validIssueStatuses))
 		}
 		return statusOrderExpression("group_value")
+	case "workflow":
+		return `CASE WHEN group_value = (SELECT default_issue_workflow_id::text FROM workspace WHERE id=$1) THEN 0 ELSE 1 END`
 	case "workflow_status":
 		return `CASE WHEN group_value LIKE 'legacy:%' THEN 2147483646 ELSE COALESCE(
-  (SELECT FLOOR(s.position)::int FROM issue_workflow_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
+  (SELECT ranked.rank FROM (
+    SELECT s.id, ROW_NUMBER() OVER (ORDER BY COALESCE(w.id=ws.default_issue_workflow_id,false) DESC, LOWER(w.name), w.id, s.position, s.id)::int AS rank
+    FROM issue_workflow_status s JOIN issue_workflow w ON w.id=s.workflow_id AND w.workspace_id=s.workspace_id
+    JOIN workspace ws ON ws.id=w.workspace_id WHERE s.workspace_id=$1
+  ) ranked WHERE ranked.id=group_value::uuid),
   2147483647
 ) END`
 	case "assignee":
@@ -609,7 +620,7 @@ func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, 
 	}
 	if group.kind == "workflow" {
 		return `CASE WHEN group_value = '__legacy__' THEN '{}'::jsonb ELSE COALESCE((
-          SELECT jsonb_build_object('workflow_name', w.name) FROM issue_workflow w
+          SELECT jsonb_build_object('workflow_name', w.name, 'is_default', w.id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1)) FROM issue_workflow w
           WHERE w.workspace_id = $1 AND w.id = group_value::uuid
         ), '{}'::jsonb) END`
 	}
@@ -618,6 +629,8 @@ func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, 
   SELECT jsonb_build_object('workflow_status', jsonb_build_object(
     'id', s.id::text,
     'workflow_id', s.workflow_id::text,
+    'workflow_name', (SELECT name FROM issue_workflow WHERE id=s.workflow_id AND workspace_id=$1),
+    'is_default', s.workflow_id=(SELECT default_issue_workflow_id FROM workspace WHERE id=$1),
     'legacy_status_key', COALESCE(s.legacy_status_key, ''),
     'name', s.name,
     'color', s.color,
@@ -712,6 +725,19 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 					}
 				}
 			}
+			if group.primary.kind != "workflow" && !group.secondaryFiltered {
+				// Assignee/project/parent grids need empty targets from each
+				// represented workflow, not only the nodes with loaded cards.
+				workflows := map[string]bool{}
+				for id := range secondaryCounts {
+					workflows[group.workflowStatuses[id].WorkflowID] = true
+				}
+				for id, node := range group.workflowStatuses {
+					if workflows[node.WorkflowID] && node.ArchivedAt == nil && !issueTableContainsString(secondaryValues, id) {
+						secondaryValues = append(secondaryValues, id)
+					}
+				}
+			}
 			for id := range secondaryCounts {
 				if !issueTableContainsString(secondaryValues, id) {
 					secondaryValues = append(secondaryValues, id)
@@ -719,7 +745,16 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 			}
 			sort.Slice(secondaryValues, func(i, j int) bool {
 				a, b := group.workflowStatuses[secondaryValues[i]], group.workflowStatuses[secondaryValues[j]]
-				if group.primary.kind == "workflow" && a.Position != b.Position {
+				if a.IsDefault != b.IsDefault {
+					return a.IsDefault
+				}
+				if a.WorkflowID != b.WorkflowID {
+					if a.WorkflowName != b.WorkflowName {
+						return a.WorkflowName < b.WorkflowName
+					}
+					return a.WorkflowID < b.WorkflowID
+				}
+				if a.Position != b.Position {
 					return a.Position < b.Position
 				}
 				return secondaryValues[i] < secondaryValues[j]
@@ -792,6 +827,8 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 			Kind:             "workflow_status",
 			Status:           status.LegacyStatusKey,
 			WorkflowID:       &status.WorkflowID,
+			WorkflowName:     status.WorkflowName,
+			IsDefault:        status.IsDefault,
 			WorkflowStatusID: &status.ID,
 			Name:             status.Name,
 			Color:            status.Color,
@@ -818,6 +855,7 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 	case "workflow":
 		descriptor.Value.Kind = "workflow"
 		descriptor.Value.Name = context.WorkflowName
+		descriptor.Value.IsDefault = context.IsDefault
 		if raw == "__legacy__" {
 			descriptor.Key = "workflow:legacy"
 			return descriptor, nil

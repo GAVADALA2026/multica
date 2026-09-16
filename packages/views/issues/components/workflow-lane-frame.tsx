@@ -8,15 +8,16 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 
 /** Height is a per-view layout preference; resizing never changes the query. */
-export function WorkflowLaneFrame({ laneKey, name, count, maxColumnCount, children }: {
+export function WorkflowLaneFrame({ laneKey, name, count, maxColumnCount, primary = false, children }: {
   laneKey: string;
   name: string;
   count: number;
   maxColumnCount: number;
+  primary?: boolean;
   children: ReactNode;
 }) {
   const { t } = useT("issues");
-  const collapsed = useViewStore((s) => s.collapsedWorkflowLanes.includes(laneKey));
+  const collapsed = useViewStore((s) => s.collapsedWorkflowLanes.includes(laneKey) || (!primary && !s.expandedWorkflowLanes.includes(laneKey)));
   const toggle = useViewStore((s) => s.toggleWorkflowLaneCollapsed);
   const savedHeight = useViewStore((s) => s.workflowLaneHeights[laneKey]);
   const saveHeight = useViewStore((s) => s.setWorkflowLaneHeight);
@@ -42,7 +43,7 @@ export function WorkflowLaneFrame({ laneKey, name, count, maxColumnCount, childr
     <section className="shrink-0 border-b border-border">
       <div className="sticky top-0 z-10 flex items-center bg-background">
         <button type="button" aria-label={`${name} ${count}`} aria-expanded={!collapsed} aria-controls={bodyId}
-          onClick={() => toggle(laneKey)}
+          onClick={() => toggle(laneKey, !primary)}
           className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-body font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {collapsed ? <ChevronRight className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
           <Workflow className="size-4 shrink-0 text-muted-foreground" />
@@ -55,7 +56,7 @@ export function WorkflowLaneFrame({ laneKey, name, count, maxColumnCount, childr
       </div>
       {!collapsed && <>
         <div ref={body} id={bodyId} className="flex min-h-0"
-          style={{ height: height ?? `min(${autoHeight}px, max(320px, 75dvh))` }}>
+          style={{ height: height ?? (primary ? "max(480px, 75dvh)" : `min(${autoHeight}px, max(320px, 50dvh))`) }}>
           {children}
         </div>
         <div role="separator" tabIndex={0} aria-orientation="horizontal" aria-controls={bodyId}

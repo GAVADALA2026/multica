@@ -59,3 +59,9 @@ describe("baselineFromQuery property filters", () => {
     expect(baseline.property.size).toBe(0);
   });
 });
+
+
+it("retains legacy and native status filters in saved-view baselines", () => {
+  const statuses = ["in_progress", "22222222-2222-4222-8222-222222222222"];
+  expect(baselineFromQuery({ statusFilters: statuses }).raw.statusFilters).toEqual(statuses);
+});

@@ -1522,6 +1522,8 @@ const IssueTableParentRefSchema = z.object({
 const IssueTableWorkflowStatusValueSchema = z.object({
     kind: z.literal("workflow_status"),
     workflow_id: z.string().optional(),
+    workflow_name: z.string().optional().catch(undefined),
+    is_default: z.boolean().optional().catch(undefined),
     workflow_status_id: z.string().optional(),
     status: z.string().default(""),
     name: z.string(),
@@ -1536,6 +1538,7 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("workflow"),
     workflow_id: z.string().nullable().optional().default(null),
+    is_default: z.boolean().optional().catch(undefined),
     name: z.string().optional().default(""),
   }).loose(),
   z.object({

@@ -1401,6 +1401,8 @@ describe("SwimLaneView", () => {
     const issue: Issue = { ...mockIssues[0]!, id: "native-issue", title: "Native build task", parent_issue_id: null,
       assignee_type: null, assignee_id: null, status: "in_progress", workflow_id: "workflow", workflow_status_id: "node-Build" };
     const onMove = vi.fn();
+    const foreignNode = { ...nodes[0]!, id: "foreign-node", workflow_id: "other-workflow", name: "Other build" };
+    nodes.push(foreignNode);
     renderWithI18n(<SurfaceWorkflowContext value={{ statuses: nodes }}>
       <SwimLaneView issues={[issue]} visibleStatuses={nodes.map((node) => node.id)} onMoveIssue={onMove} />
     </SurfaceWorkflowContext>);
@@ -1412,6 +1414,11 @@ describe("SwimLaneView", () => {
     act(() => lastOnDragEnd({ active: { id: issue.id }, over: { id: target } }));
     expect(onMove).toHaveBeenCalledWith(issue.id, expect.objectContaining({ workflow_status_id: "node-Review" }), expect.any(Function));
     expect(onMove.mock.calls[0]![1]).not.toHaveProperty("status");
+    onMove.mockClear();
+    const foreignTarget = "swim:assignee:none:foreign-node";
+    act(() => lastOnDragOver({ active: { id: issue.id }, over: { id: foreignTarget } }));
+    act(() => lastOnDragEnd({ active: { id: issue.id }, over: { id: foreignTarget } }));
+    expect(onMove).not.toHaveBeenCalled();
   });
 
   it("emits assignee_type + assignee_id when a card is dropped into an actor lane", () => {

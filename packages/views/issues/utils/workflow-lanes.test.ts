@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import type { Issue, IssueTableGroupDescriptor } from "@multica/core/types";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
@@ -38,7 +39,12 @@ describe("workflow lanes", () => {
   it("retains exact-node and legacy saved filters without changing their meaning", () => {
     expect(workflowLaneBranches(branches, lane, ["review"]).descriptors).toHaveLength(1);
     expect(workflowLaneBranches(branches, lane, ["in_review"]).descriptors).toHaveLength(1);
-    expect(workflowLaneBranches(branches, lane, ["eng-review"]).descriptors).toHaveLength(0);
+    const empty = { ...lane, count: 0, secondary_groups: lane.secondary_groups!.map((cell) => ({ ...cell, count: 0 })) };
+    expect(workflowLaneBranches(branches, empty, ["eng-review"]).descriptors).toHaveLength(0);
+  });
+  it("retains server-matched custom columns for legacy saved filters without a legacy node alias", () => {
+    const custom = { ...lane, secondary_groups: [{ ...lane.secondary_groups![0]!, value: { ...lane.secondary_groups![0]!.value, status: "" } }] } as IssueTableGroupDescriptor;
+    expect(workflowLaneBranches(branches, custom, ["in_progress"]).descriptors).toHaveLength(1);
   });
   it("keeps archived occupied columns readable without a create action", () => {
     const archived = { ...lane.secondary_groups![0]!, value: { ...lane.secondary_groups![0]!.value, archived: true } } as IssueTableGroupDescriptor;

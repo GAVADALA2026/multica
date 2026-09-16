@@ -9,8 +9,8 @@ export function workflowLaneBranches(
   statusFilters: readonly string[],
 ): IssueGroupBranches {
   const workflowId = lane.value.kind === "workflow" ? lane.value.workflow_id : null;
-  const cells = (lane.secondary_groups ?? []).filter(({ value }) =>
-    value.kind === "workflow_status" && (statusFilters.length === 0 ||
+  const cells = (lane.secondary_groups ?? []).filter(({ value, count }) =>
+    value.kind === "workflow_status" && (count > 0 || statusFilters.length === 0 ||
       statusFilters.includes(value.workflow_status_id ?? "") || statusFilters.includes(value.status)),
   );
   const keyOf = (cell: IssueTableGroupDescriptor) => cell.value.kind === "workflow_status"

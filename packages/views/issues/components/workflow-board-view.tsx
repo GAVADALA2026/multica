@@ -44,8 +44,13 @@ export function WorkflowBoardView(props: Props) {
   const lanes = branches.descriptors.filter((lane) => lane.value.kind === "workflow");
   // An explicitly opened empty project still offers its active drop targets.
   if (lanes.length === 0 && !branches.isError && props.workflowStatuses?.length) {
-    return <BoardView {...props} ownWorkflow />;
+    return <BoardView {...props} ownWorkflow onCreateIssue={(defaults) => props.onCreateIssue?.({
+      ...defaults, project_id: props.projectId ?? null,
+      required_workflow_id: props.workflowStatuses?.[0]?.workflow_id,
+      require_project_choice: !props.projectId,
+    })} />;
   }
+  const primaryKey = lanes.find((lane) => lane.value.kind === "workflow" && lane.value.is_default)?.key ?? lanes[0]?.key;
   const single = lanes.length === 1 && !branches.hasMoreGroups;
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -53,13 +58,13 @@ export function WorkflowBoardView(props: Props) {
         const name = lane.value.kind === "workflow" ? lane.value.name : "";
         const board = <WorkflowLane {...props} lane={lane} branches={branches} />;
         if (single) return <section key={lane.key} className="flex min-h-0 flex-1 flex-col">{board}</section>;
-        return <WorkflowLaneFrame key={lane.key} laneKey={lane.key}
+        return <WorkflowLaneFrame key={lane.key} laneKey={lane.key} primary={lane.key === primaryKey}
           name={name || t(($) => $.board.legacy_workflow)} count={lane.count}
-          maxColumnCount={Math.max(0, ...(lane.secondary_groups ?? []).filter(({ value }) => {
+          maxColumnCount={Math.max(0, ...(lane.secondary_groups ?? []).filter(({ value, count }) => {
             if (value.kind !== "workflow_status") return false;
             const keys = [value.workflow_status_id, value.status].filter((key): key is string => !!key);
             const selected = keys.some((key) => statusFilters.includes(key));
-            return selected || (statusFilters.length === 0 && !keys.some((key) => hiddenStatuses.includes(key)));
+            return count > 0 || selected || (statusFilters.length === 0 && !keys.some((key) => hiddenStatuses.includes(key)));
           }).map((cell) => cell.count))}>
           {board}
         </WorkflowLaneFrame>;

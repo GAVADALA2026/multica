@@ -47,6 +47,12 @@ export function useSurfaceStatusCatalog(wsId: string) {
     const facetGroups: IssueTableGroupDescriptor[] = (facets?.facets ?? []).flatMap((facet) =>
       facet.values.flatMap((value) => value.status_node ? [{ key: value.key, count: value.count, value: value.status_node }] : []),
     );
+    const workflowIds = new Set(statuses.map((node) => node.workflow_id));
+    for (const group of [...(groups ?? []), ...facetGroups]) {
+      for (const item of group.secondary_groups ?? [group]) {
+        if (item.value.kind === "workflow_status" && item.value.workflow_id) workflowIds.add(item.value.workflow_id);
+      }
+    }
     for (const group of [...(groups ?? []), ...facetGroups]) {
       for (const item of group.secondary_groups ?? [group]) {
         const value = item.value;
@@ -56,17 +62,43 @@ export function useSurfaceStatusCatalog(wsId: string) {
           if (legacy) entries.set(legacy.key, legacy);
           continue;
         }
-        if (entries.has(value.workflow_status_id) && !facetGroups.includes(group)) continue;
+
         // Pinned definitions remain readable after project defaults change;
         // only archived nodes are unavailable as transition targets.
         entries.set(value.workflow_status_id, {
           id: value.workflow_status_id, workspace_id: wsId, key: value.workflow_status_id,
-          name: value.name, description: "", category: normalizeIssueStatusCategory(value.phase ?? "unstarted") ?? "unstarted",
+          name: workflowIds.size > 1 && value.workflow_name && !value.is_default ? `${value.workflow_name} / ${value.name}` : value.name, description: "", category: normalizeIssueStatusCategory(value.phase ?? "unstarted") ?? "unstarted",
           color: value.color ?? "#808080", icon: value.icon, position: value.position ?? 0,
           is_system: false, archived_at: value.archived ? "archived" : null, created_at: "", updated_at: "",
         });
       }
     }
-    return buildIssueStatusCatalog([...entries.values()].sort((a, b) => a.position - b.position));
+    // Keep legacy keys for saved filters, but order concrete nodes by workflow
+    // and then node position rather than interleaving different definitions.
+    const order = new Map<string, string>();
+    for (const group of [...(groups ?? []), ...facetGroups]) for (const item of group.secondary_groups ?? [group]) {
+      const node = item.value;
+      if (node.kind === "workflow_status" && node.workflow_status_id) order.set(node.workflow_status_id,
+        `${node.is_default ? "0" : "1"}:${node.workflow_name ?? ""}:${node.workflow_id ?? ""}`);
+    }
+    return buildIssueStatusCatalog([...entries.values()].sort((a, b) =>
+      (order.get(a.key) ?? "0").localeCompare(order.get(b.key) ?? "0") || a.position - b.position));
   }, [groups, facets, statuses, workspace, wsId]);
+}
+
+/** Concrete drag/create targets are resolved independently of their labels. */
+export function useSurfaceNodeWorkflows() {
+  const { statuses, groups, facets } = useSurfaceWorkflow();
+  return useMemo(() => {
+    const nodes = new Map((statuses ?? []).map((node) => [node.id, node.workflow_id]));
+    const descriptors = [...(groups ?? []), ...(facets?.facets ?? []).flatMap((facet) => facet.values.flatMap((value) =>
+      value.status_node ? [{ value: value.status_node }] : []))];
+    for (const descriptor of descriptors) {
+      const children = "secondary_groups" in descriptor ? descriptor.secondary_groups : undefined;
+      for (const { value } of children ?? [descriptor]) {
+        if (value.kind === "workflow_status" && value.workflow_status_id && value.workflow_id) nodes.set(value.workflow_status_id, value.workflow_id);
+      }
+    }
+    return nodes;
+  }, [statuses, groups, facets]);
 }

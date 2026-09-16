@@ -1440,8 +1440,9 @@ export function IssueFilterMenu({
   const workspaceStatusOptions = useStatusOptions(wsId);
   const surfaceWorkflow = useSurfaceWorkflow();
   const surfaceCatalog = useSurfaceStatusCatalog(wsId);
-  const statusOptions = surfaceWorkflow.statuses ? surfaceCatalog.statuses.filter((status) => (status.key === status.id || statusFilters.includes(status.key)) && (!status.archived_at || statusFilters.includes(status.id))).map((status) => ({
-    key: status.key, label: status.name, category: status.category, color: status.color, icon: status.icon,
+  const selectedLegacyNodes = new Set((surfaceWorkflow.statuses ?? []).filter((node) => node.legacy_status_key && statusFilters.includes(node.legacy_status_key)).map((node) => node.id));
+  const statusOptions = surfaceWorkflow.statuses ? surfaceCatalog.statuses.filter((status) => (!selectedLegacyNodes.has(status.id) || statusFilters.includes(status.id)) && (status.key === status.id || statusFilters.includes(status.key)) && (!status.archived_at || statusFilters.includes(status.id))).map((status) => ({
+    key: status.key, label: status.key === status.id ? status.name : workspaceStatusOptions.find((option) => option.key === status.key)?.label ?? status.name, category: status.category, color: status.color, icon: status.icon,
   })) : workspaceStatusOptions;
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(

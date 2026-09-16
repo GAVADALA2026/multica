@@ -33,6 +33,10 @@ function renderBoard(data = branches) {
 describe("workflow board", () => {
   it("renders server lanes and counts before cards arrive, and collapses without changing filters", () => {
     const { store } = renderBoard();
+    expect(screen.getAllByTestId("lane-board")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Design 6" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Design 6" }));
+    expect(store.getState().expandedWorkflowLanes).toContain("workflow:1");
     expect(screen.getAllByTestId("lane-board")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Engineering 51" }));
     expect(screen.getAllByTestId("lane-board")).toHaveLength(1);
@@ -42,6 +46,7 @@ describe("workflow board", () => {
   });
   it("requires an explicit project choice while retaining the exact target node", () => {
     const { onCreateIssue } = renderBoard();
+    fireEvent.click(screen.getByRole("button", { name: "Design 6" }));
     fireEvent.click(screen.getByRole("button", { name: "Design review" }));
     expect(onCreateIssue).toHaveBeenCalledWith({ project_id: null, required_workflow_id: "1", require_project_choice: true, workflow_status_id: "review-1" });
     for (const board of screen.getAllByTestId("lane-board")) expect(board).toHaveAttribute("data-own-workflow", "true");
