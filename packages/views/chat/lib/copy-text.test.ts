@@ -83,53 +83,22 @@ describe("splitTimeline", () => {
 });
 
 describe("extractCopyText", () => {
-  it("falls back to message.content when timeline is empty (legacy)", () => {
-    expect(extractCopyText(message("legacy body"), [])).toBe("legacy body");
+  it("uses canonical message content when timeline is empty", () => {
+    expect(extractCopyText(message("legacy body"))).toBe("legacy body");
   });
 
-  it("returns concatenated text segments for an all-text timeline", () => {
+  it("copies canonical message content without transcript inference", () => {
     expect(
-      extractCopyText(message(""), [text(1, "hello"), text(2, "world")]),
-    ).toBe("hello\n\nworld");
+      extractCopyText(message("complete canonical answer")),
+    ).toBe("complete canonical answer");
   });
 
-  it("returns only the final text for the standard tool-using shape", () => {
+  it("applies a surface transform to hidden protocols", () => {
     expect(
-      extractCopyText(message(""), [
-        thinking(1),
-        tool(2),
-        text(3, "intermediate — should be excluded"),
-        tool(4),
-        text(5, "final answer"),
-      ]),
-    ).toBe("final answer");
-  });
-
-  it("includes preface and final, excludes middle text", () => {
-    expect(
-      extractCopyText(message(""), [
-        text(1, "preface"),
-        tool(2),
-        text(3, "middle — excluded"),
-        tool(4),
-        text(5, "final"),
-      ]),
-    ).toBe("preface\n\nfinal");
-  });
-
-  it("falls back to message.content when timeline has no text items", () => {
-    expect(
-      extractCopyText(message("fallback body"), [thinking(1), tool(2)]),
-    ).toBe("fallback body");
-  });
-
-  it("joins multiple trailing text segments with blank-line separators", () => {
-    expect(
-      extractCopyText(message(""), [
-        tool(1),
-        text(2, "para 1"),
-        text(3, "para 2"),
-      ]),
-    ).toBe("para 1\n\npara 2");
+      extractCopyText(
+        message("visible<agent_draft>hidden</agent_draft>"),
+        (content) => content.replace(/<agent_draft>[\s\S]*<\/agent_draft>/, ""),
+      ),
+    ).toBe("visible");
   });
 });

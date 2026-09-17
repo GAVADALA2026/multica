@@ -599,6 +599,14 @@ function AssistantMessage({
   // without any text. Keep whatever tool/thinking timeline the run produced and
   // show a localized "no text reply" notice instead of an empty markdown block.
   const isNoResponse = message?.message_kind === "no_response";
+  const settledContent = message
+    ? extractCopyText(message, transformContent)
+    : undefined;
+  // Empty persisted content is valid for attachment-only/no-response turns and
+  // for legacy rows whose transcript is the only remaining text source. Only
+  // a non-empty canonical answer replaces timeline text after settlement.
+  const canonicalAnswer =
+    !isNoResponse && settledContent?.trim() ? settledContent : undefined;
 
   return (
     <div className="w-full space-y-1.5">
@@ -608,13 +616,14 @@ function AssistantMessage({
           attachments={message?.attachments}
           phase={phase}
           isStreaming={!message}
+          settledContent={canonicalAnswer}
         />
       )}
       {isNoResponse ? (
         <NoResponseNotice />
       ) : message && timeline.length === 0 ? (
         <RichContent
-          content={message.content}
+          content={settledContent ?? message.content}
           attachments={message.attachments}
           density="compact"
           phase="settled"
@@ -629,8 +638,8 @@ function AssistantMessage({
           />
           <MessageFooter
             message={message}
-            timeline={timeline}
             isPending={isPending}
+            transformContent={transformContent}
           />
           {onQuickAction && showStarterCards ? (
             // The opening's starter cards own this turn's suggestion strip
@@ -851,12 +860,12 @@ function NoResponseNotice() {
 // final text is still being appended.
 function MessageFooter({
   message,
-  timeline,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
-  timeline: ChatTimelineItem[];
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   // A no_response turn has nothing to copy, and its caption uses a neutral
   // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
@@ -871,21 +880,26 @@ function MessageFooter({
           elapsedMs={message.elapsed_ms}
         />
       )}
-      {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
+      {showCopy && (
+        <MessageCopyButton
+          message={message}
+          transformContent={transformContent}
+        />
+      )}
     </div>
   );
 }
 
 function MessageCopyButton({
   message,
-  timeline,
+  transformContent,
 }: {
   message: ChatMessage;
-  timeline: ChatTimelineItem[];
+  transformContent?: (content: string) => string;
 }) {
   const { t } = useT("chat");
   const handleCopy = async () => {
-    if (await copyText(extractCopyText(message, timeline))) {
+    if (await copyText(extractCopyText(message, transformContent))) {
       toast.success(t(($) => $.message_list.copied_toast));
     } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
@@ -1041,37 +1055,63 @@ function FailureBubble({
   );
 }
 
-// ─── Timeline: outer process fold + final text (Conductor-style) ─────────
+// ─── Timeline: outer process fold + answer (Conductor-style) ─────────────
 //
-// splitTimeline (lib/copy-text.ts) carves the items into:
+// While streaming, splitTimeline (lib/copy-text.ts) carves the items into:
 //   preface — text before the first thinking/tool item
 //   middle  — first → last non-text item (inclusive, may sandwich text)
 //   final   — text after the last non-text item
 //
-// We render preface + final outside an outer Collapsible ("X steps") that
-// wraps middle. The inner row Collapsibles (ThinkingRow / ToolCallRow /
-// ToolResultRow) are unchanged — clicking them toggles independently of
-// the outer fold. Copy mirrors what's visible when the outer fold is
-// closed: preface + final, never middle. See extractCopyText for the
-// authoritative copy logic.
+// Once settled, the persisted chat_message content is authoritative: task
+// text is discarded and only thinking/tool/error rows remain in the fold.
+// Explicit process/answer keys preserve the trailing RichContent subtree when
+// a live row becomes its persisted row (MUL-4922).
 
 function TimelineView({
   items,
   isStreaming,
   attachments,
   phase = "settled",
+  settledContent,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
+  settledContent?: string;
 }) {
+  if (phase === "settled" && settledContent !== undefined) {
+    const processItems = items.filter((item) => item.type !== "text");
+    return (
+      <>
+        {processItems.length > 0 && (
+          <OuterProcessFold
+            key="process"
+            items={processItems}
+            isStreaming={false}
+            attachments={attachments}
+            phase="settled"
+          />
+        )}
+        <RichContent
+          key="answer"
+          content={settledContent}
+          attachments={attachments}
+          density="compact"
+          phase="settled"
+          className="leading-relaxed"
+        />
+      </>
+    );
+  }
+
   const { preface, middle, final } = splitTimeline(items);
 
   return (
     <>
       {preface.length > 0 && (
         <RichContent
+          key="preface"
           content={preface.map((t) => t.content ?? "").join("")}
           attachments={attachments}
           density="compact"
@@ -1081,6 +1121,7 @@ function TimelineView({
       )}
       {middle.length > 0 && (
         <OuterProcessFold
+          key="process"
           items={middle}
           isStreaming={!!isStreaming}
           attachments={attachments}
@@ -1089,6 +1130,7 @@ function TimelineView({
       )}
       {final.length > 0 && (
         <RichContent
+          key="answer"
           content={final.map((t) => t.content ?? "").join("")}
           attachments={attachments}
           density="compact"

@@ -234,6 +234,82 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
     expect(screen.queryByText(/Hidden suggestion/)).not.toBeInTheDocument();
   });
+
+  it("renders the canonical settled answer outside a process-only fold", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", { content: "first timeline fragment" }),
+      taskMsg(1, "thinking", { content: "checking" }),
+      taskMsg(2, "text", { content: "second timeline fragment" }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-answer",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "Complete canonical answer",
+              task_id: TASK_ID,
+              created_at: "2026-09-17T00:00:00Z",
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Complete canonical answer")).toBeInTheDocument();
+    const foldTrigger = screen.getByText("1 step");
+    expect(screen.queryByText("first timeline fragment")).not.toBeInTheDocument();
+    expect(screen.queryByText("second timeline fragment")).not.toBeInTheDocument();
+
+    fireEvent.click(foldTrigger);
+    expect(screen.queryByText("first timeline fragment")).not.toBeInTheDocument();
+    expect(screen.queryByText("second timeline fragment")).not.toBeInTheDocument();
+  });
+
+  it("keeps the answer node mounted across the live-to-settled handoff", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Stable final answer" }),
+    ]);
+
+    const view = (
+      messages: Parameters<typeof ChatMessageList>[0]["messages"],
+      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+    ) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={messages}
+            pendingTask={pendingTask}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+
+    const { rerender } = render(
+      view([], { task_id: TASK_ID, status: "running" }),
+    );
+    const answerBefore = await screen.findByText("Stable final answer");
+
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Stable final answer",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+
+    expect(await screen.findByText("Stable final answer")).toBe(answerBefore);
+  });
 });
 
 describe("ChatMessageList footer spacing", () => {
