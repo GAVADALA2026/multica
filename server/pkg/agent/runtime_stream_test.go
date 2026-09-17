@@ -38,6 +38,11 @@ const claudeFakeResultEvent = `{"type":"result","subtype":"success","session_id"
 // shorten each other's.
 func runFakeBackend(t *testing.T, agentType, script string, terminalGrace, exitDrain time.Duration) *Session {
 	t.Helper()
+	return runFakeBackendWithPrompt(t, agentType, script, "prompt-ignored", terminalGrace, exitDrain)
+}
+
+func runFakeBackendWithPrompt(t *testing.T, agentType, script, prompt string, terminalGrace, exitDrain time.Duration) *Session {
+	t.Helper()
 	dir := t.TempDir()
 	fakePath := filepath.Join(dir, agentType)
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -54,7 +59,7 @@ func runFakeBackend(t *testing.T, agentType, script string, terminalGrace, exitD
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+	session, err := backend.Execute(ctx, prompt, ExecOptions{
 		Timeout:         0, // mirrors production: daemon.DefaultAgentTimeout = 0
 		Cwd:             dir,
 		ResumeSessionID: filepath.Join(dir, "session.jsonl"),
@@ -228,5 +233,98 @@ func TestRuntimeStreamAddsNoLatencyToACleanExit(t *testing.T) {
 	}
 	if elapsed >= time.Minute {
 		t.Fatalf("clean exit took %s: a run that reaches EOF must not wait for either fallback", elapsed)
+	}
+}
+
+// Pi keeps going after agent_end in a second documented way: context
+// compaction. The overflow case compacts — an LLM call, silent on stdout for
+// as long as it takes — and then continues generating. compaction_start
+// withdraws the boundary agent_end armed; compaction_end says in willRetry
+// whether more output is coming.
+func TestRuntimeStreamDoesNotCutPiCompactionAfterAgentEnd(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\ncat > /dev/null\n")
+	for _, e := range []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"context window exceeded"}}`,
+		`{"type":"agent_end","messages":[]}`,
+		`{"type":"compaction_start","reason":"overflow"}`,
+	} {
+		b.WriteString("printf '%s\\n' '" + e + "'\n")
+	}
+	// Compaction itself: silent, and longer than the terminal grace.
+	b.WriteString("sleep 1.5\n")
+	for _, e := range []string{
+		`{"type":"compaction_end","reason":"overflow","aborted":false,"willRetry":true}`,
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"recovered after compaction"}}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"stop"}}`,
+		`{"type":"agent_end","messages":[]}`,
+	} {
+		b.WriteString("printf '%s\\n' '" + e + "'\n")
+	}
+	b.WriteString("exit 0\n")
+
+	session := runFakeBackend(t, "pi", b.String(), 300*time.Millisecond, 300*time.Millisecond)
+
+	res, _ := awaitResult(t, session, 15*time.Second)
+	if res.Status != "completed" {
+		t.Fatalf("Status: got %q (error=%q), want completed — compaction recovered the run", res.Status, res.Error)
+	}
+	if res.Output != "recovered after compaction" {
+		t.Fatalf("Output: got %q, want the post-compaction output", res.Output)
+	}
+}
+
+// A launcher exits while the real CLI, its child, has not read the prompt yet.
+// os/exec closes the pipes it created inside cmd.Wait(), and this package now
+// calls Wait as soon as the leader is reaped — so an os/exec-owned stdin would
+// be closed out from under a prompt write that is still in flight.
+func TestRuntimeStreamKeepsPromptWritableWhenLauncherExitsFirst(t *testing.T) {
+	t.Parallel()
+
+	// The prompt is larger than the pipe buffer, so the write is still in
+	// flight when the launcher exits.
+	script := `#!/bin/sh
+(
+  sleep 0.5
+  cat > /dev/null
+  printf '%s\n' '{"type":"agent_start"}'
+  printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"read full prompt"}}'
+  printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"stop"}}'
+  printf '%s\n' '{"type":"agent_end","messages":[]}'
+) <&0 &
+exit 0
+`
+	session := runFakeBackendWithPrompt(t, "pi", script, strings.Repeat("x", 1024*1024), 5*time.Second, 5*time.Second)
+
+	res, _ := awaitResult(t, session, 20*time.Second)
+	if res.Status != "completed" {
+		t.Fatalf("Status: got %q (error=%q), want completed — the prompt write must survive the launcher", res.Status, res.Error)
+	}
+}
+
+// A CLI that closes its own stdout and stderr but keeps running. Both pipes
+// reach EOF, so the scanner finishes and the stderr pump finishes — but the
+// adapter is then parked in wait() on a process that is still alive, which is
+// why supervision cannot stop at EOF.
+func TestRuntimeStreamBoundsALiveLeaderThatClosedItsOutput(t *testing.T) {
+	t.Parallel()
+
+	script := `#!/bin/sh
+read line
+printf '%s\n' '` + claudeFakeResultEvent + `'
+exec 1>/dev/null 2>/dev/null
+sleep 30
+`
+	session := runFakeBackend(t, "claude", script, 300*time.Millisecond, 300*time.Millisecond)
+
+	res, _ := awaitResult(t, session, 15*time.Second)
+	if res.Status != "completed" {
+		t.Fatalf("Status: got %q (error=%q), want completed", res.Status, res.Error)
 	}
 }

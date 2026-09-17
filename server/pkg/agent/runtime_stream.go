@@ -81,6 +81,15 @@ type runtimeStream struct {
 	errW2    io.Writer // the backend's sink; nil when it captures no stderr
 	pumpDone chan struct{}
 
+	// stdin is owned here for a third reason: cmd.Wait() closes the pipes
+	// os/exec created, and this type calls Wait in the background the moment
+	// the leader is reaped. With os/exec's own StdinPipe that tears the prompt
+	// write out from under a launcher whose real CLI has not read it yet — the
+	// shim exits, the CLI keeps reading, and the write fails with "file already
+	// closed". Owning the pipe leaves closing it to the adapter, which does so
+	// when the prompt is fully written.
+	stdinR *os.File
+
 	terminalGrace time.Duration
 	exitDrain     time.Duration
 
@@ -170,6 +179,18 @@ func newRuntimeStream(cmd *exec.Cmd, label string, cfg Config) (*runtimeStream, 
 	}, nil
 }
 
+// stdinPipe replaces cmd.StdinPipe(). Call it before start(); the returned
+// writer is the adapter's to write the prompt to and to close.
+func (s *runtimeStream) stdinPipe() (*os.File, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	s.stdinR = r
+	s.cmd.Stdin = r
+	return w, nil
+}
+
 // captureStderr routes the child's stderr to w through a pipe this type owns.
 // Call it before start(); backends pass the same writer they used to assign to
 // cmd.Stderr.
@@ -193,6 +214,9 @@ func (s *runtimeStream) start() error {
 			_ = s.errR.Close()
 			_ = s.errW.Close()
 		}
+		if s.stdinR != nil {
+			_ = s.stdinR.Close()
+		}
 		return err
 	}
 	// Drop the parent's write ends immediately: while this process holds one,
@@ -202,6 +226,12 @@ func (s *runtimeStream) start() error {
 	if s.errW != nil {
 		_ = s.errW.Close()
 		s.errW = nil
+	}
+	// The child has its own descriptor now; the parent's copy of the read end
+	// would keep the child's stdin from ever reaching EOF.
+	if s.stdinR != nil {
+		_ = s.stdinR.Close()
+		s.stdinR = nil
 	}
 	s.lastByte.Store(time.Now().UnixNano())
 
@@ -321,8 +351,11 @@ func (s *runtimeStream) supervise() {
 		case <-ticker.C:
 		}
 
-		if s.ended.Load() && s.pumpFinished() {
-			return // both pipes closed on their own; nothing left to bound
+		// Both pipes reaching EOF is not the end of the story: a CLI can close
+		// its output and stay alive, and then the adapter is still parked in
+		// wait(). Supervision ends when the process itself is gone.
+		if exited && s.ended.Load() && s.pumpFinished() {
+			return
 		}
 
 		switch {

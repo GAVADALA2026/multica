@@ -261,7 +261,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// from re-tokenising embedded quotes into CLI flags on Windows (#6457).
 	// The explicit close remains part of the #2188 contract too: under systemd,
 	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
-	stdin, err := cmd.StdinPipe()
+	stdin, err := stream.stdinPipe()
 	if err != nil {
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -336,6 +336,26 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			var evt piStreamEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
 				continue
+			}
+
+			// Arm the stream's terminal boundary, or withdraw a stale arming.
+			//
+			// agent_end is Pi's boundary for the whole execution (turn_end
+			// repeats per turn), but Pi keeps going after it in two documented
+			// ways: an automatic retry of a retryable error, and context
+			// compaction, whose overflow case compacts and then continues
+			// generating. Both begin with an event, and compaction_end says in
+			// willRetry whether more is coming — so every event other than a
+			// boundary is proof the run is still producing and withdraws the
+			// arming. Enumerating only the continuation events would leave the
+			// next one Pi adds silently able to cut a live run short.
+			switch {
+			case evt.Type == "agent_end":
+				stream.terminalObserved()
+			case evt.Type == "compaction_end" && !evt.WillRetry:
+				stream.terminalObserved()
+			default:
+				stream.runContinues()
 			}
 
 			switch evt.Type {
@@ -431,21 +451,6 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					}
 				}
 
-			case "auto_retry_start":
-				// Pi emits agent_end before deciding whether the turn's error is
-				// retryable, and emits auto_retry_start immediately after that
-				// decision — the backoff sleep comes after this event, not
-				// before it. So this is the withdrawal of the terminal boundary
-				// agent_end just reported, and it always arrives well inside the
-				// grace. Without it the retry's silent backoff would look like a
-				// finished run that failed to exit.
-				stream.runContinues()
-
-			case "agent_end":
-				// Pi's protocol boundary for the whole execution, not for one
-				// turn: turn_end repeats per turn, agent_end does not. A retry
-				// withdraws it through auto_retry_start above.
-				stream.terminalObserved()
 			}
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
@@ -616,6 +621,11 @@ type piStreamEvent struct {
 	// auto_retry_end
 	Success    bool   `json:"success,omitempty"`
 	FinalError string `json:"finalError,omitempty"`
+
+	// compaction_end: true when Pi will continue generating once the context
+	// has been compacted (the overflow case). False is the threshold case,
+	// where compaction ends the execution.
+	WillRetry bool `json:"willRetry,omitempty"`
 }
 
 type piAssistantMessageEvent struct {

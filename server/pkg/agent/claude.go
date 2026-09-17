@@ -98,7 +98,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdout pipe: %w", err)
 	}
-	stdin, err := cmd.StdinPipe()
+	stdin, err := stream.stdinPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
