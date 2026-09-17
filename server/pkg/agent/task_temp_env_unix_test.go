@@ -88,31 +88,37 @@ func recordChildEnv(t *testing.T, provider string, cfgEnv map[string]string) map
 	return got
 }
 
-// TestAgentExecutePassesTaskTempEnvToChild is the regression for #8392.
+// TestAgentExecutePassesTaskTempEnvToChild pins the per-task temp variables to
+// the process that actually consumes them.
 //
 // The daemon gives every task a private temp directory and points TMPDIR, TMP
 // and TEMP at it (taskMulticaEnvironment in server/internal/daemon/daemon.go),
-// then removes that directory when the task ends. That isolation is the only
-// thing bounding a class of agent-CLI temp litter we do not own: OpenCode is
-// compiled by Bun into a single-file executable, and on every successful run
-// its embedded runtime extracts a native module into $TMPDIR under a fresh
-// non-content-addressed name and never deletes it. Reproduced on macOS/arm64
-// and Linux (amd64 and arm64) across OpenCode 1.15.0 through 1.18.30: one
-// 4-8 MB module per successful `opencode run`, surviving both clean exit and
-// SIGKILL. #8392 is what happens when those land in the shared system temp
-// directory instead — ~2,960 files, 11.16 GiB, root filesystem at 99%.
+// then removes that directory when the task ends. That isolation is what bounds
+// a class of agent-CLI temp litter we do not own and cannot safely delete by
+// filename in a shared /tmp: OpenCode is compiled by Bun into a single-file
+// executable, and on every successful run its embedded runtime extracts a
+// native module into $TMPDIR under a fresh non-content-addressed name and never
+// deletes it — one 4-8 MB module per run, surviving clean exit and SIGKILL,
+// measured across OpenCode 1.1.49 through 1.18.30 on macOS/arm64 and Linux.
 //
-// Existing coverage stops at the map taskMulticaEnvironment returns and at the
-// custom_env blocklist that keeps an agent from overriding these keys. Neither
-// notices if a backend builds its child environment without Config.Env — the
-// variables would still be in the map, correct in every unit test, and simply
-// absent from the process that creates the files. This asserts the value the
-// spawned process actually receives.
+// This is NOT the regression for #8392. That report's cause was upstream:
+// OpenCode <= 1.1.53 ignored these variables outright and wrote into the shared
+// /tmp no matter what the daemon exported (fixed upstream in 1.1.54). No test
+// here could have caught that. What this pins is our half of the contract, on
+// which the isolation depends for every CLI that does honor the variables.
+//
+// TestOpencodeBackendOmitsMCPEnvWhenEmpty already fails if a backend drops
+// Config.Env wholesale, so that much was covered. The gap this closes is
+// narrower and was genuinely uncovered: these three keys specifically, and
+// their precedence over the same names inherited from the daemon's own
+// environment — see TestAgentExecuteTaskTempEnvOverridesInheritedValue, which
+// is the case the MCP test passes straight through.
 func TestAgentExecutePassesTaskTempEnvToChild(t *testing.T) {
 	t.Parallel()
 
-	// Every provider the daemon can spawn through this package's exec path.
-	// A backend added without wiring Config.Env into its child fails here.
+	// The providers the daemon spawns through this package's exec path, on
+	// Unix. Not an exhaustive registry walk: a newly added backend has to be
+	// listed here to be covered.
 	for _, provider := range []string{"claude", "codex", "opencode"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
@@ -127,7 +133,7 @@ func TestAgentExecutePassesTaskTempEnvToChild(t *testing.T) {
 			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 				if got[key] != taskTemp {
 					t.Errorf("child %s = %q, want the per-task temp dir %q — "+
-						"agent temp files would land in the shared system temp dir (#8392)",
+						"agent temp files would land in the shared system temp dir instead",
 						key, got[key], taskTemp)
 				}
 			}
