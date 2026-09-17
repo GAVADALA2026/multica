@@ -613,6 +613,7 @@ export function SaveViewDialog({
       definition_version: 1,
       query: {
         statusFilters: state.statusFilters,
+        statusFilterMappings: state.statusFilterMappings,
         priorityFilters: state.priorityFilters,
         assigneeFilters: state.assigneeFilters,
         includeNoAssignee: state.includeNoAssignee,

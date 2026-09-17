@@ -115,10 +115,12 @@ func CustomizeProject(ctx context.Context, q Querier, workspaceID, projectID pgt
 			return db.IssueWorkflow{}, fmt.Errorf("clone workspace workflow statuses: %w", err)
 		}
 	}
-	if err := q.SetDefaultIssueWorkflowInitialStatus(ctx, db.SetDefaultIssueWorkflowInitialStatusParams{
-		WorkspaceID: workspaceID, WorkflowID: custom.ID,
-	}); err != nil {
-		return db.IssueWorkflow{}, fmt.Errorf("set project workflow initial status: %w", err)
+	if count == 0 {
+		if err := q.SetDefaultIssueWorkflowInitialStatus(ctx, db.SetDefaultIssueWorkflowInitialStatusParams{
+			WorkspaceID: workspaceID, WorkflowID: custom.ID,
+		}); err != nil {
+			return db.IssueWorkflow{}, fmt.Errorf("set project workflow initial status: %w", err)
+		}
 	}
 	if _, err := q.SetProjectIssueWorkflow(ctx, db.SetProjectIssueWorkflowParams{
 		ProjectID: projectID, WorkspaceID: workspaceID, WorkflowID: custom.ID,
@@ -132,8 +134,8 @@ func CustomizeProject(ctx context.Context, q Querier, workspaceID, projectID pgt
 	return custom, nil
 }
 
-// UseWorkspaceDefault removes only the project's default pointer. Issues that
-// were already created remain pinned to their original workflow and status.
+// UseWorkspaceDefault changes the project pointer inside a caller-owned
+// transaction. The caller must migrate existing bindings before committing.
 func UseWorkspaceDefault(ctx context.Context, q Querier, workspaceID, projectID pgtype.UUID) error {
 	if _, err := q.ClearProjectIssueWorkflow(ctx, db.ClearProjectIssueWorkflowParams{
 		ProjectID: projectID, WorkspaceID: workspaceID,

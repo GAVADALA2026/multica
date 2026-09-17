@@ -51,11 +51,12 @@ type normalizedWorkflowSpec struct {
 }
 
 type issueWorkflowApplyPlan struct {
-	Changed  bool     `json:"changed"`
-	Created  []string `json:"created"`
-	Updated  []string `json:"updated"`
-	Restored []string `json:"restored"`
-	Archived []string `json:"archived"`
+	Changed   bool                   `json:"changed"`
+	Migration *workflowMigrationPlan `json:"migration,omitempty"`
+	Created   []string               `json:"created"`
+	Updated   []string               `json:"updated"`
+	Restored  []string               `json:"restored"`
+	Archived  []string               `json:"archived"`
 }
 
 type issueWorkflowApplyResponse struct {
@@ -182,6 +183,14 @@ func applyWorkflowSpec(ctx context.Context, qtx *db.Queries, workspaceID, projec
 	if err != nil {
 		return db.IssueWorkflow{}, nil, issueWorkflowApplyPlan{}, fmt.Errorf("ensure project workflow: %w", err)
 	}
+	workspaceDefault, err := qtx.GetDefaultIssueWorkflow(ctx, workspaceID)
+	if err != nil {
+		return db.IssueWorkflow{}, nil, issueWorkflowApplyPlan{}, err
+	}
+	inheritedStatuses, err := qtx.ListIssueWorkflowStatuses(ctx, db.ListIssueWorkflowStatusesParams{WorkspaceID: workspaceID, WorkflowID: workspaceDefault.ID, IncludeArchived: true})
+	if err != nil {
+		return db.IssueWorkflow{}, nil, issueWorkflowApplyPlan{}, err
+	}
 	modeChanged := project.DefaultIssueWorkflowID != custom.ID
 	if _, err := qtx.SetProjectIssueWorkflow(ctx, db.SetProjectIssueWorkflowParams{
 		ProjectID: projectID, WorkspaceID: workspaceID, WorkflowID: custom.ID,
@@ -215,9 +224,18 @@ func applyWorkflowSpec(ctx context.Context, qtx *db.Queries, workspaceID, projec
 		desiredKeys[desired.Key] = struct{}{}
 		current, exists := byKey[desired.Key]
 		if !exists {
+			legacy := pgtype.Text{}
+			if !wasCustom {
+				for _, inherited := range inheritedStatuses {
+					if inherited.SpecKey == desired.Key && inherited.Phase == desired.Phase {
+						legacy = inherited.LegacyStatusKey
+						break
+					}
+				}
+			}
 			current, err = qtx.CreateIssueWorkflowStatus(ctx, db.CreateIssueWorkflowStatusParams{
 				ID: dbid.NewV7(), WorkspaceID: workspaceID, WorkflowID: workflow.ID,
-				SpecKey: desired.Key, Name: desired.Name, Description: desired.Description,
+				LegacyStatusKey: legacy, SpecKey: desired.Key, Name: desired.Name, Description: desired.Description,
 				Color: desired.Color, Icon: desired.Icon, Position: desired.position, Phase: desired.Phase,
 				Outcome: desired.outcome, EntryPolicy: desired.policyJSON,
 			})

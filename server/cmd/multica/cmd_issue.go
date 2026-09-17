@@ -571,6 +571,7 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
+	issueUpdateCmd.Flags().String("workflow-status", "", "Destination workflow status UUID when moving between projects")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -1547,6 +1548,16 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			}
 			body["project_id"] = project.ID
 		}
+	}
+	if cmd.Flags().Changed("workflow-status") {
+		if statusChanged {
+			return errors.New("--status and --workflow-status are mutually exclusive")
+		}
+		node, _ := cmd.Flags().GetString("workflow-status")
+		if _, err := util.ParseUUID(node); err != nil {
+			return errors.New("--workflow-status must be a status UUID")
+		}
+		body["workflow_status_id"] = node
 	}
 	if cmd.Flags().Changed("start-date") {
 		v, _ := cmd.Flags().GetString("start-date")

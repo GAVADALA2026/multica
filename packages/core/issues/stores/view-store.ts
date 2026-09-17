@@ -121,6 +121,7 @@ export interface ActorFilterValue {
  *  fixes, and what resets restore. */
 export interface FilterSnapshot {
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -238,6 +239,7 @@ export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -360,6 +362,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   viewMode: "board",
   grouping: "status",
   statusFilters: [],
+  statusFilterMappings: {},
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,
@@ -502,6 +505,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   clearFilters: () =>
     set({
       statusFilters: [],
+  statusFilterMappings: {},
       priorityFilters: [],
       assigneeFilters: [],
       includeNoAssignee: false,
@@ -513,7 +517,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       dateFilter: null,
       agentRunningFilter: false,
     }),
-  resetFiltersTo: (snapshot) => set({ ...snapshot }),
+  resetFiltersTo: (snapshot) => set({ statusFilterMappings: {}, ...snapshot }),
   clearFilterDimension: (dimension) =>
     set((state) => {
       switch (dimension) {
@@ -670,6 +674,7 @@ export const viewStorePersistOptions = (name: string) => ({
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
+    statusFilterMappings: state.statusFilterMappings,
     priorityFilters: state.priorityFilters,
     assigneeFilters: state.assigneeFilters,
     includeNoAssignee: state.includeNoAssignee,

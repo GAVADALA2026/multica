@@ -253,7 +253,8 @@ RETURNING *;
 
 -- name: UpdateIssueWorkflowStatusFromSpec :one
 UPDATE issue_workflow_status
-SET name = sqlc.arg('name')::text,
+SET legacy_status_key = CASE WHEN phase = sqlc.arg('phase')::text THEN legacy_status_key ELSE NULL END,
+    name = sqlc.arg('name')::text,
     description = sqlc.arg('description')::text,
     color = sqlc.arg('color')::text,
     icon = sqlc.arg('icon')::text,
@@ -283,7 +284,8 @@ RETURNING *;
 
 -- name: UpdateIssueWorkflowStatusDefinition :one
 UPDATE issue_workflow_status
-SET name = sqlc.arg('name')::text,
+SET legacy_status_key = CASE WHEN phase = sqlc.arg('phase')::text THEN legacy_status_key ELSE NULL END,
+    name = sqlc.arg('name')::text,
     description = sqlc.arg('description')::text,
     color = sqlc.arg('color')::text,
     icon = sqlc.arg('icon')::text,

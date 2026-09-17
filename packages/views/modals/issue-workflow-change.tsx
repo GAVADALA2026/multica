@@ -113,7 +113,7 @@ function ChangeForm({
   const pinnedQuery = useQuery(
     issueWorkflowOptions(
       wsId,
-      usesEffective ? "" : (issue.workflow_id ?? ""),
+      issue.workflow_id ?? "",
     ),
   );
   const workflowQuery = usesEffective ? effectiveQuery : pinnedQuery;
@@ -144,16 +144,15 @@ function ChangeForm({
       : categoryMatches.length === 1
         ? categoryMatches[0]
         : undefined;
-  const target = moving
-    ? nodes.find((node) => node.id === workflowQuery.data?.workflow.initial_status_id)
-    : nodes.find((node) => node.id === selectedId) ??
-      (selectedId ? undefined : inferred);
+  const sourceNode = pinnedQuery.data?.statuses.find((node) => node.id === issue.workflow_status_id);
+  const moveMatch = moving ? nodes.find((node) => updates.workflow_status_id ? node.id === updates.workflow_status_id : updates.status ? node.legacy_status_key === updates.status : node.id === issue.workflow_status_id || (sourceNode?.legacy_status_key && node.legacy_status_key === sourceNode.legacy_status_key && node.phase === sourceNode.phase)) : undefined;
+  const target = nodes.find((node) => node.id === selectedId) ?? (selectedId ? undefined : moving ? moveMatch : inferred);
   const update = useUpdateIssue();
   const transition = useTransitionIssueStatusNode();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const save = async () => {
-    if (!target || !workflowQuery.data || !executionReady || pending) return;
+    if (!target || !workflowQuery.data || !executionReady || pending || (moving && active)) return;
     setPending(true);
     try {
       let result: Issue;
@@ -163,7 +162,7 @@ function ChangeForm({
           id: issue.id,
           ...rest,
           ...(moving
-            ? { expected_workflow_revision: workflowQuery.data.workflow.revision }
+            ? { workflow_status_id: target.id, expected_workflow_revision: workflowQuery.data.workflow.revision }
             : { workflow_status_id: target.id }),
           expected_revision: issue.revision,
           expected_transition_id: issue.transition_id ?? undefined,
@@ -223,20 +222,12 @@ function ChangeForm({
           </DialogDescription>
         </DialogHeader>
         {workflowQuery.isSuccess ? (
-          moving ? (
-            <p role={target ? undefined : "alert"} className="text-body">
-              {target
-                ? t(($) => $.workflow_selection.move_initial_status, { name: target.name })
-                : t(($) => $.workflow_selection.load_error)}
-            </p>
-          ) : (
             <WorkflowNodePicker
               nodes={nodes}
               value={target?.id}
               onChange={(node) => setSelectedId(node.id)}
               disabled={pending}
             />
-          )
         ) : (
           <p role={workflowQuery.isError ? "alert" : "status"}>
             {workflowQuery.isError
@@ -252,13 +243,14 @@ function ChangeForm({
         {(active || !executionReady) && (
           <p className="text-caption text-muted-foreground">
             {active
-              ? t(($) => $.handoff.stops)
+              ? t(($) => moving ? $.workflow_selection.move_active_blocked : $.handoff.stops)
               : executions.isError
                 ? t(($) => $.handoff.error)
                 : t(($) => $.handoff.loading)}
           </p>
         )}
-        {target && <WorkflowEntryEffects node={target} />}
+        {target && moving && sourceNode && target.phase !== sourceNode.phase && <p role="alert" className="text-caption text-destructive">{t(($) => $.workflow_selection.move_phase_warning)}</p>}
+        {target && !moving && <WorkflowEntryEffects node={target} />}
         {error && (
           <p role="alert" className="text-caption text-destructive">
             {error}
@@ -269,7 +261,7 @@ function ChangeForm({
             {t(($) => $.handoff.cancel)}
           </Button>
           <Button
-            disabled={!target || !executionReady || pending || !!error}
+            disabled={(moving && !!active) || !target || !executionReady || pending || !!error}
             onClick={() => void save()}
           >
             {pending

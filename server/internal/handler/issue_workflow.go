@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -226,16 +230,22 @@ func (h *Handler) GetIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProjectIssueWorkflowRequest struct {
-	Mode             string                    `json:"mode"`
-	Spec             *issueWorkflowSpecRequest `json:"spec,omitempty"`
-	ExpectedRevision *int64                    `json:"expected_revision,omitempty"`
-	AllowArchive     bool                      `json:"allow_archive,omitempty"`
-	DryRun           bool                      `json:"dry_run,omitempty"`
+	Mode                 string                    `json:"mode"`
+	Spec                 *issueWorkflowSpecRequest `json:"spec,omitempty"`
+	ExpectedRevision     *int64                    `json:"expected_revision,omitempty"`
+	AllowArchive         bool                      `json:"allow_archive,omitempty"`
+	DryRun               bool                      `json:"dry_run,omitempty"`
+	StatusMapping        map[string]string         `json:"status_mapping,omitempty"`
+	ConfirmMigration     bool                      `json:"confirm_migration,omitempty"`
+	MigrationFingerprint string                    `json:"migration_fingerprint,omitempty"`
 }
 
 // UpdateProjectIssueWorkflow switches a project between inherited and custom
-// configuration. It never rewrites existing issue bindings.
+// configuration and migrates all current project issues atomically.
 func (h *Handler) UpdateProjectIssueWorkflow(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
@@ -291,6 +301,33 @@ func (h *Handler) UpdateProjectIssueWorkflow(w http.ResponseWriter, r *http.Requ
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
+		writeError(w, 500, "failed to lock workflow migration")
+		return
+	}
+	if _, err := qtx.LockProjectForIssueWorkflowApply(r.Context(), db.LockProjectForIssueWorkflowApplyParams{ProjectID: projectID, WorkspaceID: wsUUID}); err != nil {
+		writeError(w, 500, "failed to lock project")
+		return
+	}
+	previous, err := issueworkflow.Effective(r.Context(), qtx, wsUUID, projectID)
+	if err != nil {
+		writeError(w, 500, "failed to load current workflow")
+		return
+	}
+	if req.ExpectedRevision != nil && previous.Revision != *req.ExpectedRevision {
+		writeError(w, 409, "workflow revision changed; reload and retry")
+		return
+	}
+	issues, err := qtx.ListProjectIssuesForWorkflowMigration(r.Context(), db.ListProjectIssuesForWorkflowMigrationParams{WorkspaceID: wsUUID, ProjectID: projectID})
+	if err != nil {
+		writeError(w, 500, "failed to load project issues")
+		return
+	}
+	sources, err := qtx.ListProjectMigrationStatuses(r.Context(), db.ListProjectMigrationStatusesParams{WorkspaceID: wsUUID, ProjectID: projectID, WorkflowID: previous.ID})
+	if err != nil {
+		writeError(w, 500, "failed to load source statuses")
+		return
+	}
 	var plan issueWorkflowApplyPlan
 	var statuses []db.IssueWorkflowStatus
 	var workflow db.IssueWorkflow
@@ -325,7 +362,80 @@ func (h *Handler) UpdateProjectIssueWorkflow(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	migration, resolved, err := planWorkflowMigration(r.Context(), qtx, wsUUID, projectID, issues, sources, statuses, req, previous)
+	if err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
+	views, err := qtx.ListWorkflowMigrationViews(r.Context(), db.ListWorkflowMigrationViewsParams{WorkspaceID: wsUUID, ScopeID: projectID})
+	if err != nil {
+		writeError(w, 500, "failed to load saved views")
+		return
+	}
+	// Include view revisions in the confirmation cursor: newly affected saved
+	// filters must be reviewed, just like newly created issues.
+	viewSnapshot, _ := json.Marshal(views)
+	viewHash := sha256.Sum256(append([]byte(migration.Fingerprint), viewSnapshot...))
+	migration.Fingerprint = hex.EncodeToString(viewHash[:])
+	for _, view := range views {
+		references := viewStatusReferences(view, uuidToString(projectID))
+		affected := false
+		for index := range migration.Rows {
+			if issueTableContainsString(references, migration.Rows[index].SourceStatusID) {
+				migration.Rows[index].Required = true
+				affected = true
+			}
+		}
+		if affected {
+			migration.ViewCount++
+		}
+	}
+	viewQueries := map[pgtype.UUID][]byte{}
+	for _, view := range views {
+		raw, changed, err := migratedViewQuery(view, uuidToString(projectID), resolved)
+		if err != nil {
+			writeError(w, 500, "failed to migrate saved view")
+			return
+		}
+		if changed {
+			viewQueries[view.ID] = raw
+		}
+	}
+	plan.Migration = &migration
 	response := buildIssueWorkflowResponse(workflow, statuses, projectID)
+	if !req.DryRun {
+		if len(migration.BlockedIssueIDs) > 0 {
+			writeJSON(w, 409, map[string]any{"error": "workflow_migration_blocked", "message": "Finish or cancel active agent work before migrating", "plan": plan})
+			return
+		}
+		if migration.IssueCount > 0 || migration.ViewCount > 0 {
+			if !req.ConfirmMigration || req.MigrationFingerprint != migration.Fingerprint {
+				writeJSON(w, 409, map[string]any{"error": "workflow_migration_confirmation_required", "message": "Preview the migration with dry_run, map statuses, then confirm the fingerprint", "plan": plan})
+				return
+			}
+		}
+		for _, row := range migration.Rows {
+			if row.Required && row.TargetKey == "" {
+				writeJSON(w, 409, map[string]any{"error": "workflow_status_mapping_required", "message": "Choose a destination for every occupied status", "plan": plan})
+				return
+			}
+		}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		actor := issueworkflow.TransitionActor{Type: actorType}
+		if actorID != "" {
+			actor.ID = parseUUID(actorID)
+		}
+		if err := applyWorkflowMigration(r.Context(), qtx, issues, resolved, actor); err != nil {
+			writeError(w, 500, "failed to migrate issues; no changes were saved")
+			return
+		}
+		for id, query := range viewQueries {
+			if err := qtx.MigrateIssueViewQuery(r.Context(), db.MigrateIssueViewQueryParams{WorkspaceID: wsUUID, ID: id, Query: query}); err != nil {
+				writeError(w, 500, "failed to update saved views")
+				return
+			}
+		}
+	}
 	if req.DryRun {
 		writeJSON(w, http.StatusOK, issueWorkflowApplyResponse{
 			Workflow: response.Workflow, Statuses: response.Statuses, Mode: response.Mode,
@@ -337,23 +447,16 @@ func (h *Handler) UpdateProjectIssueWorkflow(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to commit project workflow")
 		return
 	}
-	if req.Spec == nil || plan.Changed {
+	if req.Spec == nil || plan.Changed || migration.IssueCount > 0 || migration.ViewCount > 0 {
 		action := "workflow_mode_changed"
 		if req.Spec != nil {
 			action = "workflow_definition_applied"
 		}
 		h.publish(protocol.EventIssueStatusChanged, workspaceID, "member", requestUserID(r), map[string]any{
-			"action": action, "project_id": uuidToString(projectID),
+			"action": action, "project_id": uuidToString(projectID), "issues_migrated": migration.IssueCount, "views_migrated": migration.ViewCount,
 		})
 	}
-	if req.Spec != nil {
-		writeJSON(w, http.StatusOK, issueWorkflowApplyResponse{
-			Workflow: response.Workflow, Statuses: response.Statuses, Mode: response.Mode,
-			Plan: plan, DryRun: false,
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, issueWorkflowApplyResponse{Workflow: response.Workflow, Statuses: response.Statuses, Mode: response.Mode, Plan: plan, DryRun: false})
 }
 
 type transitionIssueStatusNodeRequest struct {

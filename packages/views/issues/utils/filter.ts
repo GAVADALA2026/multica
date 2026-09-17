@@ -4,6 +4,7 @@ import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -32,6 +33,7 @@ export interface IssueFilters {
 
 export interface IssueFilterState {
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -203,7 +205,8 @@ export function applyIssueFilters(
 
     if (hideSubIssues && issue.parent_issue_id) return false;
 
-    if (statusFilters.length > 0 && !statusFilters.includes(issue.status) && !statusFilters.includes(issue.workflow_status_id ?? ""))
+    const mappedStatuses = statusFilters.map((status) => filters.statusFilterMappings?.[issue.project_id ?? ""]?.[status] ?? status);
+    if (mappedStatuses.length > 0 && !mappedStatuses.includes(issue.status) && !mappedStatuses.includes(issue.workflow_status_id ?? ""))
       return false;
 
     if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))
@@ -263,6 +266,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
     issues,
     {
       statusFilters: filters.statusFilters,
+      statusFilterMappings: filters.statusFilterMappings,
       priorityFilters: filters.priorityFilters,
       assigneeFilters: filters.assigneeFilters,
       includeNoAssignee: filters.includeNoAssignee,

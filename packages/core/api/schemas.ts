@@ -570,6 +570,12 @@ export const IssueWorkflowStatusNodeSchema = z.object({
 }).loose();
 
 export const IssueWorkflowResponseSchema = z.object({
+  dry_run: z.boolean().optional(),
+  plan: z.object({ migration: z.object({
+    rows: z.array(z.object({ source_status_id: z.string(), source_name: z.string(), source_phase: z.string(), count: z.number().int().nonnegative(), required: z.boolean().default(false), target_key: z.string(), phase_changed: z.boolean() })),
+    issue_count: z.number().int().nonnegative(), view_count: z.number().int().nonnegative(),
+    blocked_issue_ids: z.array(z.string()), fingerprint: z.string().min(1),
+  }).optional() }).loose().optional(),
   workflow: IssueWorkflowDefinitionSchema,
   statuses: z.array(IssueWorkflowStatusNodeSchema).default([]),
   mode: z.string(),

@@ -298,6 +298,7 @@ export type IssueTableScope = (
 
 export interface IssueTableFilters {
   workflow_status_ids?: string[];
+  status_mappings?: Record<string, Record<string, string>>;
   statuses?: IssueStatus[];
   priorities?: IssuePriority[];
   assignees?: IssueActorRef[];

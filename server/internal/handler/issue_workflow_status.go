@@ -137,6 +137,10 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalog(r.Context(), workspaceID); err != nil {
+		writeError(w, 500, "failed to lock workflow")
+		return
+	}
 	workflow, err := qtx.LockEditableIssueWorkflow(r.Context(), db.LockEditableIssueWorkflowParams{
 		WorkflowID: workflowID, WorkspaceID: workspaceID,
 	})
@@ -249,6 +253,17 @@ func (h *Handler) UpdateIssueWorkflowStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if phase != current.Phase {
+		count, err := qtx.CountIssuesUsingWorkflowStatus(r.Context(), db.CountIssuesUsingWorkflowStatusParams{WorkspaceID: workspaceID, WorkflowStatusID: statusID})
+		if err != nil {
+			writeError(w, 500, "failed to count affected issues")
+			return
+		}
+		if count > 0 {
+			writeError(w, 409, "use project workflow apply with a migration preview to change an occupied status phase")
+			return
+		}
+	}
 	if _, err = qtx.UpdateIssueWorkflowStatusDefinition(r.Context(), db.UpdateIssueWorkflowStatusDefinitionParams{
 		Name: name, Description: description, Color: color, Icon: icon, Position: position,
 		Phase: phase, Outcome: outcome, EntryPolicy: entryPolicy,
@@ -310,6 +325,10 @@ func (h *Handler) ArchiveIssueWorkflowStatus(w http.ResponseWriter, r *http.Requ
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalog(r.Context(), workspaceID); err != nil {
+		writeError(w, 500, "failed to lock workflow")
+		return
+	}
 	workflow, err := qtx.LockEditableIssueWorkflow(r.Context(), db.LockEditableIssueWorkflowParams{
 		WorkflowID: workflowID, WorkspaceID: workspaceID,
 	})
@@ -358,6 +377,15 @@ func (h *Handler) ArchiveIssueWorkflowStatus(w http.ResponseWriter, r *http.Requ
 	}
 	if len(active) <= 1 {
 		writeError(w, http.StatusConflict, "a workflow must keep at least one active status")
+		return
+	}
+	count, err := qtx.CountIssuesUsingWorkflowStatus(r.Context(), db.CountIssuesUsingWorkflowStatusParams{WorkspaceID: workspaceID, WorkflowStatusID: statusID})
+	if err != nil {
+		writeError(w, 500, "failed to count affected issues")
+		return
+	}
+	if count > 0 {
+		writeError(w, 409, "use project workflow apply with status_mapping to archive an occupied status")
 		return
 	}
 	if _, err := qtx.ArchiveIssueWorkflowStatus(r.Context(), db.ArchiveIssueWorkflowStatusParams{
@@ -424,6 +452,10 @@ func (h *Handler) ReorderIssueWorkflowStatuses(w http.ResponseWriter, r *http.Re
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalog(r.Context(), workspaceID); err != nil {
+		writeError(w, 500, "failed to lock workflow")
+		return
+	}
 	workflow, err := qtx.LockEditableIssueWorkflow(r.Context(), db.LockEditableIssueWorkflowParams{
 		WorkflowID: workflowID, WorkspaceID: workspaceID,
 	})

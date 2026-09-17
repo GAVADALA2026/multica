@@ -152,6 +152,9 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	}
 	defer tx.Rollback(ctx)
 	qtx := q.WithTx(tx)
+	if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
+		return IssueTransitionResult{}, err
+	}
 	if legacyStatus != "" && !issuestatus.IsBuiltIn(legacyStatus) {
 		if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
 			return IssueTransitionResult{}, err

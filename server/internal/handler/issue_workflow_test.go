@@ -284,10 +284,12 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 		t.Fatalf("automated generic edit did not change issue: %#v, %v", updatedIssue, err)
 	}
 
+	var migrationPreview issueWorkflowApplyResponse
+	testutil.Call(t, testHandler.UpdateProjectIssueWorkflow, withURLParam(newRequest(http.MethodPut, "/", map[string]any{"mode": "default", "dry_run": true}), "id", projectID)).Want(200).JSON(&migrationPreview)
 	var inherited issueWorkflowResponse
 	testutil.Call(t, testHandler.UpdateProjectIssueWorkflow,
 		withURLParam(newRequest(http.MethodPut, "/api/projects/"+projectID+"/issue-workflow", map[string]any{
-			"mode": "default",
+			"mode": "default", "confirm_migration": true, "migration_fingerprint": migrationPreview.Plan.Migration.Fingerprint,
 		}), "id", projectID)).Want(http.StatusOK).JSON(&inherited)
 	if inherited.Mode != "default" || inherited.Workflow.ID != uuidToString(workspaceWorkflow.ID) {
 		t.Fatalf("default workflow response = %#v", inherited)
@@ -296,17 +298,17 @@ func TestProjectWorkflowAPIAndStatusNodeTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload pinned issue: %v", err)
 	}
-	if uuidToString(pinned.WorkflowID) != customized.Workflow.ID {
-		t.Fatalf("switching project default drifted existing issue workflow to %s", uuidToString(pinned.WorkflowID))
+	if uuidToString(pinned.WorkflowID) != uuidToString(workspaceWorkflow.ID) {
+		t.Fatalf("switching project default did not migrate existing issue to %s", uuidToString(pinned.WorkflowID))
 	}
 
-	// Project moves enter the effective workflow's configured initial status.
+	// Moving between projects sharing the default workflow preserves status.
 	var moved IssueResponse
 	testutil.Call(t, testHandler.UpdateIssue,
 		withURLParam(newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
 			"project_id":             destinationProjectID,
-			"expected_revision":      updatedIssue.Revision,
-			"expected_transition_id": uuidToString(updatedIssue.LastTransitionID),
+			"expected_revision":      pinned.Revision,
+			"expected_transition_id": uuidToString(pinned.LastTransitionID),
 		}), "id", created.ID)).Want(http.StatusOK).JSON(&moved)
 	if moved.ProjectID == nil || *moved.ProjectID != destinationProjectID || moved.WorkflowID == nil || *moved.WorkflowID != uuidToString(workspaceWorkflow.ID) || moved.WorkflowStatusID == nil || *moved.WorkflowStatusID != uuidToString(workspaceWorkflow.InitialStatusID) {
 		t.Fatalf("initial-status project move = %#v", moved)

@@ -1966,12 +1966,13 @@ func (q *Queries) UpdateIssueWorkflowStatus(ctx context.Context, arg UpdateIssue
 
 const updateIssueWorkflowStatusDefinition = `-- name: UpdateIssueWorkflowStatusDefinition :one
 UPDATE issue_workflow_status
-SET name = $1::text,
-    description = $2::text,
-    color = $3::text,
-    icon = $4::text,
-    position = $5::double precision,
-    phase = $6::text,
+SET legacy_status_key = CASE WHEN phase = $1::text THEN legacy_status_key ELSE NULL END,
+    name = $2::text,
+    description = $3::text,
+    color = $4::text,
+    icon = $5::text,
+    position = $6::double precision,
+    phase = $1::text,
     outcome = $7::text,
     entry_policy = $8::jsonb,
     entry_policy_revision = entry_policy_revision + CASE
@@ -1986,12 +1987,12 @@ RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, c
 `
 
 type UpdateIssueWorkflowStatusDefinitionParams struct {
+	Phase                   string      `json:"phase"`
 	Name                    string      `json:"name"`
 	Description             string      `json:"description"`
 	Color                   string      `json:"color"`
 	Icon                    string      `json:"icon"`
 	Position                float64     `json:"position"`
-	Phase                   string      `json:"phase"`
 	Outcome                 pgtype.Text `json:"outcome"`
 	EntryPolicy             []byte      `json:"entry_policy"`
 	BumpEntryPolicyRevision bool        `json:"bump_entry_policy_revision"`
@@ -2002,12 +2003,12 @@ type UpdateIssueWorkflowStatusDefinitionParams struct {
 
 func (q *Queries) UpdateIssueWorkflowStatusDefinition(ctx context.Context, arg UpdateIssueWorkflowStatusDefinitionParams) (IssueWorkflowStatus, error) {
 	row := q.db.QueryRow(ctx, updateIssueWorkflowStatusDefinition,
+		arg.Phase,
 		arg.Name,
 		arg.Description,
 		arg.Color,
 		arg.Icon,
 		arg.Position,
-		arg.Phase,
 		arg.Outcome,
 		arg.EntryPolicy,
 		arg.BumpEntryPolicyRevision,
@@ -2040,12 +2041,13 @@ func (q *Queries) UpdateIssueWorkflowStatusDefinition(ctx context.Context, arg U
 
 const updateIssueWorkflowStatusFromSpec = `-- name: UpdateIssueWorkflowStatusFromSpec :one
 UPDATE issue_workflow_status
-SET name = $1::text,
-    description = $2::text,
-    color = $3::text,
-    icon = $4::text,
-    position = $5::double precision,
-    phase = $6::text,
+SET legacy_status_key = CASE WHEN phase = $1::text THEN legacy_status_key ELSE NULL END,
+    name = $2::text,
+    description = $3::text,
+    color = $4::text,
+    icon = $5::text,
+    position = $6::double precision,
+    phase = $1::text,
     outcome = $7::text,
     entry_policy = $8::jsonb,
     entry_policy_revision = entry_policy_revision + CASE
@@ -2060,12 +2062,12 @@ RETURNING id, workspace_id, workflow_id, legacy_status_key, name, description, c
 `
 
 type UpdateIssueWorkflowStatusFromSpecParams struct {
+	Phase                   string      `json:"phase"`
 	Name                    string      `json:"name"`
 	Description             string      `json:"description"`
 	Color                   string      `json:"color"`
 	Icon                    string      `json:"icon"`
 	Position                float64     `json:"position"`
-	Phase                   string      `json:"phase"`
 	Outcome                 pgtype.Text `json:"outcome"`
 	EntryPolicy             []byte      `json:"entry_policy"`
 	BumpEntryPolicyRevision bool        `json:"bump_entry_policy_revision"`
@@ -2076,12 +2078,12 @@ type UpdateIssueWorkflowStatusFromSpecParams struct {
 
 func (q *Queries) UpdateIssueWorkflowStatusFromSpec(ctx context.Context, arg UpdateIssueWorkflowStatusFromSpecParams) (IssueWorkflowStatus, error) {
 	row := q.db.QueryRow(ctx, updateIssueWorkflowStatusFromSpec,
+		arg.Phase,
 		arg.Name,
 		arg.Description,
 		arg.Color,
 		arg.Icon,
 		arg.Position,
-		arg.Phase,
 		arg.Outcome,
 		arg.EntryPolicy,
 		arg.BumpEntryPolicyRevision,

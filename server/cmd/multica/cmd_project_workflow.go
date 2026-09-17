@@ -114,6 +114,12 @@ func init() {
 	projectWorkflowApplyCmd.Flags().Bool("dry-run", false, "Validate and show the apply plan without committing")
 	projectWorkflowApplyCmd.Flags().String("output", "json", "Output format: yaml or json")
 	projectWorkflowUseDefaultCmd.Flags().String("output", "json", "Output format: json")
+	projectWorkflowUseDefaultCmd.Flags().Bool("dry-run", false, "Preview migration without committing")
+	for _, command := range []*cobra.Command{projectWorkflowApplyCmd, projectWorkflowUseDefaultCmd} {
+		command.Flags().StringToString("status-map", nil, "Source status UUID to destination stable key (source=target)")
+		command.Flags().String("confirm-migration", "", "Confirm the fingerprint returned by --dry-run")
+	}
+
 	issueCmd.AddCommand(issueWorkflowStatusCmd)
 	issueWorkflowStatusCmd.Flags().String("output", "table", "Output format: table or json")
 }
@@ -353,6 +359,11 @@ func runProjectWorkflowApply(cmd *cobra.Command, args []string) error {
 	if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
 		body["dry_run"] = true
 	}
+	mapping, _ := cmd.Flags().GetStringToString("status-map")
+	body["status_mapping"] = mapping
+	fingerprint, _ := cmd.Flags().GetString("confirm-migration")
+	body["confirm_migration"] = fingerprint != ""
+	body["migration_fingerprint"] = fingerprint
 	var response workflowAPIResponse
 	if err := client.PutJSON(ctx, "/api/projects/"+project.ID+"/issue-workflow", body, &response); err != nil {
 		return fmt.Errorf("apply project workflow: %w", err)
@@ -379,7 +390,10 @@ func runProjectWorkflowUseDefault(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve project: %w", err)
 	}
 	var response workflowAPIResponse
-	if err := client.PutJSON(ctx, "/api/projects/"+project.ID+"/issue-workflow", map[string]any{"mode": "default"}, &response); err != nil {
+	mapping, _ := cmd.Flags().GetStringToString("status-map")
+	fingerprint, _ := cmd.Flags().GetString("confirm-migration")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if err := client.PutJSON(ctx, "/api/projects/"+project.ID+"/issue-workflow", map[string]any{"mode": "default", "dry_run": dryRun, "status_mapping": mapping, "confirm_migration": fingerprint != "", "migration_fingerprint": fingerprint}, &response); err != nil {
 		return fmt.Errorf("use workspace workflow: %w", err)
 	}
 	return printWorkflowOutput(output, response)

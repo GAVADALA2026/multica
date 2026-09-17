@@ -259,6 +259,7 @@ function useFilterChips(
     const raw = baseline.raw;
     const current: FilterSnapshot = {
       statusFilters: s.statusFilters,
+      statusFilterMappings: s.statusFilterMappings,
       priorityFilters: s.priorityFilters,
       assigneeFilters: s.assigneeFilters,
       includeNoAssignee: s.includeNoAssignee,
@@ -270,7 +271,7 @@ function useFilterChips(
     };
     switch (dimension) {
       case "status":
-        s.resetFiltersTo({ ...current, statusFilters: raw.statusFilters });
+        s.resetFiltersTo({ ...current, statusFilters: raw.statusFilters, statusFilterMappings: raw.statusFilterMappings });
         break;
       case "priority":
         s.resetFiltersTo({ ...current, priorityFilters: raw.priorityFilters });

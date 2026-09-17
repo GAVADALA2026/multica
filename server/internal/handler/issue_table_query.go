@@ -82,15 +82,16 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
-	WorkflowStatusIDs []string             `json:"workflow_status_ids,omitempty"`
-	Statuses          []string             `json:"statuses,omitempty"`
-	Priorities        []string             `json:"priorities,omitempty"`
-	Assignees         []issueTableActorRef `json:"assignees,omitempty"`
-	IncludeNoAssignee bool                 `json:"include_no_assignee,omitempty"`
-	Creators          []issueTableActorRef `json:"creators,omitempty"`
-	ProjectIDs        []string             `json:"project_ids,omitempty"`
-	IncludeNoProject  bool                 `json:"include_no_project,omitempty"`
-	LabelIDs          []string             `json:"label_ids,omitempty"`
+	StatusMappings    map[string]map[string]string `json:"status_mappings,omitempty"`
+	WorkflowStatusIDs []string                     `json:"workflow_status_ids,omitempty"`
+	Statuses          []string                     `json:"statuses,omitempty"`
+	Priorities        []string                     `json:"priorities,omitempty"`
+	Assignees         []issueTableActorRef         `json:"assignees,omitempty"`
+	IncludeNoAssignee bool                         `json:"include_no_assignee,omitempty"`
+	Creators          []issueTableActorRef         `json:"creators,omitempty"`
+	ProjectIDs        []string                     `json:"project_ids,omitempty"`
+	IncludeNoProject  bool                         `json:"include_no_project,omitempty"`
+	LabelIDs          []string                     `json:"label_ids,omitempty"`
 	// Members are raw JSON so operator objects ({op, value}) and plain
 	// strings both survive the round-trip into parsePropertiesFilterParam.
 	Properties       map[string][]json.RawMessage `json:"properties,omitempty"`
@@ -469,7 +470,33 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		if !ok {
 			return issueTableSQL{}, false
 		}
-		statusPredicates = append(statusPredicates, fmt.Sprintf("i.workflow_status_id = ANY(%s::uuid[])", addArg(ids)))
+		if len(spec.Filters.StatusMappings) == 0 {
+			statusPredicates = append(statusPredicates, fmt.Sprintf("i.workflow_status_id = ANY(%s::uuid[])", addArg(ids)))
+		} else {
+			if len(spec.Filters.StatusMappings) > 200 {
+				writeError(w, 400, "too many status mappings")
+				return issueTableSQL{}, false
+			}
+			for project, mappings := range spec.Filters.StatusMappings {
+				if _, ok := parseUUIDOrBadRequest(w, project, "status_mappings project"); !ok {
+					return issueTableSQL{}, false
+				}
+				if len(mappings) > 500 {
+					writeError(w, 400, "too many status mappings")
+					return issueTableSQL{}, false
+				}
+				for source, target := range mappings {
+					if _, ok := parseUUIDOrBadRequest(w, source, "status_mappings source"); !ok {
+						return issueTableSQL{}, false
+					}
+					if _, ok := parseUUIDOrBadRequest(w, target, "status_mappings target"); !ok {
+						return issueTableSQL{}, false
+					}
+				}
+			}
+			raw, _ := json.Marshal(spec.Filters.StatusMappings)
+			statusPredicates = append(statusPredicates, fmt.Sprintf("EXISTS (SELECT 1 FROM unnest(%s::uuid[]) selected(id) WHERE i.workflow_status_id = COALESCE((%s::jsonb -> i.project_id::text ->> selected.id::text)::uuid, selected.id))", addArg(ids), addArg(raw)))
+		}
 	}
 
 	// Any non-empty status KEY, not just the 7 built-ins. A status filter names

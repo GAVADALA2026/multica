@@ -228,6 +228,7 @@ export function useIssueSurfaceController({
   const sortDirection = useViewStore((s) => s.sortDirection);
   const dateFilter = useViewStore((s) => s.dateFilter);
   const statusFilters = useViewStore((s) => s.statusFilters);
+  const statusFilterMappings = useViewStore((s) => s.statusFilterMappings);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
@@ -351,11 +352,11 @@ export function useIssueSurfaceController({
         (status) =>
           !status.archived_at &&
           (statusFilters.length === 0 ||
-            statusFilters.includes(status.id) ||
+            statusFilters.some((key) => (statusFilterMappings?.[projectId ?? ""]?.[key] ?? key) === status.id) ||
             (status.legacy_status_key != null &&
               statusFilters.includes(status.legacy_status_key))),
       ),
-    [projectWorkflowQuery.data?.statuses, statusFilters],
+    [projectWorkflowQuery.data?.statuses, statusFilters, statusFilterMappings, projectId],
   );
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
@@ -512,6 +513,7 @@ export function useIssueSurfaceController({
         ...(scopedWorkflowId ? { workflow_id: scopedWorkflowId } : {}),
       },
       filters: {
+        ...(statusFilterMappings ? { status_mappings: statusFilterMappings } : {}),
         ...(legacyStatusFilters.length > 0 ? { statuses: legacyStatusFilters } : {}),
         ...(nativeStatusFilters.length > 0 ? { workflow_status_ids: nativeStatusFilters } : {}),
         ...(hasProjectScope && !projectId && !scopedWorkflowId ? { workflow_status_ids: [] } : {}),
@@ -545,6 +547,7 @@ export function useIssueSurfaceController({
     scopedWorkflowId,
     nativeStatusFilters,
     legacyStatusFilters,
+    statusFilterMappings,
     agentRunningFilter,
     assigneeFilters,
     creatorFilters,
@@ -796,6 +799,7 @@ export function useIssueSurfaceController({
     serverGroupBranches,
     ganttShowCompleted,
     statusFilters,
+    statusFilterMappings,
     hiddenStatusKeys,
     statusFilterPending,
     statusFilterError,

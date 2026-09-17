@@ -55,3 +55,18 @@ it("refreshes project status choices without leaking archived statuses or replac
   unmount();
   client.clear();
 });
+
+it("does not replace live workflow choices with rolled-back preview node IDs", async () => {
+  const client = new QueryClient();
+  const choices = effectiveIssueWorkflowOptions("ws", "project").queryKey;
+  const existing = { workflow: { id: "live", workspace_id: "ws", scope_type: "workspace", scope_id: "ws", name: "Default", revision: 1, initial_status_id: null, created_at: "", updated_at: "" }, statuses: [], mode: "default" };
+  client.setQueryData(choices, existing);
+  apply.mockResolvedValue({ workflow: { id: "transient" }, statuses: [], mode: "custom", dry_run: true });
+  const { result, unmount } = renderHook(() => useApplyProjectWorkflow(), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+  await act(async () => { await result.current.mutateAsync({ projectId: "project", data: { mode: "custom", expected_revision: 1, dry_run: true } }); });
+  expect(client.getQueryData(choices)).toEqual(existing);
+  expect(client.getQueryState(choices)?.isInvalidated).toBe(false);
+  unmount(); client.clear();
+});

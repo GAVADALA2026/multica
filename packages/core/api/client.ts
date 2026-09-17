@@ -3798,6 +3798,7 @@ export class ApiClient {
       endpoint: "PUT /api/projects/{id}/issue-workflow (spec)",
     });
     if (!result.workflow.id || result.statuses.length === 0) throw new Error("Invalid workflow response. Reload the project to verify the saved configuration.");
+    if (data.dry_run && (!result.dry_run || !result.plan?.migration)) throw new Error("This server does not support workflow migration previews. Update the server before editing this workflow.");
     return result;
   }
 

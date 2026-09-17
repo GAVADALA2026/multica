@@ -21,7 +21,7 @@ export function ProjectWorkflowSection({
   const wsId = useWorkspaceId();
   const query = useQuery(effectiveIssueWorkflowOptions(wsId, projectId, true));
   const { getActorName } = useActorName();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<"custom" | "default" | null>(null);
   const active =
     query.data?.statuses
       .filter((s) => !s.archived_at)
@@ -41,10 +41,12 @@ export function ProjectWorkflowSection({
           </p>
         </div>
         {canEdit && query.data?.workflow.id && (
-          <Button variant="outline" onClick={() => setEditing(true)}>
+          <div className="flex gap-2">
+          {query.data.mode === "custom" && <Button variant="outline" onClick={() => setEditing("default")}>{t(($) => $.workflow.use_default)}</Button>}
+          <Button variant="outline" onClick={() => setEditing("custom")}>
             <Pencil className="size-3.5" />
             {t(($) => $.workflow.edit)}
-          </Button>
+          </Button></div>
         )}
       </header>
       {query.isLoading && (
@@ -98,7 +100,7 @@ export function ProjectWorkflowSection({
         ))}
       </div>
       {editing && canEdit && query.data && (
-        <ProjectWorkflowEditorDialog projectId={projectId} definition={query.data} onClose={() => setEditing(false)} />
+        <ProjectWorkflowEditorDialog projectId={projectId} definition={query.data} mode={editing} onClose={() => setEditing(null)} />
       )}
     </section>
   );

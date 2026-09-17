@@ -99,6 +99,7 @@ export function useIssueSurfaceData({
   serverGroupBranches,
   ganttShowCompleted,
   statusFilters,
+  statusFilterMappings,
   hiddenStatusKeys,
   statusFilterPending,
   statusFilterError,
@@ -126,6 +127,7 @@ export function useIssueSurfaceData({
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
   statusFilters: IssueStatus[];
+  statusFilterMappings?: Record<string, Record<string, string>>;
   hiddenStatusKeys: IssueStatus[];
   /** A custom status filter is waiting on the catalog — hold loading. */
   statusFilterPending: boolean;
@@ -173,6 +175,7 @@ export function useIssueSurfaceData({
   const baseFilterState = useMemo<IssueFilterState>(
     () => ({
       statusFilters,
+  statusFilterMappings,
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
@@ -196,6 +199,7 @@ export function useIssueSurfaceData({
       propertyFilters,
       showSubIssues,
       statusFilters,
+  statusFilterMappings,
     ],
   );
 

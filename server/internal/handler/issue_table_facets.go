@@ -55,6 +55,7 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 	case "status", "workflow_status":
 		output.Filters.Statuses = nil
 		output.Filters.WorkflowStatusIDs = nil
+		output.Filters.StatusMappings = nil
 	case "priority":
 		output.Filters.Priorities = nil
 	case "assignee":

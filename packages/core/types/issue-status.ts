@@ -124,6 +124,8 @@ export interface IssueWorkflowStatusNode {
 }
 
 export interface IssueWorkflowResponse {
+  plan?: { migration?: WorkflowMigrationPlan };
+  dry_run?: boolean;
   workflow: IssueWorkflowDefinition;
   statuses: IssueWorkflowStatusNode[];
   mode: "default" | "custom" | (string & {});
@@ -220,8 +222,20 @@ export interface IssueWorkflowSpec {
 }
 
 export interface ApplyProjectWorkflowRequest {
-  mode: "custom";
-  spec: IssueWorkflowSpec;
+  mode: "custom" | "default";
+  spec?: IssueWorkflowSpec;
   expected_revision: number;
-  allow_archive: boolean;
+  allow_archive?: boolean;
+  dry_run?: boolean;
+  status_mapping?: Record<string, string>;
+  confirm_migration?: boolean;
+  migration_fingerprint?: string;
+}
+
+export interface WorkflowMigrationPlan {
+  rows: Array<{ source_status_id: string; source_name: string; source_phase: string; count: number; required: boolean; target_key: string; phase_changed: boolean }>;
+  issue_count: number;
+  view_count: number;
+  blocked_issue_ids: string[];
+  fingerprint: string;
 }

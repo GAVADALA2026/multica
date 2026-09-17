@@ -16,6 +16,7 @@ import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
+import { issueViewKeys } from "../issue-views/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
 import {
@@ -1000,6 +1001,13 @@ export function useRealtimeSync(
 
     const unsubAny = ws.onAny((msg) => {
       if (specificEvents.has(msg.type)) return;
+      if (msg.type === "issue_status:changed" && msg.payload && typeof msg.payload === "object" && "issues_migrated" in msg.payload) {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
+        }
+      }
       const prefix = msg.type.split(":")[0] ?? "";
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);

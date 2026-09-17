@@ -643,3 +643,14 @@ describe("workflow status filters", () => {
     expect(filterIssues(rows, { ...NO_FILTER, statusFilters: ["todo", "node-review"] }).map((row) => row.id)).toEqual(["review", "legacy"]);
   });
 });
+
+it("applies saved status mappings only within the migrated project", () => {
+  const rows = [
+    makeIssue({ id: "migrated", project_id: "p1", workflow_status_id: "new-node" }),
+    makeIssue({ id: "unrelated", project_id: "p2", workflow_status_id: "new-node" }),
+    makeIssue({ id: "original", project_id: "p2", workflow_status_id: "old-node" }),
+  ];
+  expect(filterIssues(rows, {
+    ...NO_FILTER, statusFilters: ["old-node"], statusFilterMappings: { p1: { "old-node": "new-node" } },
+  }).map((issue) => issue.id)).toEqual(["migrated", "original"]);
+});

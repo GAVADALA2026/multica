@@ -131,16 +131,17 @@ describe("workflow change resolution", () => {
     expect(mocks.update).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalled();
   });
-  it("previews the destination initial status and moves without a status mapping", async () => {
+  it("preserves the corresponding status and sends an explicit destination mapping", async () => {
     const user = userEvent.setup();
     setup({ project_id: "target" });
-    expect(screen.getByText("Initial status: target First")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "target First" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose a status" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Move task" }));
     await waitFor(() =>
       expect(mocks.update).toHaveBeenCalledWith({
         id: "issue",
         project_id: "target",
+        workflow_status_id: "target-first",
         expected_workflow_revision: 3,
         expected_revision: 7,
         expected_transition_id: "cursor",
@@ -148,11 +149,12 @@ describe("workflow change resolution", () => {
     );
     expect(mocks.transition).not.toHaveBeenCalled();
   });
-  it("previews the initial entry action and interruption before moving", () => {
+  it("blocks a move with active work without promising to start or cancel agents", () => {
     setup({ project_id: "target", status: "done" }, true);
-    expect(screen.getByText("Initial status: target First")).toBeInTheDocument();
-    expect(screen.getByText("Starts Reviewer")).toBeInTheDocument();
-    expect(screen.getByText(en.handoff.stops)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "target Done" })).toBeInTheDocument();
+    expect(screen.queryByText("Starts Reviewer")).not.toBeInTheDocument();
+    expect(screen.getByText(en.workflow_selection.move_active_blocked)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move task" })).toBeDisabled();
   });
   it("keeps a failed move open for review without silently retrying", async () => {
     mocks.update.mockRejectedValue(new Error("issue entry policy executor unavailable"));
