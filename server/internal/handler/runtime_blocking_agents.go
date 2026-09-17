@@ -120,11 +120,11 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool) []string {
 	}
 	if classes[blockingAgentBuilderCarrier] {
 		// Addressed to the creator, not to whoever hit this error. Builder
-		// sessions are creator-scoped reads (ListAgentBuilderSessions, and
-		// loadChatSessionForUser behind switch/discard), so an admin who is not
-		// the creator cannot list, switch or discard the session — all three
-		// return 403. Telling them to reopen it would be another instruction
-		// that cannot be carried out.
+		// sessions are creator-scoped: ListAgentBuilderSessions returns 200 but
+		// omits other members' sessions, and switch/discard go through
+		// loadChatSessionForUser and return 403. So an admin who is not the
+		// creator cannot even see the session to act on it, and telling them to
+		// reopen it would be another instruction that cannot be carried out.
 		out = append(out, "The unfinished Agent Builder session(s) here are hidden from the agent list, and only their creator can open them — ask the member who started the session to switch its runtime or discard it; another admin cannot do that for them.")
 	}
 	if classes[blockingAgentMika] {

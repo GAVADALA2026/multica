@@ -771,7 +771,7 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 			holds = append(holds, fmt.Sprintf("%d agent(s) are still bound to it", n))
 		}
 		if n := blockers.undrainedTasks; n > 0 {
-			holds = append(holds, fmt.Sprintf("%d task(s) on it have not finished", n))
+			holds = append(holds, fmt.Sprintf("%d unfinished task(s) belong to it or to agents bound to it", n))
 		}
 		parts = append(parts, fmt.Sprintf(
 			"It is offline, but %s, which holds it in place; Multica removes the runtime automatically after %d days offline once that is cleared.",
@@ -779,7 +779,7 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		))
 		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents))...)
 		if blockers.undrainedTasks > 0 {
-			parts = append(parts, "Let the unfinished tasks complete, or cancel them.")
+			parts = append(parts, "Let those tasks finish, or cancel them — one can be running on a different machine if its agent was moved there.")
 		}
 	default:
 		parts = append(parts, fmt.Sprintf(
@@ -811,9 +811,11 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 }
 
 // profileInstanceBlockers is everything retention GC checks before it will
-// reclaim an offline runtime. Both halves matter to the refusal: GC's candidate
-// query requires no non-archived user agent AND no task with completed_at NULL,
-// so reporting only one of them would promise a cleanup the sweeper then skips.
+// reclaim an offline runtime, which is more than its candidate query asks for:
+// the candidate scan wants no non-archived user agent and no runtime-owned task
+// with completed_at NULL, and then gcRuntime re-checks the drain across every
+// user agent bound to the runtime, archived ones included. Reporting any subset
+// of that promises a cleanup the sweeper then skips.
 type profileInstanceBlockers struct {
 	agents         []db.Agent
 	undrainedTasks int64
@@ -834,11 +836,22 @@ func (h *Handler) profileInstanceRefusalBlockers(ctx context.Context, runtimeID 
 			"runtime_id", uuidToString(runtimeID), "error", err)
 		return profileInstanceBlockers{}
 	}
-	// Runtime-owned tasks only, mirroring ListStaleOfflineRuntimeGCCandidates.
-	// The agent-side predicate belongs to the teardown drain check, not to the
-	// question this message answers ("will GC pick this row up").
+	// The same drain gate gcRuntime applies, and deliberately not just the
+	// candidate query's runtime-owned predicate: gcRuntime widens it to every
+	// user agent bound to this runtime, archived included, and skips the delete
+	// when any of them still owns a non-terminal task. That task can sit on a
+	// different machine — an agent moved away leaves its deferred run behind —
+	// so a check scoped to this runtime's own rows reports a row as reclaimable
+	// that the sweeper will pass over every hour.
+	agentIDs, err := h.Queries.ListUserAgentIDsByRuntime(ctx, runtimeID)
+	if err != nil {
+		slog.Warn("profile instance refusal: bound agent id lookup failed",
+			"runtime_id", uuidToString(runtimeID), "error", err)
+		return profileInstanceBlockers{}
+	}
 	tasks, err := h.Queries.CountUndrainedTasksByRuntimeOrAgent(ctx, db.CountUndrainedTasksByRuntimeOrAgentParams{
 		RuntimeIds: []pgtype.UUID{runtimeID},
+		AgentIds:   agentIDs,
 	})
 	if err != nil {
 		slog.Warn("profile instance refusal: undrained task lookup failed",
