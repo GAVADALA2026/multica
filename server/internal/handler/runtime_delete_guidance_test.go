@@ -357,8 +357,14 @@ func TestDeleteRuntimeProfile_MikaBlockerDoesNotSuggestArchiving(t *testing.T) {
 	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
 		t.Fatalf("Mika cannot be reassigned or archived; refusal must not say so: %s", msg)
 	}
-	if !strings.Contains(msg, "Mika is built into Multica") {
-		t.Fatalf("refusal must explain Mika's status honestly, got: %s", msg)
+	if !strings.Contains(msg, "cannot be archived") {
+		t.Fatalf("refusal must still say Mika cannot be archived, got: %s", msg)
+	}
+	// The other half: Mika IS movable, and saying otherwise tells an owner who
+	// could fix this in one edit to give up. Scoped for a profile delete —
+	// moving Mika to a sibling runtime of the same profile would not help.
+	if !strings.Contains(msg, "a runtime that this profile does not provide") {
+		t.Fatalf("refusal must point at the rebind that actually clears this, got: %s", msg)
 	}
 	if !strings.Contains(msg, "built into Multica)") {
 		t.Fatalf("the listed blocker should be marked as product-owned, got: %s", msg)
@@ -428,7 +434,7 @@ func TestDeleteRuntimeProfile_MixedBlockersGiveEachItsOwnRemedy(t *testing.T) {
 	for _, want := range []string{
 		"not marked as built into Multica can be reassigned or archived",
 		"Agent Builder session",
-		"Mika is built into Multica",
+		"Mika is built into Multica, so it cannot be archived",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("mixed refusal missing %q, got: %s", want, msg)
@@ -503,8 +509,11 @@ func TestDeleteAgentRuntime_OfflineInstanceHeldByMikaDoesNotSuggestArchiving(t *
 	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
 		t.Fatalf("Mika cannot be reassigned or archived: %s", msg)
 	}
-	if !strings.Contains(msg, "Mika is built into Multica") {
-		t.Fatalf("instance refusal must explain Mika honestly too, got: %s", msg)
+	if !strings.Contains(msg, "cannot be archived") {
+		t.Fatalf("instance refusal must still say Mika cannot be archived, got: %s", msg)
+	}
+	if !strings.Contains(msg, "bind it to another runtime") {
+		t.Fatalf("instance refusal must point at the rebind, got: %s", msg)
 	}
 	if strings.Contains(msg, "without any action from you") {
 		t.Fatalf("must not promise cleanup while Mika holds the runtime: %s", msg)
@@ -550,6 +559,9 @@ func TestDeleteRuntimeProfile_RemedyCoversBlockersBeyondTheSample(t *testing.T) 
 
 	if !strings.Contains(msg, "Mika is built into Multica") {
 		t.Fatalf("Mika is blocker #21 and must still be reported, got: %s", msg)
+	}
+	if !strings.Contains(msg, "a runtime that this profile does not provide") {
+		t.Fatalf("the out-of-sample Mika must still get its real remedy, got: %s", msg)
 	}
 	if strings.Contains(msg, "Reassign or archive them first.") {
 		t.Fatalf("the blanket remedy must not cover a Mika the sample never showed: %s", msg)
@@ -855,5 +867,66 @@ func TestDeleteAgentRuntime_OfflineInstanceMatchesTheRealGCDrainGate(t *testing.
 		if strings.Contains(msg, "without any action from you") {
 			t.Errorf("cascade=%v: actual GC drain count=1, but active_agent_count=%v undrained_task_count=%v: %s", cascade, body["active_agent_count"], body["undrained_task_count"], msg)
 		}
+	}
+}
+
+// The Mika clause makes two claims about product capability, and an earlier
+// version of it had the second one backwards — it said Mika could not be moved,
+// which told an owner who could have fixed the block in one edit to give up.
+// Both halves are therefore asserted against the real endpoints rather than
+// against anyone's reading of them, so the message cannot drift from the
+// product again. Correction contributed by review.
+func TestMikaRemedyMatchesWhatMikaCanDo(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	source, _ := createProfileBackedRuntime(t, ctx, "Mika Remedy Source")
+	target := newTestRuntime(t, "Mika Remedy Target", "online")
+	mikaID := createSystemFixtureAgent(t, ctx, source, "Mika", "user", "mika")
+
+	// Claim 1: Mika cannot be archived.
+	w := httptest.NewRecorder()
+	testHandler.ArchiveAgent(w, withURLParam(
+		newRequest("POST", "/api/agents/"+mikaID+"/archive", nil), "id", mikaID))
+	if w.Code == http.StatusOK {
+		t.Fatalf("Mika archived successfully; the refusal claims it cannot be: %s", w.Body.String())
+	}
+
+	// Claim 2: Mika can be rebound to another runtime.
+	w = httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest("PATCH", "/api/agents/"+mikaID, map[string]any{"runtime_id": target}), "id", mikaID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("rebinding Mika failed (%d), but the refusal tells the user to do it: %s",
+			w.Code, w.Body.String())
+	}
+	var bound string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id::text FROM agent WHERE id = $1`, mikaID).Scan(&bound); err != nil {
+		t.Fatalf("read mika binding: %v", err)
+	}
+	if bound != target {
+		t.Fatalf("Mika still bound to %s, expected the move to %s to take effect", bound, target)
+	}
+
+	// And the move is what actually clears the instance refusal.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, source); err != nil {
+		t.Fatalf("mark source offline: %v", err)
+	}
+	w = httptest.NewRecorder()
+	testHandler.DeleteAgentRuntime(w, withURLParam(
+		newRequest("DELETE", "/api/runtimes/"+source, nil), "runtimeId", source))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	body := decodeConflict(t, w)
+	if got, _ := body["active_agent_count"].(float64); int(got) != 0 {
+		t.Fatalf("after the rebind the source should hold no agents, got %v", got)
+	}
+	if msg := conflictMessage(t, body); strings.Contains(msg, "Mika is built into Multica") {
+		t.Fatalf("Mika moved away but is still named as a blocker: %s", msg)
 	}
 }

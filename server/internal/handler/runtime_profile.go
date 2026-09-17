@@ -411,7 +411,7 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
 	}
 
-	remedies := blockingAgentRemedies(classes)
+	remedies := blockingAgentRemedies(classes, blockingAgentScopeProfile)
 	if len(remedies) == 0 {
 		remedies = []string{"None of them can be released from here."}
 	}

@@ -30,8 +30,9 @@ const (
 	// blockingAgentUser is an ordinary workspace agent: rebind or archive it.
 	blockingAgentUser blockingAgentClass = iota
 	// blockingAgentMika is the workspace's built-in Mika. It cannot be archived
-	// (agent.go rejects any system_key) and there is no supported rebind path,
-	// so no instruction can honestly be offered for it today.
+	// (agent.go rejects any system_key there) but it CAN be rebound: UpdateAgent
+	// takes runtime_id for it like any other manageable agent. Those two halves
+	// have to be stated separately or the remedy is wrong in one direction.
 	blockingAgentMika
 	// blockingAgentBuilderCarrier is the hidden carrier behind an unfinished
 	// Agent Builder flow. It is released through that session, not the agent list.
@@ -100,11 +101,22 @@ func blockingAgentLabel(name, runtimeName, runtimeStatus string, class blockingA
 	}
 }
 
+// blockingAgentScope distinguishes the two refusals, because one remedy differs
+// between them: moving Mika off this runtime clears an instance refusal, but a
+// profile refusal only clears if the destination is not another runtime of the
+// same profile.
+type blockingAgentScope int
+
+const (
+	blockingAgentScopeInstance blockingAgentScope = iota
+	blockingAgentScopeProfile
+)
+
 // blockingAgentRemedies returns one clause per distinct recovery path present,
 // in a fixed order so the sentence is stable. An empty result means every
 // blocker was product-owned and the caller should say so rather than suggest
 // an action.
-func blockingAgentRemedies(classes map[blockingAgentClass]bool) []string {
+func blockingAgentRemedies(classes map[blockingAgentClass]bool, scope blockingAgentScope) []string {
 	// "Reassign or archive them" must not appear to cover the product-owned
 	// blockers listed beside them, which is exactly the instruction they cannot
 	// follow. When both are present the clause names which ones it applies to.
@@ -128,7 +140,23 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool) []string {
 		out = append(out, "The unfinished Agent Builder session(s) here are hidden from the agent list, and only their creator can open them — ask the member who started the session to switch its runtime or discard it; another admin cannot do that for them.")
 	}
 	if classes[blockingAgentMika] {
-		out = append(out, "Mika is built into Multica: it cannot be archived, and there is no supported way to move it to another runtime yet, so this cannot be cleared from here while Mika is bound.")
+		// Mika is unarchivable but NOT immovable: UpdateAgent takes runtime_id
+		// for it like any other agent an admin can manage (the only system_key
+		// guard in agent.go is on archive), and the agent detail page shows it
+		// an editable runtime picker. An earlier version of this message said
+		// there was no supported way to move it, which told an owner who could
+		// have fixed this in one edit to give up instead — the exact failure
+		// this whole change set is about. TestMikaRemedyMatchesWhatMikaCanDo
+		// exercises both halves against the real endpoints so the claim cannot
+		// drift from the product again.
+		target := "another runtime"
+		if scope == blockingAgentScopeProfile {
+			target = "a runtime that this profile does not provide"
+		}
+		out = append(out, fmt.Sprintf(
+			"Mika is built into Multica, so it cannot be archived — but it can be moved: open Mika's agent page and bind it to %s.",
+			target,
+		))
 	}
 	if classes[blockingAgentOtherSystem] {
 		out = append(out, "Some blockers are agents built into Multica and cannot be archived.")

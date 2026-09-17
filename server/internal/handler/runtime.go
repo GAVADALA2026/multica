@@ -777,7 +777,7 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 			"It is offline, but %s, which holds it in place; Multica removes the runtime automatically after %d days offline once that is cleared.",
 			strings.Join(holds, " and "), ttlDays,
 		))
-		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents))...)
+		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents), blockingAgentScopeInstance)...)
 		if blockers.undrainedTasks > 0 {
 			parts = append(parts, "Let those tasks finish, or cancel them — one can be running on a different machine if its agent was moved there.")
 		}
