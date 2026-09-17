@@ -2,7 +2,11 @@
 import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { splitTimeline, extractCopyText } from "./copy-text";
+import {
+  canonicalAnswerText,
+  extractCopyText,
+  splitTimeline,
+} from "./copy-text";
 
 const text = (seq: number, content: string): ChatTimelineItem => ({
   seq,
@@ -82,23 +86,38 @@ describe("splitTimeline", () => {
   });
 });
 
-describe("extractCopyText", () => {
-  it("uses canonical message content when timeline is empty", () => {
-    expect(extractCopyText(message("legacy body"))).toBe("legacy body");
-  });
-
-  it("copies canonical message content without transcript inference", () => {
-    expect(
-      extractCopyText(message("complete canonical answer")),
-    ).toBe("complete canonical answer");
+describe("canonicalAnswerText", () => {
+  it("uses persisted message content", () => {
+    expect(canonicalAnswerText(message("legacy body"))).toBe("legacy body");
   });
 
   it("applies a surface transform to hidden protocols", () => {
     expect(
-      extractCopyText(
+      canonicalAnswerText(
         message("visible<agent_draft>hidden</agent_draft>"),
         (content) => content.replace(/<agent_draft>[\s\S]*<\/agent_draft>/, ""),
       ),
     ).toBe("visible");
+  });
+});
+
+describe("extractCopyText", () => {
+  it("copies canonical message content without transcript inference", () => {
+    expect(
+      extractCopyText(message("complete canonical answer"), [
+        text(1, "partial timeline answer"),
+        thinking(2),
+      ]),
+    ).toBe("complete canonical answer");
+  });
+
+  it("falls back to visible timeline text for legacy empty-content rows", () => {
+    expect(
+      extractCopyText(message(""), [text(1, "preface"), tool(2), text(3, "final")]),
+    ).toBe("preface\n\nfinal");
+  });
+
+  it("returns empty text for an attachment-only row", () => {
+    expect(extractCopyText(message(""), [])).toBe("");
   });
 });

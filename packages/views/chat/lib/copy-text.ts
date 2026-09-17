@@ -9,10 +9,9 @@ import { stripChatQuickActionsProtocol } from "./quick-actions";
  *             including any text items sandwiched between them
  *   final   — text items after the last non-text item
  *
- * UI renders preface above the outer fold, middle inside the fold (with each
- * row keeping its existing inner Collapsible), and final below the fold.
- * Copy concatenates preface + final — the fold's contents are intentionally
- * omitted, mirroring what's visible when the fold is closed.
+ * While streaming, UI renders preface above the outer fold, middle inside the
+ * fold, and final below it. Once settled, preface + middle become process
+ * history and the canonical chat message replaces final.
  */
 export function splitTimeline(items: ChatTimelineItem[]): {
   preface: ChatTimelineItem[];
@@ -35,16 +34,34 @@ export function splitTimeline(items: ChatTimelineItem[]): {
 }
 
 /**
- * Markdown source the Copy action puts on the clipboard. A persisted
- * chat_message is the canonical completed answer; task messages are only the
- * execution transcript and may split one answer around thinking/tool events.
- * Surface-specific transforms still apply so hidden protocols stay out of the
- * rendered and copied answer.
+ * Canonical completed answer from the persisted chat message. Surface-specific
+ * transforms still apply so hidden protocols stay out of the rendered and
+ * copied answer.
  */
-export function extractCopyText(
+export function canonicalAnswerText(
   message: ChatMessage,
   transformContent?: (content: string) => string,
 ): string {
   const content = stripChatQuickActionsProtocol(message.content ?? "");
   return transformContent ? transformContent(content) : content;
+}
+
+/**
+ * Markdown source for Copy. Completed messages use canonical content instead
+ * of inferring an answer from transcript position. Legacy rows with empty
+ * content retain the previous visible-timeline fallback.
+ */
+export function extractCopyText(
+  message: ChatMessage,
+  timeline: ChatTimelineItem[],
+  transformContent?: (content: string) => string,
+): string {
+  const canonical = canonicalAnswerText(message, transformContent);
+  if (canonical.trim()) return canonical;
+
+  const { preface, final } = splitTimeline(timeline);
+  return [...preface, ...final]
+    .map((item) => item.content ?? "")
+    .filter((content) => content.length > 0)
+    .join("\n\n");
 }
