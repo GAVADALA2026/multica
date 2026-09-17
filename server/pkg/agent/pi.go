@@ -250,7 +250,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	stdout, err := cmd.StdoutPipe()
+	stream, err := newRuntimeStream(cmd, label, b.cfg)
 	if err != nil {
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -273,9 +273,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// emitting a single JSON event, so stderr is the only place the reason
 	// exists and Result.ResumeRejected has nothing else to be built from.
 	stderrWatch := newPiStderrWatcher(newLogWriter(b.cfg.Logger, "["+label+":stderr] "))
-	cmd.Stderr = stderrWatch
+	if err := stream.captureStderr(stderrWatch); err != nil {
+		releasePiSessionFileLock(sessionLock)
+		cancel()
+		return nil, fmt.Errorf("%s stderr pipe: %w", label, err)
+	}
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	if err := stream.start(); err != nil {
 		closeStdin()
 		releasePiSessionFileLock(sessionLock)
 		cancel()
@@ -303,7 +307,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	go func() {
 		<-runCtx.Done()
 		closeStdin()
-		_ = stdout.Close()
+		stream.close()
 	}()
 
 	go func() {
@@ -321,7 +325,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 		// Pi message_update events can be large (they embed the full message
 		// partial on each delta); the shared stream bound covers that.
-		scanner := newAgentStreamScanner(stdout)
+		scanner := newAgentStreamScanner(stream)
 		var textBuffer strings.Builder
 
 		for scanner.Scan() {
@@ -426,6 +430,22 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 						finalError = label + " exhausted automatic retries"
 					}
 				}
+
+			case "auto_retry_start":
+				// Pi emits agent_end before deciding whether the turn's error is
+				// retryable, and emits auto_retry_start immediately after that
+				// decision — the backoff sleep comes after this event, not
+				// before it. So this is the withdrawal of the terminal boundary
+				// agent_end just reported, and it always arrives well inside the
+				// grace. Without it the retry's silent backoff would look like a
+				// finished run that failed to exit.
+				stream.runContinues()
+
+			case "agent_end":
+				// Pi's protocol boundary for the whole execution, not for one
+				// turn: turn_end repeats per turn, agent_end does not. A retry
+				// withdraws it through auto_retry_start above.
+				stream.terminalObserved()
 			}
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
@@ -433,7 +453,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			trySend(msgCh, Message{Type: MessageText, Content: d})
 		}
 
-		waitErr := cmd.Wait()
+		waitErr := stream.wait()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
