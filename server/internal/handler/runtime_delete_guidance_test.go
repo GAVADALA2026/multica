@@ -338,10 +338,12 @@ func createSystemFixtureAgent(t *testing.T, ctx context.Context, runtimeID, name
 }
 
 // Mika cannot be archived — the archive endpoint rejects any agent carrying a
-// system_key — and there is no supported way to move it to another runtime. So
-// the refusal must not tell the user to reassign or archive it; saying so would
-// be the same unactionable-advice defect this change set exists to remove.
-func TestDeleteRuntimeProfile_MikaBlockerDoesNotSuggestArchiving(t *testing.T) {
+// system_key — but it CAN be rebound, so the generic "reassign or archive them"
+// clause is wrong for it in both directions: half of it is impossible and the
+// half that works needs a destination the generic wording never gives. The
+// refusal has to carry Mika's own path instead. Capability itself is asserted
+// against the real endpoints in TestMikaRemedyMatchesWhatMikaCanDo.
+func TestDeleteRuntimeProfile_MikaBlockerGetsItsOwnRemedy(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -355,7 +357,7 @@ func TestDeleteRuntimeProfile_MikaBlockerDoesNotSuggestArchiving(t *testing.T) {
 	msg := conflictMessage(t, body)
 
 	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("Mika cannot be reassigned or archived; refusal must not say so: %s", msg)
+		t.Fatalf("the generic reassign-or-archive clause does not apply to Mika: %s", msg)
 	}
 	if !strings.Contains(msg, "cannot be archived") {
 		t.Fatalf("refusal must still say Mika cannot be archived, got: %s", msg)
@@ -482,8 +484,9 @@ func TestDeleteRuntimeProfile_ActiveAgentResponseIsBounded(t *testing.T) {
 }
 
 // An offline instance held by Mika alone hits the same trap as the profile
-// refusal: there is nothing the user can reassign or archive.
-func TestDeleteAgentRuntime_OfflineInstanceHeldByMikaDoesNotSuggestArchiving(t *testing.T) {
+// refusal: the generic clause does not fit, and here the destination is any
+// other runtime rather than one outside the profile.
+func TestDeleteAgentRuntime_OfflineInstanceHeldByMikaGetsMikasOwnRemedy(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -507,7 +510,7 @@ func TestDeleteAgentRuntime_OfflineInstanceHeldByMikaDoesNotSuggestArchiving(t *
 	msg := conflictMessage(t, decodeConflict(t, w))
 
 	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("Mika cannot be reassigned or archived: %s", msg)
+		t.Fatalf("the generic reassign-or-archive clause does not apply to Mika: %s", msg)
 	}
 	if !strings.Contains(msg, "cannot be archived") {
 		t.Fatalf("instance refusal must still say Mika cannot be archived, got: %s", msg)
