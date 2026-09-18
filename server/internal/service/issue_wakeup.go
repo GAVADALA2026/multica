@@ -34,6 +34,8 @@ type WakeupInput struct {
 	Mode            string     `json:"mode"`
 	EventTypes      []string   `json:"event_types"`
 	FilterAgentID   string     `json:"filter_agent_id"`
+	FilterActorType string     `json:"filter_actor_type"`
+	FilterActorID   string     `json:"filter_actor_id"`
 	FilterTaskID    string     `json:"filter_task_id"`
 	ParentCommentID string     `json:"parent_comment_id"`
 	AfterSeconds    int64      `json:"after_seconds"`
@@ -68,6 +70,19 @@ func (s *IssueWakeupService) Validate(in *WakeupInput, now time.Time) (pgtype.Ti
 	}
 	if in.Mode != "once" && in.Mode != "continuous" {
 		return bad("mode must be once or continuous")
+	}
+	if in.FilterActorType != "" || in.FilterActorID != "" {
+		if in.Kind != "event" || (in.FilterActorType != "member" && in.FilterActorType != "agent") || in.FilterActorID == "" {
+			return bad("actor filter requires an event, member or agent type, and actor ID")
+		}
+		if in.FilterAgentID != "" || in.FilterTaskID != "" {
+			return bad("choose an actor filter or agent/run filters")
+		}
+		for _, event := range in.EventTypes {
+			if strings.HasPrefix(event, "task.") {
+				return bad("actor filters apply to issue, comment, reaction and attachment changes; use agent/run filters for task events")
+			}
+		}
 	}
 	switch in.Kind {
 	case "event":
@@ -214,7 +229,7 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 			}
 			return ""
 		}
-		in = WakeupInput{AgentID: optionalID(old.AgentID), Instruction: old.Instruction, Kind: old.Kind, Mode: old.Mode, EventTypes: old.EventTypes, FilterAgentID: optionalID(old.FilterAgentID), FilterTaskID: optionalID(old.FilterTaskID), ParentCommentID: optionalID(old.ParentCommentID), IntervalSeconds: old.IntervalSeconds.Int64, CronExpression: old.CronExpression.String, Timezone: old.Timezone}
+		in = WakeupInput{AgentID: optionalID(old.AgentID), Instruction: old.Instruction, Kind: old.Kind, Mode: old.Mode, EventTypes: old.EventTypes, FilterAgentID: optionalID(old.FilterAgentID), FilterTaskID: optionalID(old.FilterTaskID), FilterActorType: old.FilterActorType.String, FilterActorID: optionalID(old.FilterActorID), ParentCommentID: optionalID(old.ParentCommentID), IntervalSeconds: old.IntervalSeconds.Int64, CronExpression: old.CronExpression.String, Timezone: old.Timezone}
 		if enable.At != nil && old.Kind != "at" {
 			return out, fmt.Errorf("%w: only single-time wakeups accept a new time", ErrWakeupInput)
 		}
@@ -265,6 +280,23 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 	filterTask, err := wakeupUUID(in.FilterTaskID)
 	if err != nil {
 		return out, err
+	}
+	filterActor, err := wakeupUUID(in.FilterActorID)
+	if err != nil {
+		return out, err
+	}
+	if filterActor.Valid {
+		if in.FilterActorType == "member" {
+			_, err = q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: filterActor, WorkspaceID: issue.WorkspaceID})
+		} else {
+			_, err = q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: filterActor, WorkspaceID: issue.WorkspaceID})
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, ErrWakeupForbidden
+		}
+		if err != nil {
+			return out, err
+		}
 	}
 	parent, err := wakeupUUID(in.ParentCommentID)
 	if err != nil {
@@ -329,9 +361,9 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 			return out, fmt.Errorf("%w: run and agent filters disagree", ErrWakeupInput)
 		}
 	}
-	params := db.CreateIssueWakeupParams{ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, AgentID: agent.ID, CreatedBy: member, SourceTaskID: source, ParentCommentID: parent, Instruction: in.Instruction, Kind: in.Kind, Mode: in.Mode, EventTypes: append([]string{}, in.EventTypes...), FilterAgentID: filterAgent, FilterTaskID: filterTask, IntervalSeconds: pgtype.Int8{Int64: in.IntervalSeconds, Valid: in.IntervalSeconds > 0}, CronExpression: pgtype.Text{String: in.CronExpression, Valid: in.CronExpression != ""}, Timezone: in.Timezone, NextFireAt: next}
+	params := db.CreateIssueWakeupParams{ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, AgentID: agent.ID, CreatedBy: member, SourceTaskID: source, ParentCommentID: parent, Instruction: in.Instruction, Kind: in.Kind, Mode: in.Mode, EventTypes: append([]string{}, in.EventTypes...), FilterAgentID: filterAgent, FilterTaskID: filterTask, FilterActorType: pgtype.Text{String: in.FilterActorType, Valid: in.FilterActorType != ""}, FilterActorID: filterActor, IntervalSeconds: pgtype.Int8{Int64: in.IntervalSeconds, Valid: in.IntervalSeconds > 0}, CronExpression: pgtype.Text{String: in.CronExpression, Valid: in.CronExpression != ""}, Timezone: in.Timezone, NextFireAt: next}
 	if existingID.Valid {
-		_, err = tx.Exec(ctx, `UPDATE issue_wakeup SET agent_id=$2,created_by=$3,source_task_id=$4,parent_comment_id=$5,instruction=$6,kind=$7,mode=$8,event_types=$9,filter_agent_id=$10,filter_task_id=$11,interval_seconds=$12,cron_expression=$13,timezone=$14,next_fire_at=$15,enabled=true,disabled_at=NULL,revision=revision+1,last_task_id=NULL,last_error=NULL,updated_at=now() WHERE id=$1`, existingID, params.AgentID, member, source, parent, in.Instruction, in.Kind, in.Mode, params.EventTypes, filterAgent, filterTask, params.IntervalSeconds, params.CronExpression, in.Timezone, next)
+		_, err = tx.Exec(ctx, `UPDATE issue_wakeup SET agent_id=$2,created_by=$3,source_task_id=$4,parent_comment_id=$5,instruction=$6,kind=$7,mode=$8,event_types=$9,filter_agent_id=$10,filter_task_id=$11,interval_seconds=$12,cron_expression=$13,timezone=$14,next_fire_at=$15,filter_actor_type=$16,filter_actor_id=$17,enabled=true,disabled_at=NULL,revision=revision+1,last_task_id=NULL,last_error=NULL,updated_at=now() WHERE id=$1`, existingID, params.AgentID, member, source, parent, in.Instruction, in.Kind, in.Mode, params.EventTypes, filterAgent, filterTask, params.IntervalSeconds, params.CronExpression, in.Timezone, next, params.FilterActorType, filterActor)
 		if err == nil {
 			out, err = q.LockIssueWakeup(ctx, existingID)
 		}

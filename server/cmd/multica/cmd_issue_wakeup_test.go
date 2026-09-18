@@ -77,3 +77,39 @@ func TestIssueWakeupCreateRetriesOnlyRolledBackSourceConflict(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueWakeupCLIActorFilter(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issue = "a57c0511-1ebc-471d-a314-438ca16cc75d"
+	const person = "356c8712-6100-4fb2-ac42-513770588468"
+	var body map[string]any
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "wake", "enabled": true})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	for _, action := range []string{"create", "update"} {
+		cmd := newIssueWakeupCommand()
+		args := []string{action, issue}
+		wantMethod := "POST"
+		if action == "update" {
+			args = append(args, "wake")
+			wantMethod = "PUT"
+		}
+		args = append(args, "--event", "comment.created", "--filter-actor-type", "member", "--filter-actor-id", person, "--instruction", "wait")
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if method != wantMethod || body["filter_actor_type"] != "member" || body["filter_actor_id"] != person {
+			t.Fatalf("lost actor filter: %s %+v", method, body)
+		}
+	}
+}

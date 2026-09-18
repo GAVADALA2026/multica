@@ -977,6 +977,8 @@ type IssueWakeup struct {
 	LastError       pgtype.Text        `json:"last_error"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	FilterActorType pgtype.Text        `json:"filter_actor_type"`
+	FilterActorID   pgtype.UUID        `json:"filter_actor_id"`
 }
 
 type IssueWakeupReceipt struct {

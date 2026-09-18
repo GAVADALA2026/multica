@@ -121,6 +121,36 @@ agent for mutation events. Editing another agent's comment does not make that
 agent the editor; payloads distinguish actor from author. `--task-id` accepts
 only run events. Filters never expand the subscription beyond its current issue.
 
+Use `--filter-actor-type member --filter-actor-id USER_ID` to wait for a
+specific workspace member, or type `agent` for a source agent. For example:
+
+```sh
+multica issue wakeup create ISSUE --kind event --event comment.created \
+  --filter-actor-type member --filter-actor-id USER_ID \
+  --instruction-file ./instruction.md
+```
+
+These optional paired filters apply to issue, comment, reaction and attachment
+changes. They match the actor who performed the change; for a new comment this
+is its author, but for an edit it is the editor, not the original author. Unknown
+system attribution does not match. Task subscriptions keep their existing
+agent/run filters. Actor filters cannot be combined with those source filters.
+The ID is the user's UUID, not the membership record's UUID; it must belong to
+the current workspace. Other people's events neither enqueue nor consume a
+one-shot rule. Broad subscriptions without actor filters behave as before.
+Enable/rearm retains the stored actor filter; an explicit full update can replace
+or clear it. The sidebar, board summary and inventory show the actor's name;
+private agent references are redacted, retaining a generic selected-actor label.
+
+Migrations 522–523 add nullable actor columns and update transactional capture.
+Apply migrations, then deploy the API/CLI before creating actor-filtered rules;
+update web/Desktop to display the actor restriction. Old clients can read the
+additive response, but cannot show the new restriction. On application rollback,
+keep these migrations: the database still enforces stored filters even for older
+consumers. Schema rollback deliberately refuses while any actor-filtered rule
+exists, including disabled rules, so a later re-enable cannot silently broaden
+it. Disable/drain and remove those configurations before rolling 523/522 back.
+
 The platform lifecycle names `issue.created` and `issue.deleted` are listed
 separately and rejected for self-wakeups: subscription requires an existing
 issue, and deleting it withdraws its work. Workspace/cross-issue subscriptions,
@@ -198,7 +228,7 @@ still match. Apply this migration before enabling broad agent-created subscripti
 Rolling it back restores the previous capture function without rewriting data;
 disable affected subscriptions first to avoid registration feedback.
 
-This unmerged branch's migrations use prefixes 500–521 to follow main's 495–499.
+This unmerged branch's migrations use prefixes 500–523 to follow main's 495–499.
 Local databases that already applied the previous 495–508 wakeup filenames must
 rename those exact `schema_migrations.version` entries by +5 before updating.
 Do not rename main's migrations or rerun the table-creation migration. Fresh

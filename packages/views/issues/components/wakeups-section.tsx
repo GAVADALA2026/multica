@@ -132,9 +132,14 @@ function WakeupRow({
               {t(($) => $.wakeups.any_event)}:{" "}
               {wakeup.event_types
                 .map((event) =>
-                  text.eventName(event, wakeup.filter_agent_name || undefined),
+                  text.eventCondition(event, wakeup),
                 )
                 .join("; ")}
+            </p>
+          )}
+          {wakeup.filter_actor_type && (
+            <p className="break-words text-caption text-muted-foreground">
+              {t(($) => $.wakeups.source_actor)}: {text.actorName(wakeup)}
             </p>
           )}
           {wakeup.filter_agent_id && (

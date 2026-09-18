@@ -186,6 +186,15 @@ export function useWakeupText() {
       ? t(($) => $.wakeups.today_time, { time: formatted })
       : formatted;
   };
+  const actorName = (w: WakeupPreview) => w.filter_actor_name ||
+    (w.filter_actor_type === "member" ? t(($) => $.wakeups.selected_member) : t(($) => $.wakeups.selected_agent));
+  const eventCondition = (event: string, w: WakeupPreview) => {
+    const label = eventName(event, w.filter_agent_name || undefined);
+    const actor = w.filter_actor_type ? actorName(w) : w.filter_agent_name;
+    return actor && !event.startsWith("task.")
+      ? t(($) => $.wakeups.by_actor, { condition: label, agent: actor })
+      : label;
+  };
   const trigger = (w: WakeupPreview) => {
     if (w.kind === "every" || w.kind === "cron") return schedule(w);
     if (w.kind === "at")
@@ -195,12 +204,7 @@ export function useWakeupText() {
           })
         : t(($) => $.wakeups.scheduled_time);
     const event = w.event_types[0] ?? "";
-    let label = eventName(event, w.filter_agent_name || undefined);
-    if (w.filter_agent_name && !event.startsWith("task."))
-      label = t(($) => $.wakeups.by_actor, {
-        condition: label,
-        agent: w.filter_agent_name,
-      });
+    let label = eventCondition(event, w);
     if (w.filter_task_id)
       label += ` · ${t(($) => $.wakeups.specific_run, { id: w.filter_task_id.slice(0, 8) })}`;
     return `${label}${w.event_types.length > 1 ? ` +${w.event_types.length - 1}` : ""}`;
@@ -236,5 +240,5 @@ export function useWakeupText() {
         ? t(($) => $.wakeups.conflict_error)
         : fallback;
   };
-  return { eventName, trigger, schedule, frequency, runState, state, error };
+  return { eventName, eventCondition, actorName, trigger, schedule, frequency, runState, state, error };
 }

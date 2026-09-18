@@ -3448,6 +3448,9 @@ export const IssueWakeupSchema = z.object({
   interval_seconds: z.number().nullable(), cron_expression: z.string().nullable(), timezone: z.string(),
   next_fire_at: z.string().nullable(), enabled: z.boolean(), disabled_at: z.string().nullable(),
   last_task_id: z.string().nullable(), last_error: z.string().nullable(),
+  filter_actor_type: z.enum(["member", "agent"]).nullable().optional(),
+  filter_actor_id: z.string().nullable().optional(),
+  filter_actor_name: z.string().nullable().optional(),
   revision: z.number().int().positive().optional(),
   filter_agent_name: z.string().nullable().optional(), last_task_status: z.string().nullable().optional(),
 });
@@ -3455,6 +3458,7 @@ export const IssueWakeupSchema = z.object({
 export const IssueWakeupSummaryRowSchema = IssueWakeupSchema.pick({
   id: true, issue_id: true, agent_id: true, agent_name: true, kind: true, mode: true,
   event_types: true, filter_task_id: true, filter_agent_name: true, interval_seconds: true,
+  filter_actor_type: true, filter_actor_id: true, filter_actor_name: true,
   cron_expression: true, timezone: true, next_fire_at: true,
 }).extend({ active_count: z.number().int().positive(), event_count: z.number().int().nonnegative() });
 

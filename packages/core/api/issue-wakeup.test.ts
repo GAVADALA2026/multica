@@ -125,3 +125,21 @@ it("surfaces a stale enable refusal instead of reporting success", async () => {
     client.enableIssueWakeup("issue", "wake", { revision: 1 }),
   ).rejects.toThrow();
 });
+
+it("preserves actor filters and accepts older responses without them", async () => {
+  const rule = {
+    id: "wake", issue_id: "issue", agent_id: "agent", agent_name: "Emacs",
+    instruction: "wait", kind: "event", mode: "once", event_types: ["comment.created"],
+    filter_agent_id: null, filter_task_id: null, interval_seconds: null,
+    cron_expression: null, timezone: "UTC", next_fire_at: null, enabled: true,
+    disabled_at: null, last_task_id: null, last_error: null,
+  };
+  for (const fields of [{}, { filter_actor_type: "member", filter_actor_id: "user", filter_actor_name: "Jiayuan" }, { filter_actor_type: "agent", filter_actor_id: null, filter_actor_name: null }]) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ ...rule, ...fields }]))));
+    await expect(client.listIssueWakeups("issue")).resolves.toEqual([{ ...rule, ...fields }]);
+  }
+  for (const fields of [{ filter_actor_type: 42 }, { filter_actor_type: "robot" }, { filter_actor_id: 42 }, { filter_actor_name: 42 }]) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ ...rule, ...fields }]))));
+    await expect(client.listIssueWakeups("issue")).rejects.toThrow("Could not load wakeups");
+  }
+});

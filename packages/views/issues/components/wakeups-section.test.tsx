@@ -238,3 +238,27 @@ it("keeps a failed one-shot triggered without calling the rule completed", () =>
   expect(row).toHaveTextContent("This execution: Run failed");
   expect(row).not.toHaveTextContent("Completed");
 });
+
+it("names the monitored member in the condition and details", async () => {
+  wakeup.kind = "event";
+  wakeup.event_types = ["comment.created", "comment.updated"];
+  wakeup.filter_actor_type = "member";
+  wakeup.filter_actor_id = "member-id";
+  wakeup.filter_actor_name = "Jiayuan";
+  renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+  const trigger = screen.getByRole("button", { name: /由 Jiayuan 触发/ });
+  expect(trigger).toHaveTextContent("Jiayuan");
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByText(/监听的成员或智能体/)).toBeVisible());
+  expect(screen.getByText(/以下任一事件发生时/)).toHaveTextContent("由 Jiayuan 触发");
+});
+
+it("keeps a redacted actor restriction visible without exposing an ID", () => {
+  wakeup.kind = "event";
+  wakeup.event_types = ["comment.created"];
+  wakeup.filter_actor_type = "agent";
+  wakeup.filter_actor_id = null;
+  wakeup.filter_actor_name = null;
+  renderWithI18n(<WakeupsSection issueId="issue" />);
+  expect(screen.getByRole("button", { name: /triggered by Selected agent/ })).toBeInTheDocument();
+});

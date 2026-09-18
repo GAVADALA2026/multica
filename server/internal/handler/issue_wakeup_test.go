@@ -296,3 +296,46 @@ func TestIssueWakeupCapacityReturnsActionableError(t *testing.T) {
 		t.Fatalf("capacity error %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestIssueWakeupActorFilterAPIAndProjection(t *testing.T) {
+	issue := dbfx.Issue(t, "actor filter API")
+	target := dbfx.Agent(t, "actor filter target", testRuntimeID)
+	source := dbfx.Agent(t, "hidden actor name", testRuntimeID)
+	person := dbfx.User(t, "Monitored Person", "actor-projection@multica.test")
+	dbfx.Member(t, testWorkspaceID, person, "member")
+	reader := dbfx.User(t, "actor reader", "actor-reader@multica.test")
+	dbfx.Member(t, testWorkspaceID, reader, "member")
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN(SELECT id FROM issue_wakeup WHERE issue_id=$1)", issue)
+	for _, actor := range []struct{ kind, id string }{{"member", person}, {"agent", source}} {
+		req := withURLParam(newRequest("POST", "/", map[string]any{"agent_id": target, "kind": "event", "event_types": []string{"comment.created"}, "filter_actor_type": actor.kind, "filter_actor_id": actor.id, "instruction": "wait for this actor"}), "id", issue)
+		rec := httptest.NewRecorder()
+		testHandler.CreateIssueWakeup(rec, req)
+		if rec.Code != 201 {
+			t.Fatalf("actor create %d: %s", rec.Code, rec.Body.String())
+		}
+		var rule db.IssueWakeup
+		if err := json.Unmarshal(rec.Body.Bytes(), &rule); err != nil {
+			t.Fatal(err)
+		}
+		if rule.FilterActorType.String != actor.kind || uuidToString(rule.FilterActorID) != actor.id {
+			t.Fatal("actor filter not persisted")
+		}
+	}
+	for _, endpoint := range []func(http.ResponseWriter, *http.Request){testHandler.ListIssueWakeups, testHandler.ListWorkspaceWakeupSummaries, testHandler.ListWorkspaceWakeups} {
+		req := withURLParam(newRequest("GET", "/?scope=all", nil), "id", issue)
+		req.Header.Set("X-User-ID", reader)
+		rec := httptest.NewRecorder()
+		endpoint(rec, req)
+		if rec.Code != 200 {
+			t.Fatal(rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "Monitored Person") || !strings.Contains(body, person) || !strings.Contains(body, `"filter_actor_type":"agent"`) {
+			t.Fatalf("missing actor projection: %s", body)
+		}
+		if strings.Contains(body, "hidden actor name") || strings.Contains(body, source) {
+			t.Fatalf("private actor exposed: %s", body)
+		}
+	}
+}

@@ -118,7 +118,7 @@ function WakeupListRow({
           className="flex items-center gap-1.5"
           title={row.event_types
             .map((event) =>
-              text.eventName(event, row.filter_agent_name || undefined),
+              text.eventCondition(event, row),
             )
             .join(", ")}
         >

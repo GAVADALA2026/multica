@@ -2,7 +2,9 @@
 -- Counts, filter choices, and page share one snapshot and the same access scope.
 WITH base AS MATERIALIZED (
  SELECT w.id,w.issue_id,i.title AS issue_title,ws.issue_prefix||'-'||i.number AS issue_identifier,
-  w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,
+  w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,w.filter_actor_type,
+ (CASE WHEN actor_agent.id IS NOT NULL OR actor_member.user_id IS NOT NULL THEN w.filter_actor_id END)::uuid AS filter_actor_id,
+ COALESCE(actor_agent.name,actor_user.name,'')::text AS filter_actor_name,
   CASE WHEN source.id IS NOT NULL THEN w.filter_agent_id END AS filter_agent_id,
   source.name AS filter_agent_name,
   CASE WHEN EXISTS(SELECT 1 FROM agent_task_queue ft JOIN agent fa ON fa.id=ft.agent_id AND fa.workspace_id=w.workspace_id
@@ -16,6 +18,9 @@ WITH base AS MATERIALIZED (
  JOIN workspace ws ON ws.id=w.workspace_id
  JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id
  JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
+ LEFT JOIN agent actor_agent ON w.filter_actor_type='agent' AND actor_agent.id=w.filter_actor_id AND actor_agent.workspace_id=w.workspace_id AND actor_agent.id=ANY(@agent_ids::uuid[])
+LEFT JOIN member actor_member ON w.filter_actor_type='member' AND actor_member.user_id=w.filter_actor_id AND actor_member.workspace_id=w.workspace_id
+LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY(@agent_ids::uuid[])
  LEFT JOIN LATERAL (
   SELECT count(*) AS active_runs FROM agent_task_queue t

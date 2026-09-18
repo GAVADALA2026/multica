@@ -9,6 +9,9 @@ export interface IssueWakeup {
   event_types: string[];
   filter_agent_id: string | null;
   filter_task_id: string | null;
+  filter_actor_type?: "member" | "agent" | null;
+  filter_actor_id?: string | null;
+  filter_actor_name?: string | null;
   interval_seconds: number | null;
   cron_expression: string | null;
   timezone: string;
@@ -33,6 +36,9 @@ export type WakeupPreview = Pick<
   | "event_types"
   | "filter_task_id"
   | "filter_agent_name"
+  | "filter_actor_type"
+  | "filter_actor_id"
+  | "filter_actor_name"
   | "interval_seconds"
   | "cron_expression"
   | "timezone"

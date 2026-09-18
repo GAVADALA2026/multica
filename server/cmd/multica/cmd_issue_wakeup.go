@@ -20,7 +20,7 @@ func init() { issueCmd.AddCommand(newIssueWakeupCommand()) }
 func newIssueWakeupCommand() *cobra.Command {
 	wake := &cobra.Command{Use: "wakeup", Short: "Manage event and time wakeups that start ordinary runs"}
 	wake.AddCommand(&cobra.Command{Use: "events", Short: "List supported event types and filters", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "platform_only_event_types": eventcontract.LifecycleTypes, "platform_only_reason": "Creation precedes subscription; deletion withdraws the issue's wakeups. Cross-issue subscriptions are not supported.", "scope": "current issue", "filters": []string{"filter_agent_id", "filter_task_id (task events only)"}, "modes": []string{"once (default)", "continuous"}})
+		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "platform_only_event_types": eventcontract.LifecycleTypes, "platform_only_reason": "Creation precedes subscription; deletion withdraws the issue's wakeups. Cross-issue subscriptions are not supported.", "scope": "current issue", "filters": []string{"filter_agent_id", "filter_task_id (task events only)", "filter_actor_type + filter_actor_id (member or agent; mutation events only)"}, "modes": []string{"once (default)", "continuous"}})
 	}})
 	for _, action := range []string{"list", "get", "disable", "create", "update"} {
 		action := action
@@ -36,13 +36,15 @@ func newIssueWakeupCommand() *cobra.Command {
 		c.Flags().String("output", "json", "Output format (json or table)")
 		if action == "create" || action == "update" {
 			c.Long = "Create or replace the complete configuration. Events default to once; every/cron use continuous. Updating explicitly re-enables the configuration. Runs use normal comment delivery."
-			c.Long += " To wait for another agent, prefer --task-id for one run or --filter-agent-id for that agent. Without a source filter, all matching events on this issue can wake the target."
+			c.Long += " To wait for another agent, prefer --task-id for one run or --filter-agent-id for that agent. To wait for a person to comment, use --event comment.created --filter-actor-type member --filter-actor-id USER_ID. Actor filters identify who made the change, not the original author of an edited comment. Without a source filter, all matching events on this issue can wake the target."
 			c.Flags().String("agent-id", "", "Agent to wake (defaults to authenticated agent)")
 			c.Flags().String("instruction", "", "Instruction for the next run")
 			c.Flags().String("instruction-file", "", "Read instruction from a UTF-8 file")
 			c.Flags().String("kind", "event", "event, at, every or cron")
 			c.Flags().String("mode", "", "once or continuous")
 			c.Flags().StringSlice("event", nil, "Event types (comma-separated); see wakeup events")
+			c.Flags().String("filter-actor-type", "", "Event actor: member or agent (requires --filter-actor-id)")
+			c.Flags().String("filter-actor-id", "", "Actor user/agent UUID in this workspace; mutation events only")
 			c.Flags().String("filter-agent-id", "", "Match facts from this agent")
 			c.Flags().String("task-id", "", "Match this specific run; terminal state is checked on registration")
 			c.Flags().String("parent", "", "Comment thread for result delivery")
@@ -94,7 +96,7 @@ func runIssueWakeup(cmd *cobra.Command, args []string, action string) error {
 		result = row
 	} else {
 		body := map[string]any{}
-		for flag, key := range map[string]string{"agent-id": "agent_id", "kind": "kind", "mode": "mode", "filter-agent-id": "filter_agent_id", "task-id": "filter_task_id", "parent": "parent_comment_id", "at": "at", "cron": "cron_expression", "timezone": "timezone"} {
+		for flag, key := range map[string]string{"agent-id": "agent_id", "kind": "kind", "mode": "mode", "filter-agent-id": "filter_agent_id", "filter-actor-type": "filter_actor_type", "filter-actor-id": "filter_actor_id", "task-id": "filter_task_id", "parent": "parent_comment_id", "at": "at", "cron": "cron_expression", "timezone": "timezone"} {
 			v, _ := cmd.Flags().GetString(flag)
 			if v != "" {
 				body[key] = v
