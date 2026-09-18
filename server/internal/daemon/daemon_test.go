@@ -3862,6 +3862,141 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	}
 }
 
+// waitForAgentMessageBackend holds Execute until the wrapped backend has
+// processed a selected protocol message, then hands the full stream to the
+// daemon. It makes watchdog cancellation tests deterministic without changing
+// the production watchdog window or relying on child-process scheduling speed.
+type waitForAgentMessageBackend struct {
+	agent.Backend
+	match func(agent.Message) bool
+}
+
+func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
+	session, err := b.Backend.Execute(ctx, prompt, opts)
+	if err != nil {
+		return nil, err
+	}
+	messages := make(chan agent.Message, 256)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case msg, ok := <-session.Messages:
+			if !ok {
+				return nil, errors.New("wrapped backend closed before the expected message")
+			}
+			messages <- msg
+			if !b.match(msg) {
+				continue
+			}
+			go func() {
+				defer close(messages)
+				for msg := range session.Messages {
+					messages <- msg
+				}
+			}()
+			return &agent.Session{
+				ToolActivity:             session.ToolActivity,
+				InterruptBackgroundTools: session.InterruptBackgroundTools,
+				TerminalObserved:         session.TerminalObserved,
+				Messages:                 messages,
+				Result:                   session.Result,
+			}, nil
+		}
+	}
+}
+
+func TestExecuteAndDrain_PiTurnErrorOutranksIdleWatchdogCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"post-error activity"}}'` + "\n" +
+		`printf '%s\n' '{"type":"agent_end","messages":[],"willRetry":false}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	backend = waitForAgentMessageBackend{
+		Backend: backend,
+		match: func(msg agent.Message) bool {
+			return msg.Type == agent.MessageThinking && msg.Content == "post-error activity"
+		},
+	}
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		backend,
+		"prompt-ignored",
+		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
+		slog.Default(),
+		"t-pi-provider-error",
+		"",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want provider failure rather than idle_watchdog (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != providerError {
+		t.Fatalf("error = %q, want original provider error %q", result.Error, providerError)
+	}
+}
+
+func TestExecuteAndDrain_PiWithoutTurnErrorKeepsIdleWatchdogResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 200 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		backend,
+		"prompt-ignored",
+		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
+		slog.Default(),
+		"t-pi-no-provider-error",
+		"",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("result = %+v, want the existing idle_watchdog disposition", result)
+	}
+	if result.Error != "execution cancelled" {
+		t.Fatalf("error = %q, want the existing no-provider-error cancellation text", result.Error)
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T) {
 	t.Parallel()
 
