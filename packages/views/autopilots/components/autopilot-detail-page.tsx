@@ -64,6 +64,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
 import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
@@ -262,6 +263,7 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -334,6 +336,23 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
     </Button>
   ) : null;
+
+  // Schedule rows only: cron and timezone are the fields this dialog edits, and
+  // the API rejects them on any other kind. It rides alongside Delete so the
+  // row that states a schedule is also the row that can change it — without it
+  // an autopilot with two schedules has no editable schedule at all (MUL-7478).
+  const editButton =
+    canWrite && trigger.kind === "schedule" ? (
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 shrink-0"
+        onClick={() => setEditOpen(true)}
+        title={t(($) => $.trigger_row.edit_schedule)}
+      >
+        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+      </Button>
+    ) : null;
 
   return (
     <div className="flex items-start gap-3 rounded-md border px-3 py-2">
@@ -408,7 +427,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </div>
         )}
       </div>
-      {!showWebhookUrlRow && deleteButton}
+      {!showWebhookUrlRow && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {editButton}
+          {deleteButton}
+        </div>
+      )}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -433,6 +457,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <EditScheduleTriggerDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        autopilotId={autopilotId}
+        trigger={trigger}
+      />
       <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

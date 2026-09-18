@@ -175,6 +175,7 @@
     "copy_url": "Copier l'URL",
     "url_copied": "URL du webhook copiée",
     "url_copy_failed": "Échec de la copie",
+    "edit_schedule": "Modifier la planification",
     "rotate_url": "Renouveler l'URL",
     "rotate_confirm_title": "Renouveler l'URL du webhook",
     "rotate_confirm_description": "L'URL actuelle cessera de fonctionner immédiatement. Tous les systèmes externes qui l'appellent devront être mis à jour avec la nouvelle. Continuer ?",
@@ -254,6 +255,16 @@
     "toast_added_webhook": "Déclencheur webhook ajouté",
     "toast_add_failed": "Échec de l'ajout du déclencheur"
   },
+  "edit_trigger_dialog": {
+    "title": "Modifier la planification",
+    "label_field": "Libellé (facultatif)",
+    "label_placeholder": "ex. Matin en semaine",
+    "enabled_label": "Activé",
+    "submit": "Enregistrer",
+    "submitting": "Enregistrement...",
+    "toast_updated": "Planification mise à jour",
+    "toast_update_failed": "Échec de la mise à jour de la planification"
+  },
   "dialog": {
     "sr_create": "Nouvelle automatisation",
     "sr_edit": "Modifier l'automatisation",
@@ -314,7 +325,7 @@
     "event_filter_add": "Ajouter",
     "event_filter_remove_label": "Retirer le filtre",
     "event_filter_hint": "Ne traiter que les webhooks correspondant à ces événements. Laissez vide pour tous les accepter.",
-    "schedule_disabled_reason": "Cette automatisation a plusieurs planifications — modifiez-les depuis la page de détail.",
+    "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",

@@ -175,6 +175,7 @@
     "copy_url": "URL 복사",
     "url_copied": "Webhook URL을 복사했습니다",
     "url_copy_failed": "URL을 복사하지 못했습니다",
+    "edit_schedule": "일정 수정",
     "rotate_url": "URL 재발급",
     "rotate_confirm_title": "Webhook URL 재발급",
     "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
@@ -254,6 +255,16 @@
     "toast_added_webhook": "Webhook 트리거를 추가했습니다",
     "toast_add_failed": "트리거를 추가하지 못했습니다"
   },
+  "edit_trigger_dialog": {
+    "title": "일정 수정",
+    "label_field": "라벨(선택 사항)",
+    "label_placeholder": "예: 평일 오전",
+    "enabled_label": "활성화",
+    "submit": "저장",
+    "submitting": "저장하는 중...",
+    "toast_updated": "일정을 수정했습니다",
+    "toast_update_failed": "일정 수정에 실패했습니다"
+  },
   "dialog": {
     "sr_create": "새 오토파일럿",
     "sr_edit": "오토파일럿 수정",
@@ -314,7 +325,7 @@
     "event_filter_add": "추가",
     "event_filter_remove_label": "필터 제거",
     "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
-    "schedule_disabled_reason": "이 오토파일럿에는 여러 일정이 있습니다. 상세 페이지에서 수정하세요.",
+    "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",
