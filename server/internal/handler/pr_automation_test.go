@@ -168,6 +168,7 @@ func policyRequest(t *testing.T, method, path, ws, user string, body any) *httpt
 	router := chi.NewRouter()
 	router.Get("/workspaces/{id}", testHandler.GetPRPolicy)
 	router.Post("/workspaces/{id}/preview", testHandler.PreviewPRPolicy)
+	router.Post("/workspaces/{id}/sync", testHandler.SyncPRPolicy)
 	router.Put("/workspaces/{id}", testHandler.UpdatePRPolicy)
 	router.Get("/issues/{id}", testHandler.GetIssuePRPolicy)
 	router.Put("/issues/{id}", testHandler.UpdateIssuePRPolicy)

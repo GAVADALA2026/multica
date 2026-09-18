@@ -204,28 +204,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 			return err
 		}
 	}
-	pr, err := queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
-		WorkspaceID:     conn.WorkspaceID,
-		ConnectionID:    conn.ID,
-		Provider:        conn.Provider,
-		RepoOwner:       ev.RepoOwner,
-		RepoName:        ev.RepoName,
-		PrNumber:        ev.Number,
-		Title:           ev.Title,
-		State:           ev.State,
-		HtmlUrl:         ev.HTMLURL,
-		Branch:          ptrToText(strPtrOrNil(ev.Branch)),
-		AuthorLogin:     ptrToText(strPtrOrNil(ev.AuthorLogin)),
-		AuthorAvatarUrl: ptrToText(strPtrOrNil(ev.AuthorAvatarURL)),
-		MergedAt:        parseGHTime(ev.MergedAt),
-		ClosedAt:        parseGHTime(ev.ClosedAt),
-		PrCreatedAt:     parseGHTimeRequired(ev.CreatedAt),
-		PrUpdatedAt:     parseGHTimeRequired(ev.UpdatedAt),
-		Additions:       ev.Additions,
-		Deletions:       ev.Deletions,
-		ChangedFiles:    ev.ChangedFiles,
-		HeadSha:         ev.HeadSHA,
-	})
+	pr, err := upsertVCSPolicyPR(ctx, queries, conn, ev)
 	if err != nil {
 		slog.Warn("vcs: upsert pr failed", "err", err)
 		return err
@@ -389,4 +368,30 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 			"issue_id": uuidToString(issueID),
 		})
 	}
+}
+
+// Shared metadata ingestion; linking and completion belong to the caller.
+func upsertVCSPolicyPR(ctx context.Context, queries *db.Queries, conn db.VcsConnection, ev vcs.PullRequestEvent) (db.VcsPullRequest, error) {
+	return queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID:     conn.WorkspaceID,
+		ConnectionID:    conn.ID,
+		Provider:        conn.Provider,
+		RepoOwner:       ev.RepoOwner,
+		RepoName:        ev.RepoName,
+		PrNumber:        ev.Number,
+		Title:           ev.Title,
+		State:           ev.State,
+		HtmlUrl:         ev.HTMLURL,
+		Branch:          ptrToText(strPtrOrNil(ev.Branch)),
+		AuthorLogin:     ptrToText(strPtrOrNil(ev.AuthorLogin)),
+		AuthorAvatarUrl: ptrToText(strPtrOrNil(ev.AuthorAvatarURL)),
+		MergedAt:        parseGHTime(ev.MergedAt),
+		ClosedAt:        parseGHTime(ev.ClosedAt),
+		PrCreatedAt:     parseGHTimeRequired(ev.CreatedAt),
+		PrUpdatedAt:     parseGHTimeRequired(ev.UpdatedAt),
+		Additions:       ev.Additions,
+		Deletions:       ev.Deletions,
+		ChangedFiles:    ev.ChangedFiles,
+		HeadSha:         ev.HeadSHA,
+	})
 }

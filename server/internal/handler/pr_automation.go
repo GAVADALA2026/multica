@@ -120,6 +120,7 @@ func (h *Handler) prPolicyPlan(ctx context.Context, d dbExecutor, ws pgtype.UUID
 	}
 	prs := map[string]prPolicyPR{}
 	order := []string{}
+	unknownBody, conflict := false, false
 	for rows.Next() {
 		var pr prPolicyPR
 		var body pgtype.Text
@@ -133,10 +134,12 @@ func (h *Handler) prPolicyPlan(ctx context.Context, d dbExecutor, ws pgtype.UUID
 		if syncError.Valid {
 			if syncError.String == "conflicting observation" {
 				plan.Pending = append(plan.Pending, "conflict:"+pr.PRID)
+				conflict = true
 			}
 			pr.Connected = false
 		}
 		pr.Known = body.Valid && at.Valid && !at.Time.Before(pr.Updated)
+		unknownBody = unknownBody || !pr.Known
 		if pr.Provider != "github" && !h.isVCSAvailable() {
 			pr.Connected = false
 		}
@@ -330,11 +333,7 @@ func (h *Handler) prPolicyPlan(ctx context.Context, d dbExecutor, ws pgtype.UUID
 		}
 		// Unknown bodies can contain another deliverable for any issue. Never claim
 		// all PRs have been accounted for until this selected source is synchronized.
-		conflict := false
-		for _, pending := range plan.Pending {
-			conflict = conflict || strings.HasPrefix(pending, "conflict:")
-		}
-		if ((p.Source == "all" && len(plan.Pending) > 0) || conflict) && i.Decision.Complete {
+		if ((p.Source == "all" && unknownBody) || conflict) && i.Decision.Complete {
 			i.Decision.Complete = false
 			i.Decision.Reason = "sync_required"
 		}
@@ -619,6 +618,7 @@ func (h *Handler) UpdateIssuePRPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid link mode")
 		return
 	}
+	var snapshot *prPolicySnapshot
 	if req.Disabled == nil && req.Mode == "manual" && strings.TrimSpace(req.URL) != "" {
 		_, migrated, err := readPRPolicy(r.Context(), h.DB, issue.WorkspaceID)
 		if err != nil || !migrated {
@@ -632,7 +632,7 @@ func (h *Handler) UpdateIssuePRPolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !known {
-			if err = h.syncPRPolicyURL(r.Context(), issue.WorkspaceID, req.URL); err != nil {
+			if snapshot, err = h.fetchPRPolicyURL(r.Context(), issue.WorkspaceID, req.URL); err != nil {
 				writeError(w, 422, err.Error())
 				return
 			}
@@ -648,6 +648,14 @@ func (h *Handler) UpdateIssuePRPolicy(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !migrated {
 		writeError(w, 409, "migrate the workspace PR policy first")
 		return
+	}
+	// The fetched observation and manual association become visible together.
+	// No scheduler/webhook can reconcile an intermediate, unlinked snapshot.
+	if snapshot != nil {
+		if err = snapshot.store(r.Context(), tx, issue.WorkspaceID); err != nil {
+			writeError(w, 500, "cannot store PR metadata")
+			return
+		}
 	}
 	if req.Disabled != nil {
 		// Lock the issue before changing its override, in the same order used by
@@ -790,8 +798,7 @@ func (h *Handler) resolvePRAutomationIdentity(ctx context.Context, d dbExecutor,
 // Preview apply holds that same lock; reconciliation can recover the durable
 // observation after an interrupted request.
 func (h *Handler) finishPRPolicyMirror(ctx context.Context, tx pgx.Tx, ws, pr pgtype.UUID, body string, at pgtype.Timestamptz) error {
-	_, err := tx.Exec(ctx, `INSERT INTO pr_automation_evidence(pr_id,workspace_id,body,observed_at,sync_attempted_at) VALUES($1,$2,$3,$4,now())
- ON CONFLICT(pr_id) DO UPDATE SET body=EXCLUDED.body,observed_at=EXCLUDED.observed_at,sync_error=NULL WHERE EXCLUDED.observed_at>=pr_automation_evidence.observed_at`, pr, ws, body, at)
+	err := storePRPolicyEvidence(ctx, tx, ws, pr, body, at)
 	if err != nil {
 		return err
 	}

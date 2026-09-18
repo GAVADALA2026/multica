@@ -33,6 +33,12 @@ Owners/admins preview and apply workspace policy:
 - `PUT /api/workspaces/{id}/pr-automation` with the preview `token`
 - `POST /api/workspaces/{id}/pr-automation/sync` for a bounded metadata refresh
 
+Metadata refresh stores PR observations without changing links or issue statuses,
+including during legacy migration previews. Webhooks, policy apply and scheduled
+reconciliation evaluate completion separately. Manual URL linking fetches before
+locking, then commits metadata and the explicit link in one transaction before
+publishing the target issue's completion, if eligible.
+
 Preview/apply bodies contain `source` and `auto_complete`. Apply additionally
 requires `token`. A changed evaluated impact or policy revision returns 409 and
 requires another preview. Tokens are workspace-scoped. Unrelated issue edits do

@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Parse only the public PR route on a configured instance. The caller never
@@ -114,27 +116,88 @@ func fetchVCSPolicyPR(ctx context.Context, conn db.VcsConnection, token, owner, 
 	return ev, nil
 }
 
+// A provider read has no database or issue side effects. Its caller chooses
+// the transaction that stores the observation and whether to apply a policy.
+type prPolicySnapshot struct {
+	github     *ghPullRequestPayload
+	connection db.VcsConnection
+	vcs        vcs.PullRequestEvent
+}
+
+func storePRPolicyEvidence(ctx context.Context, tx pgx.Tx, ws, pr pgtype.UUID, body string, at pgtype.Timestamptz) error {
+	_, err := tx.Exec(ctx, `INSERT INTO pr_automation_evidence(pr_id,workspace_id,body,observed_at,sync_attempted_at) VALUES($1,$2,$3,$4,now())
+ ON CONFLICT(pr_id) DO UPDATE SET body=EXCLUDED.body,observed_at=EXCLUDED.observed_at,sync_error=NULL WHERE EXCLUDED.observed_at>=pr_automation_evidence.observed_at`, pr, ws, body, at)
+	return err
+}
+
+func (s *prPolicySnapshot) store(ctx context.Context, tx pgx.Tx, ws pgtype.UUID) error {
+	queries := db.New(tx)
+	if s.github != nil {
+		pr, err := upsertGitHubPolicyPR(ctx, queries, ws, s.github.Installation.ID, s.github)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // A newer webhook won the race with the provider read.
+		}
+		if err != nil {
+			return err
+		}
+		return storePRPolicyEvidence(ctx, tx, ws, pr.ID, s.github.PullRequest.Body, pr.PrUpdatedAt)
+	}
+	if s.connection.WorkspaceID != ws {
+		return errors.New("PR connection belongs to a different workspace")
+	}
+	pr, err := upsertVCSPolicyPR(ctx, queries, s.connection, s.vcs)
+	if err != nil {
+		return err
+	}
+	if at := parseGHTimeRequired(s.vcs.UpdatedAt); pr.PrUpdatedAt.Valid && at.Valid && pr.PrUpdatedAt.Time.After(at.Time) {
+		return nil
+	}
+	return storePRPolicyEvidence(ctx, tx, ws, pr.ID, s.vcs.Body, pr.PrUpdatedAt)
+}
+
+// Synchronization only refreshes metadata, including for legacy workspaces.
+// Webhooks, policy apply and the scheduler own linking/completion decisions.
+func (h *Handler) syncPRPolicyURL(ctx context.Context, ws pgtype.UUID, raw string) error {
+	snapshot, err := h.fetchPRPolicyURL(ctx, ws, raw)
+	if err != nil {
+		return err
+	}
+	tx, err := h.prPolicyTx(ctx, ws)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = snapshot.store(ctx, tx, ws); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	h.publish(protocol.EventPullRequestUpdated, uuidToString(ws), "system", "", map[string]any{"linked_issue_ids": []string{}})
+	return nil
+}
+
 // Resolve explicitly supplied URLs against workspace credentials. A shared
 // GitHub installation cannot create a link in a different workspace here.
-func (h *Handler) syncPRPolicyURL(ctx context.Context, ws pgtype.UUID, raw string) error {
+func (h *Handler) fetchPRPolicyURL(ctx context.Context, ws pgtype.UUID, raw string) (*prPolicySnapshot, error) {
 	if owner, repo, n, err := prPolicyURL(raw, "https://github.com", "github"); err == nil {
 		w, e := h.Queries.GetWorkspace(ctx, ws)
 		if e != nil {
-			return e
+			return nil, e
 		}
 		var flags struct {
 			Enabled *bool `json:"github_enabled"`
 		}
 		if json.Unmarshal(w.Settings, &flags) != nil || (flags.Enabled != nil && !*flags.Enabled) {
-			return errors.New("GitHub integration is disabled")
+			return nil, errors.New("GitHub integration is disabled")
 		}
 		insts, e := h.Queries.ListGitHubInstallationsByWorkspace(ctx, ws)
 		if e != nil {
-			return e
+			return nil, e
 		}
 		client, e := ghsnapshot.NewClientFromEnv()
 		if e != nil {
-			return e
+			return nil, e
 		}
 		for _, inst := range insts {
 			body, e := client.FetchPullRequest(ctx, inst.InstallationID, owner, repo, n)
@@ -147,18 +210,18 @@ func (h *Handler) syncPRPolicyURL(ctx context.Context, ws pgtype.UUID, raw strin
 			p.Repository.Name = repo
 			p.Repository.Owner.Login = owner
 			if json.Unmarshal(body, &p.PullRequest) != nil || p.PullRequest.Number != n || p.PullRequest.UpdatedAt == "" || p.PullRequest.CreatedAt == "" {
-				return errors.New("incomplete GitHub PR response")
+				return nil, errors.New("incomplete GitHub PR response")
 			}
-			return h.mirrorPullRequestForWorkspace(ctx, ws, inst.InstallationID, &p, closeIntentPolicy{unrestricted: true})
+			return &prPolicySnapshot{github: &p}, nil
 		}
-		return errors.New("cannot read PR with this workspace's GitHub installation")
+		return nil, errors.New("cannot read PR with this workspace's GitHub installation")
 	}
 	if !h.isVCSAvailable() || !h.isVCSConfigured() {
-		return errors.New("provider is not configured")
+		return nil, errors.New("provider is not configured")
 	}
 	conns, err := h.Queries.ListVCSConnectionsByWorkspace(ctx, ws)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, conn := range conns {
 		owner, repo, n, e := prPolicyURL(raw, conn.InstanceUrl, conn.Provider)
@@ -167,15 +230,15 @@ func (h *Handler) syncPRPolicyURL(ctx context.Context, ws pgtype.UUID, raw strin
 		}
 		token, e := h.openVCSSecret(conn.AccessTokenEncrypted)
 		if e != nil {
-			return errors.New("provider credential unavailable")
+			return nil, errors.New("provider credential unavailable")
 		}
 		ev, e := fetchVCSPolicyPR(ctx, conn, token, owner, repo, n)
 		if e != nil {
-			return e
+			return nil, e
 		}
-		return h.mirrorVCSPullRequest(ctx, conn, ev)
+		return &prPolicySnapshot{connection: conn, vcs: ev}, nil
 	}
-	return errors.New("use a PR URL from a connected provider")
+	return nil, errors.New("use a PR URL from a connected provider")
 }
 
 // Bound API work and persist attempted_at even on failure, so an unavailable
