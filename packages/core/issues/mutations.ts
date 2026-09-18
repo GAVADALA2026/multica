@@ -10,7 +10,7 @@ import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
-import { inboxKeys } from "../inbox/queries";
+import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
 import {
   cancelInboxLists,
   isInboxListRequestInFlight,
@@ -580,7 +580,7 @@ export function useBatchUpdateIssues() {
       >();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
-      let prevArchivedInboxList: InboxItem[] | undefined;
+      let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
       const staleKeys: QueryKey[] = [];
       for (const id of ids) {
         const base = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
@@ -609,10 +609,10 @@ export function useBatchUpdateIssues() {
           prevInboxList = change.prevInboxList;
         }
         if (
-          prevArchivedInboxList === undefined &&
-          change.prevArchivedInboxList !== undefined
+          prevArchivedInboxCaches === undefined &&
+          change.prevArchivedInboxCaches !== undefined
         ) {
-          prevArchivedInboxList = change.prevArchivedInboxList;
+          prevArchivedInboxCaches = change.prevArchivedInboxCaches;
         }
         staleKeys.push(...change.staleKeys);
       }
@@ -642,7 +642,7 @@ export function useBatchUpdateIssues() {
         prevTableRows: [...prevTableRowByHash.values()],
         prevDetailById,
         prevInboxList,
-        prevArchivedInboxList,
+        prevArchivedInboxCaches,
         inboxWrite,
         staleKeys,
         prevChildren,
@@ -673,11 +673,8 @@ export function useBatchUpdateIssues() {
       if (ctx?.prevInboxList !== undefined) {
         qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
       }
-      if (ctx?.prevArchivedInboxList !== undefined) {
-        qc.setQueryData(
-          inboxKeys.archived(wsId),
-          ctx.prevArchivedInboxList,
-        );
+      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
+        qc.setQueryData(key, snapshot);
       }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {

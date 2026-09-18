@@ -140,6 +140,10 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"495_issue_to_label_label_id_index":                         "issue_to_label_label_idx",
+	"496_chat_session_agent_id_index":                           "idx_chat_session_agent_id",
+	"497_agent_task_queue_delegated_failure_evidence_index":     "idx_agent_task_queue_delegated_failure_evidence",
+	"498_chat_session_runtime_id_index":                         "idx_chat_session_runtime_id",
 	"486_maintenance_job_id_index":                              "idx_maintenance_job_id",
 	"487_maintenance_job_idempotency_index":                     "idx_maintenance_job_idempotency",
 	"488_maintenance_job_active_index":                          "idx_maintenance_job_active",
@@ -304,18 +308,18 @@ var concurrentIndexCleanups = map[string]string{
 	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
 	"452_agent_task_pending_thread_unique":                      "idx_one_pending_task_per_issue_agent_thread",
 	"459_chat_message_assistant_task_index":                     "idx_chat_message_assistant_task",
-	"492_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
-	"493_issue_workflow_status_pkey_index":                      "issue_workflow_status_pkey_uidx",
-	"494_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
-	"495_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
-	"497_issue_workflow_scope_index":                            "idx_issue_workflow_scope",
-	"498_issue_workflow_legacy_status_index":                    "idx_issue_workflow_status_legacy_key",
-	"499_issue_transition_revision_index":                       "idx_issue_transition_revision",
-	"500_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
-	"501_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
-	"502_issue_workflow_binding_index":                          "idx_issue_workflow_binding",
-	"503_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
-	"507_issue_workflow_spec_key_index":                         "idx_issue_workflow_status_spec_key",
+	"501_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
+	"502_issue_workflow_status_pkey_index":                      "issue_workflow_status_pkey_uidx",
+	"503_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
+	"504_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
+	"506_issue_workflow_scope_index":                            "idx_issue_workflow_scope",
+	"507_issue_workflow_legacy_status_index":                    "idx_issue_workflow_status_legacy_key",
+	"508_issue_transition_revision_index":                       "idx_issue_transition_revision",
+	"509_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
+	"510_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
+	"511_issue_workflow_binding_index":                          "idx_issue_workflow_binding",
+	"512_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
+	"516_issue_workflow_spec_key_index":                         "idx_issue_workflow_status_spec_key",
 	"460_agent_task_queue_autopilot_run_created_at_index":       "idx_agent_task_queue_autopilot_run_created_at",
 	"465_agent_task_queue_chat_with_session_index":              "idx_agent_task_queue_chat_with_session_created_at",
 	"466_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
@@ -428,8 +432,8 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 
 var upMigrationConditions = map[string]migrationCondition{
 	// Preserve applied history; pending 469 is superseded by the bounded expand
-	// migration. Backfill is an independent operator job, never startup work.
-	"469_issue_status_lifecycle_categories": skipMigration("superseded by 478 compatibility expansion; backfill runs separately (MUL-7365)"),
+	// migration. SaaS backfills separately; self-host converges in 491.
+	"469_issue_status_lifecycle_categories": skipMigration("superseded by 478 expansion and 491 convergence (MUL-7365)"),
 	// Current search no longer consumes an issue-description GIN. Fresh installs
 	// should not build the historical fallback only to retire it at migration 464.
 	"139_issue_description_trgm_index": skipMigration("issue description search indexes are retired by migration 464"),

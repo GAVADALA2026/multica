@@ -87,29 +87,29 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	up := []string{
-		"491_issue_workflow_foundation.up.sql",
-		"492_issue_workflow_pkey_index.up.sql",
-		"493_issue_workflow_status_pkey_index.up.sql",
-		"494_issue_transition_pkey_index.up.sql",
-		"495_automation_execution_pkey_index.up.sql",
-		"496_issue_workflow_primary_keys.up.sql",
-		"497_issue_workflow_scope_index.up.sql",
-		"498_issue_workflow_legacy_status_index.up.sql",
-		"499_issue_transition_revision_index.up.sql",
-		"500_automation_execution_trigger_index.up.sql",
-		"501_issue_transition_timeline_index.up.sql",
-		"502_issue_workflow_binding_index.up.sql",
-		"503_agent_task_automation_execution_index.up.sql",
-		"504_issue_workflow_backfill.up.sql",
-		"505_automation_execution_task_status.up.sql",
-		"506_issue_workflow_spec_fields.up.sql",
-		"507_issue_workflow_spec_key_index.up.sql",
+		"500_issue_workflow_foundation.up.sql",
+		"501_issue_workflow_pkey_index.up.sql",
+		"502_issue_workflow_status_pkey_index.up.sql",
+		"503_issue_transition_pkey_index.up.sql",
+		"504_automation_execution_pkey_index.up.sql",
+		"505_issue_workflow_primary_keys.up.sql",
+		"506_issue_workflow_scope_index.up.sql",
+		"507_issue_workflow_legacy_status_index.up.sql",
+		"508_issue_transition_revision_index.up.sql",
+		"509_automation_execution_trigger_index.up.sql",
+		"510_issue_transition_timeline_index.up.sql",
+		"511_issue_workflow_binding_index.up.sql",
+		"512_agent_task_automation_execution_index.up.sql",
+		"513_issue_workflow_backfill.up.sql",
+		"514_automation_execution_task_status.up.sql",
+		"515_issue_workflow_spec_fields.up.sql",
+		"516_issue_workflow_spec_key_index.up.sql",
 	}
 	for _, name := range up {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
 	}
 	// The backfill itself is explicitly restartable after partial operator runs.
-	applyMigrationFile(t, ctx, conn.Conn(), "504_issue_workflow_backfill.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "513_issue_workflow_backfill.up.sql")
 
 	assertWorkflowMigrationCount(t, ctx, conn, "issue_workflow", 1)
 	assertWorkflowMigrationCount(t, ctx, conn, "issue_workflow_status", 8)
@@ -160,23 +160,23 @@ func TestIssueWorkflowMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	down := []string{
-		"507_issue_workflow_spec_key_index.down.sql",
-		"506_issue_workflow_spec_fields.down.sql",
-		"505_automation_execution_task_status.down.sql",
-		"504_issue_workflow_backfill.down.sql",
-		"503_agent_task_automation_execution_index.down.sql",
-		"502_issue_workflow_binding_index.down.sql",
-		"501_issue_transition_timeline_index.down.sql",
-		"500_automation_execution_trigger_index.down.sql",
-		"499_issue_transition_revision_index.down.sql",
-		"498_issue_workflow_legacy_status_index.down.sql",
-		"497_issue_workflow_scope_index.down.sql",
-		"496_issue_workflow_primary_keys.down.sql",
-		"495_automation_execution_pkey_index.down.sql",
-		"494_issue_transition_pkey_index.down.sql",
-		"493_issue_workflow_status_pkey_index.down.sql",
-		"492_issue_workflow_pkey_index.down.sql",
-		"491_issue_workflow_foundation.down.sql",
+		"516_issue_workflow_spec_key_index.down.sql",
+		"515_issue_workflow_spec_fields.down.sql",
+		"514_automation_execution_task_status.down.sql",
+		"513_issue_workflow_backfill.down.sql",
+		"512_agent_task_automation_execution_index.down.sql",
+		"511_issue_workflow_binding_index.down.sql",
+		"510_issue_transition_timeline_index.down.sql",
+		"509_automation_execution_trigger_index.down.sql",
+		"508_issue_transition_revision_index.down.sql",
+		"507_issue_workflow_legacy_status_index.down.sql",
+		"506_issue_workflow_scope_index.down.sql",
+		"505_issue_workflow_primary_keys.down.sql",
+		"504_automation_execution_pkey_index.down.sql",
+		"503_issue_transition_pkey_index.down.sql",
+		"502_issue_workflow_status_pkey_index.down.sql",
+		"501_issue_workflow_pkey_index.down.sql",
+		"500_issue_workflow_foundation.down.sql",
 	}
 	for _, name := range down {
 		applyMigrationFile(t, ctx, conn.Conn(), name)

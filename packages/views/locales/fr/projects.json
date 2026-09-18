@@ -75,7 +75,7 @@
     "description_placeholder": "Ajouter une description...",
     "description_hint": "Partagé avec les agents comme contexte à chaque exécution dans ce projet.",
     "empty_issues_title": "Aucune tâche liée",
-    "empty_issues_hint": "Créez une tâche ou rattachez des tâches existantes à ce projet.",
+    "empty_issues_hint": "Vous pouvez aussi ajouter des tâches existantes à ce projet.",
     "empty_issues_new_button": "Nouvelle tâche",
     "no_issues_yet": "Aucune tâche pour l'instant",
     "toast_link_copied": "Lien copié",

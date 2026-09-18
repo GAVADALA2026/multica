@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "Supprimer la tâche",
     "description": "Cette tâche et tous ses commentaires seront définitivement supprimés. Cette action est irréversible.",
-    "hint": "Tout membre de l'espace de travail peut supprimer des tâches.",
     "cancel": "Annuler",
     "confirm": "Supprimer",
     "deleting": "Suppression...",
@@ -29,7 +28,7 @@
     "toast_failed": "Échec de l'envoi du retour",
     "send": "Envoyer le retour",
     "sending": "Envoi…",
-    "github_hint_prefix": "Vous voulez un traitement plus rapide et une discussion ouverte ? Rendez-vous sur ",
+    "github_hint_prefix": "Vous pouvez aussi envoyer vos commentaires sur ",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
@@ -76,7 +75,7 @@
     "leader_placeholder": "Sélectionnez un agent chef",
     "members_label": "Membres supplémentaires",
     "members_optional": "(facultatif)",
-    "members_hint": "Membres auxquels le responsable peut déléguer des sous-tâches. Vous pouvez les ajouter plus tard.",
+    "members_hint": "Le chef peut déléguer des sous-tâches à ces membres.",
     "members_placeholder": "Ajouter des agents ou des membres de l'espace de travail",
     "members_selected_count_one": "{{count}} sélectionné",
     "members_selected_count_other": "{{count}} sélectionnés",

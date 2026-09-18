@@ -339,7 +339,7 @@ describe("PreferencesTab — Sticky comment bar", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    const toggle = screen.getByRole("switch", { name: "Sticky comment bar" });
+    const toggle = screen.getByRole("switch", { name: "Pin comment bar to bottom" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
     await user.click(toggle);

@@ -1,7 +1,6 @@
 {
   "issue_statuses": {
     "title": "États des tâches",
-    "description": "Organisez les statuts des tâches en quatre catégories de cycle de vie.",
     "loading": "Chargement des états…",
     "add": "Ajouter un état",
     "show_archived": "Afficher les archivés ({{count}})",
@@ -16,7 +15,7 @@
       "archive": "Archiver",
       "reorder": "Réordonner {{name}}"
     },
-    "reorder_hint": "Faites glisser les statuts dans une catégorie pour définir leur ordre dans les tableaux, les listes et les menus de statut.",
+    "reorder_hint": "Glissez les statuts au sein d’une catégorie pour réordonner les tableaux, listes et menus.",
     "built_in_dialog": {
       "title": "Ce statut intégré ne peut pas être modifié",
       "description": "Les statuts intégrés sont utilisés par Multica et ne peuvent être ni modifiés ni archivés. Vous pouvez toutefois changer leur ordre dans la catégorie.",
@@ -86,7 +85,7 @@
   },
   "quick_actions": {
     "title": "Actions rapides",
-    "description": "Préparez une fois un agent et une invite, puis déclenchez-les d'un clic depuis la barre latérale de n'importe quel tâche.",
+    "description": "Lancez un agent et un prompt prédéfinis depuis la barre latérale d’une tâche.",
     "add": "Nouvelle action rapide",
     "search_placeholder": "Rechercher des actions rapides",
     "loading": "Chargement des actions rapides…",
@@ -100,7 +99,7 @@
       "updated": "Mise à jour"
     },
     "empty_title": "Aucune action rapide pour l'instant",
-    "empty_hint": "Créez-en une pour le travail que vous demandez encore et encore à un agent — relecture de code, écriture de tests, passe de sécurité.",
+    "empty_hint": "Par exemple, la revue de code ou la rédaction de tests.",
     "archived": "Archivée",
     "visibility_public": "Équipe",
     "visibility_private": "Moi uniquement",
@@ -157,14 +156,12 @@
     "timezone": {
       "title": "Fuseau horaire d'affichage",
       "browser_suffix": " (navigateur)",
-      "hint": "Utilisé pour les tableaux de bord, les graphiques et toute mention « aujourd'hui » qui vous est affichée. C'est une préférence personnelle qui s'applique à tous vos espaces de travail.",
+      "hint": "Utilisé pour les dates et graphiques dans tous vos espaces de travail.",
       "sync_failed": "Échec de l'enregistrement de votre préférence de fuseau horaire."
     },
     "sticky_comment_bar": {
-      "title": "Barre de commentaire fixe",
-      "hint": "Garder la barre de commentaire ancrée en bas pendant le défilement d'une tâche."
+      "title": "Épingler la barre de commentaire en bas"
     },
-    "description": "Personnalisez votre façon de travailler dans Multica.",
     "issue_title": "Création de tâches",
     "comments_title": "Commentaires",
     "device_hint": "Enregistré sur cet appareil.",
@@ -172,7 +169,7 @@
   },
   "shortcuts": {
     "title": "Raccourcis clavier",
-    "description": "Personnalisez les actions du produit sur cet appareil. Cliquez sur un raccourci, puis appuyez sur la nouvelle combinaison de touches.",
+    "description": "Cliquez sur un raccourci, puis appuyez sur une nouvelle combinaison. Enregistré sur cet appareil.",
     "search_placeholder": "Rechercher des actions...",
     "reset_all": "Rétablir les valeurs par défaut",
     "reset_confirm": {
@@ -202,7 +199,7 @@
     "actions": {
       "openSearch": {
         "label": "Ouvrir la recherche",
-        "description": "Rechercher et exécuter des commandes depuis n'importe où."
+        "description": "Rechercher du contenu ou exécuter des commandes."
       },
       "createIssue": {
         "label": "Créer une tâche",
@@ -214,7 +211,7 @@
       },
       "toggleRightSidebar": {
         "label": "Afficher ou masquer la barre latérale droite",
-        "description": "Afficher ou masquer la barre latérale droite lorsque la page en possède une."
+        "description": "Disponible sur les pages avec une barre latérale droite."
       },
       "toggleChat": {
         "label": "Afficher ou masquer la fenêtre de discussion",
@@ -230,7 +227,7 @@
       },
       "send": {
         "label": "Envoyer",
-        "description": "Envoyer messages de discussion, commentaires, réponses, retours et invites, et créer des tâches dans la fenêtre de création."
+        "description": "Permet aussi de créer des tâches."
       },
       "goBack": {
         "label": "Revenir en arrière",
@@ -291,7 +288,7 @@
     },
     "fixed": {
       "title": "Raccourcis système fixes",
-      "description": "Les raccourcis de fenêtre et d'accessibilité restent fixes pour rester fiables. Les commandes de zoom et d'onglets concernent l'application de bureau.",
+      "description": "Non personnalisables. Les raccourcis de zoom et d’onglets sont réservés à Desktop.",
       "open_settings": "Ouvrir les paramètres",
       "close_tab": "Fermer l'onglet actif",
       "select_tab_1_to_8": "Sélectionner l'onglet 1 à 8",
@@ -305,14 +302,12 @@
   "chat": {
     "floating_title": "Fenêtre flottante",
     "floating_label": "Fenêtre de discussion flottante",
-    "floating_hint": "Afficher le bouton de discussion flottant dans le coin de chaque page. Désactivé par défaut — activez-le pour ouvrir la discussion partout ; sinon, elle reste uniquement dans cet onglet."
+    "floating_hint": "Afficher le bouton de chat flottant sur chaque page."
   },
   "issue": {
     "description": "Choisissez les champs que chaque fenêtre de création garde dans sa barre d'outils. Les champs masqués restent accessibles depuis le menu ⋯ et réapparaissent tant qu'ils contiennent une valeur.",
-    "quick_create_title": "Créer avec un agent",
-    "quick_create_description": "Champs affichés dans la barre d'outils de création rapide.",
-    "manual_create_title": "Créer manuellement",
-    "manual_create_description": "Champs affichés dans la barre d'outils de création manuelle.",
+    "quick_create_title": "Champs de la barre de création avec un agent",
+    "manual_create_title": "Champs de la barre de création manuelle",
     "fields": {
       "status": "Statut",
       "priority": "Priorité",
@@ -325,7 +320,7 @@
   },
   "mcp": {
     "title": "MCP",
-    "description": "Une bibliothèque de serveurs MCP pour cet espace de travail. En ajouter un ici ne le donne à aucun agent — le propriétaire d'un agent l'assigne depuis l'onglet MCP de cet agent, où il dispose aussi d'un interrupteur propre à l'agent.",
+    "description": "Après l’ajout d’un serveur, assignez-le depuis l’onglet MCP d’un agent.",
     "servers_title": "Serveurs partagés",
     "write_only_note": "Pour votre sécurité, les URL, commandes, en-têtes et valeurs d'environnement enregistrés ne sont plus affichés. Pour les modifier, saisissez une nouvelle configuration complète. Renommer conserve la configuration et les assignations aux agents.",
     "add_server": "Ajouter un serveur",
@@ -340,7 +335,6 @@
     "remove_server": "Retirer le serveur",
     "remove_action": "Supprimer",
     "empty_title": "Aucun serveur MCP partagé",
-    "empty_description": "Ajoutez un serveur ici, puis assignez-le aux agents qui doivent l'utiliser depuis leur propre onglet MCP.",
     "disabled_badge": "Désactivé",
     "admin_only_note": "Seuls les propriétaires et administrateurs de l'espace de travail peuvent modifier les serveurs MCP partagés.",
     "delete_title": "Retirer le serveur partagé ?",
@@ -393,7 +387,6 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "Publiez des plugins dans cet espace de travail, puis installez une version précise et vérifiez exactement les accès autorisés.",
     "loading": "Chargement des plugins",
     "load_failed": "Impossible de charger les plugins",
     "load_failed_description": "Réessayez. Les plugins déjà activés et les exécutions épinglées ne sont pas affectés.",
@@ -418,7 +411,7 @@
     },
     "consent": {
       "title": "Ce plugin demande les accès suivants",
-      "description": "Vous approuvez une version précise. Son code est stocké par Multica et ne changera pas avant une mise à niveau. Un plugin ne peut agir que dans les limites de ces autorisations, sans jamais dépasser les droits de la personne qui l'utilise.",
+      "description": "L’autorisation vaut uniquement pour cette version, dans les périmètres ci-dessous et les droits de l’utilisateur.",
       "cancel": "Annuler",
       "confirm": "Accorder et installer",
       "confirm_upgrade": "Accorder et mettre à jour",
@@ -464,7 +457,7 @@
     "hook_recent_failures": "{{count}} appels de hook récents ont échoué.",
     "mcp": {
       "badge": "MCP",
-      "description": "Ce hook intègre des outils du serveur MCP de l'auteur du plugin. Approuvez ceux que les agents peuvent appeler : tout nouvel outil devra être approuvé avant son intégration.",
+      "description": "Choisissez les outils que les agents peuvent appeler. Les nouveaux outils nécessitent une autorisation distincte.",
       "loading": "Chargement des outils",
       "unreachable": "Impossible de joindre le serveur MCP du plugin.",
       "empty": "Ce serveur MCP ne propose actuellement aucun outil.",
@@ -474,7 +467,6 @@
     },
     "publish": {
       "title": "Publier un plugin",
-      "description": "Envoyez un paquet de plugin. Multica le stocke et le distribue : l'auteur du plugin n'a pas besoin de son propre serveur.",
       "hint": "Un fichier .zip contenant multica.plugin.json et tous les fichiers qu'il référence.",
       "upload": "Envoyer le paquet",
       "published": "{{name}} {{version}} publié",
@@ -488,7 +480,7 @@
   },
   "properties": {
     "title": "Propriétés",
-    "description": "Définissez des propriétés personnalisées typées pour les tâches de cet espace de travail. Les valeurs se définissent sur chaque tâche et sont lisibles et modifiables par les agents.",
+    "description": "Ajoutez des champs personnalisés aux tâches.",
     "search_placeholder": "Filtrer par nom...",
     "new_property": "Nouvelle propriété",
     "show_archived": "Afficher les archivées",
@@ -503,7 +495,7 @@
     "usage_count_other": "{{count}} tâches",
     "loading": "Chargement des propriétés...",
     "empty": "Aucune propriété pour l'instant",
-    "empty_hint": "Créez des champs typés comme Gravité ou Environnement — les agents peuvent les lire et les écrire avec validation.",
+    "empty_hint": "Par exemple, Gravité ou Environnement.",
     "no_results": "Aucune propriété correspondante",
     "save_failed": "Impossible d'enregistrer la propriété",
     "limit_hint": "{{count}}/{{max}} propriétés actives",
@@ -556,7 +548,7 @@
   },
   "labels": {
     "title": "Étiquettes",
-    "description": "Gérez les catalogues d'étiquettes distincts servant à organiser les tâches et les skills de cet espace de travail.",
+    "description": "Les étiquettes des tâches et des skills sont distinctes.",
     "scopes": {
       "issue": "Tâches",
       "skill": "Skills"
@@ -606,7 +598,7 @@
     "click_avatar_hint": "Cliquez pour envoyer un avatar",
     "name_label": "Nom",
     "profile_description_label": "À propos de vous",
-    "profile_description_hint": "Partagé avec les agents travaillant en votre nom — rôle, technologies, préférences, tout ce que vous diriez à un nouveau collaborateur le premier jour.",
+    "profile_description_hint": "Inclus dans chaque exécution effectuée en votre nom.",
     "profile_description_placeholder": "ex. Ingénieur backend (Go + Postgres). Je préfère des PR concises et des tests livrés avec le changement.",
     "profile_description_too_long": "Le profil est trop long (maximum {{max}} caractères ; actuellement {{count}}).",
     "save": "Mettre à jour le profil",
@@ -618,7 +610,7 @@
   },
   "notifications": {
     "title": "Notifications de la boîte de réception",
-    "description": "Choisissez quels événements génèrent des notifications dans la boîte de réception. Les types d'événements coupés sont filtrés silencieusement — vous pouvez toujours les voir en ouvrant directement la tâche.",
+    "description": "Les événements désactivés restent visibles dans la tâche.",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -648,9 +640,8 @@
     },
     "system": {
       "title": "Notifications système",
-      "description": "Contrôlez les bannières de notification natives du système affichées quand Multica est en arrière-plan.",
-      "label": "Afficher les notifications système",
-      "hint": "Afficher une bannière de votre système d'exploitation pour les nouveaux éléments de la boîte de réception quand l'application n'est pas au premier plan."
+      "description": "Afficher les notifications système lorsque Multica est en arrière-plan.",
+      "label": "Afficher les notifications système"
     },
     "browser": {
       "label": "Notifications du navigateur",
@@ -665,7 +656,7 @@
     "title": "Jetons d'API",
     "description": "Les jetons d'accès personnels permettent au CLI et aux intégrations externes de s'authentifier avec votre compte. Utilisez-en un via multica login --token, ou comme jeton Bearer lors des appels à l'API.",
     "security_note": "Un jeton donne un accès complet à votre compte — traitez-le comme un mot de passe.",
-    "empty": "Aucun jeton d'API pour l'instant. Créez-en un ci-dessus pour commencer.",
+    "empty": "Aucun token API pour l’instant.",
     "load_failed": "Impossible de charger vos jetons d'API. Rechargez la page pour réessayer.",
     "name_placeholder": "Nom du jeton (ex. Mon CLI)",
     "expiry": {
@@ -702,7 +693,9 @@
       "cli_hint": "Connectez-vous au CLI avec :",
       "copy_command_tooltip": "Copier la commande",
       "done": "Terminé"
-    }
+    },
+    "purpose": "S’authentifier auprès du CLI et de l’API.",
+    "usage_help": "Utilisation"
   },
   "workspace": {
     "section_general": "Détails de l'espace de travail",
@@ -759,10 +752,9 @@
     "toast_failed": "Échec de la mise à jour du réglage"
   },
   "github": {
-    "page_description": "Connectez une GitHub App, contrôlez la façon dont les pull requests apparaissent dans Multica, et décidez de ce que vos agents laissent dans l'historique des commits.",
     "section_master": "Activer les fonctions GitHub",
-    "master_description_on": "Une fois désactivées, toutes les commandes GitHub de l'interface sont masquées et plus aucun effet de bord n'est écrit. Les données existantes sont conservées côté serveur. Vous n'êtes pas une équipe de développement ? Désactivez-les simplement ici.",
-    "master_description_off": "Les fonctions GitHub sont désactivées. La barre latérale des PR, la mention de co-auteur et la liaison automatique sont en pause. Les données côté serveur ne sont pas supprimées.",
+    "master_description_on": "Désactiver met en pause les fonctionnalités GitHub et conserve les données existantes.",
+    "master_description_off": "Les fonctionnalités GitHub sont en pause. Les données existantes sont conservées.",
     "section_connection": "Connexion",
     "connection_title": "GitHub App",
     "connection_description_prefix": "Associez automatiquement les tâches aux pull requests. Une PR est associée lorsque",
@@ -795,7 +787,6 @@
     "feature_co_author_description_prefix": "Ajouter",
     "feature_co_author_description_suffix": "aux commits rédigés par des agents.",
     "feature_auto_link_label": "Lier automatiquement tâches et PR",
-    "feature_auto_link_description": "Recherchez les identifiants de tâche dans les titres et noms de branche des PR, ainsi qu'après un mot-clé de clôture dans leur description, pour créer automatiquement l'association.",
     "section_repositories": "Dépôts",
     "repositories_shortcut_label": "Les URL de dépôts se trouvent dans l'onglet Dépôts",
     "repositories_shortcut_link": "Gérer les dépôts →",
@@ -844,13 +835,13 @@
   },
   "lark": {
     "section_title": "Lark",
-    "page_description": "Connectez chaque agent Multica à un bot PersonalAgent Lark (飞书). Les membres peuvent lui écrire en privé, le mentionner dans des groupes, et taper /issue pour créer une tâche Multica.",
+    "page_description": "Discutez avec les agents dans Lark ou créez une tâche avec /issue.",
     "not_enabled_title": "Intégration Lark non activée",
     "not_enabled_description_prefix": "Définissez",
     "not_enabled_description_suffix": "sur le serveur pour permettre l'installation de bots Lark.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation de bot Lark bientôt disponible",
-    "preview_description": "La clé de chiffrement au repos est définie, mais le client HTTP Lark n'est pas branché dans cette version. Le point d'entrée d'installation apparaîtra ici une fois le transport activé dans une prochaine version.",
+    "preview_description": "Les connexions Lark ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
     "connected_bots": "Bots connectés",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
@@ -864,7 +855,7 @@
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter ce bot Lark ?",
-    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Lark et la connexion WebSocket sera fermée. L'entrée d'installation est conservée pour l'audit ; vous pourrez le réinstaller plus tard depuis le même agent.",
+    "disconnect_confirm_description": "Le bot ne recevra plus de messages Lark. L’installation est conservée ; vous pouvez vous reconnecter.",
     "disconnect_confirm_cancel": "Annuler",
     "toast_disconnected": "Bot Lark déconnecté",
     "toast_disconnect_failed": "Échec de la déconnexion",
@@ -898,8 +889,6 @@
     "install_open_link_fallback": "Ou touchez ici pour ouvrir dans Lark",
     "install_success": "Installation terminée — votre bot est en ligne.",
     "install_success_toast": "Bot Lark installé",
-    "install_scan_hint_feishu": "Feishu → Scanner → autorisez le nouveau PersonalAgent.",
-    "install_scan_hint_lark": "Lark → Scanner → autorisez le nouveau PersonalAgent.",
     "install_open_link_fallback_feishu": "Ou touchez ici pour ouvrir dans Feishu",
     "install_open_link_fallback_lark": "Ou touchez ici pour ouvrir dans Lark",
     "install_success_toast_feishu": "Bot Feishu installé",
@@ -919,7 +908,7 @@
   },
   "composio": {
     "section_title": "Composio",
-    "page_description": "Connectez les applications Composio sur lesquelles vos agents peuvent agir. Seules celles dotées d'une configuration d'authentification activée dans votre projet Composio apparaissent ici.",
+    "page_description": "Connectez des applications que vos agents peuvent utiliser.",
     "not_enabled_title": "Intégration Composio non activée",
     "not_enabled_description_prefix": "Définissez",
     "not_enabled_description_suffix": "sur le serveur pour activer les connexions aux boîtes à outils Composio.",
@@ -949,13 +938,13 @@
   },
   "slack": {
     "section_title": "Slack",
-    "page_description": "Connectez chaque agent Multica à son propre bot Slack. Les membres peuvent lui écrire en privé, le @mentionner dans un canal, et taper /issue pour créer une tâche Multica.",
+    "page_description": "Discutez avec les agents dans Slack ou créez une tâche avec /issue.",
     "not_enabled_title": "Intégration Slack non activée",
     "not_enabled_description_prefix": "Définissez",
     "not_enabled_description_suffix": "sur le serveur pour permettre l'installation de bots Slack.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation Slack bientôt disponible",
-    "preview_description": "La clé de chiffrement au repos est définie, mais les identifiants OAuth de l'application Slack hébergée ne sont pas configurés dans ce déploiement. Le bouton Connecter apparaîtra ici une fois qu'ils le seront.",
+    "preview_description": "Les connexions Slack ne sont pas configurées sur ce déploiement. Contactez votre administrateur.",
     "connected_bots": "Bots connectés",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
@@ -992,11 +981,10 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "Connectez chaque agent Multica à son propre robot DingTalk. Les membres peuvent lui écrire en privé, le @mentionner dans un groupe et saisir /issue pour créer une tâche Multica.",
-    "agent_page_description": "Utilisez un bot DingTalk dédié pour écrire à cet agent en privé, le @mentionner dans un groupe ou saisir /issue pour créer une tâche Multica.",
+    "page_description": "Discutez avec les agents dans DingTalk ou créez une tâche avec /issue.",
+    "agent_page_description": "Discutez avec cet agent dans DingTalk ou créez une tâche avec /issue.",
     "groups_title": "Groupes récents",
     "groups_description": "Un groupe apparaît lorsqu'un membre de l'espace de travail associe son compte DingTalk et y @mentionne ce bot. Les groupes actifs au cours des 90 derniers jours sont affichés par défaut.",
-    "groups_overview_description": "Chaque connexion indique son agent, son bot DingTalk et les groupes récemment observés.",
     "groups_loading": "Chargement des groupes…",
     "groups_empty": "Aucun message de groupe observé pour l'instant.",
     "groups_no_recent": "Aucun groupe actif au cours des 90 derniers jours.",
@@ -1057,13 +1045,13 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "Connectez chaque agent Multica à son propre bot intelligent WeCom (企业微信). Les membres peuvent lui écrire en privé, le mentionner dans des groupes, et taper /issue pour créer une tâche Multica. L'agent répond via une connexion WebSocket longue, aucune URL de rappel publique n'est donc nécessaire.",
+    "page_description": "Discutez avec les agents dans WeCom ou créez une tâche avec /issue. Aucune URL de rappel publique nécessaire.",
     "not_enabled_title": "Intégration WeCom non activée",
     "not_enabled_description_prefix": "Définissez",
     "not_enabled_description_suffix": "sur le serveur pour permettre l'installation de bots intelligents WeCom.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation WeCom bientôt disponible",
-    "preview_description": "La clé de chiffrement au repos est définie, mais ce déploiement n'a pas encore complètement activé les installations WeCom.",
+    "preview_description": "Les connexions WeCom ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
     "connected_bots": "Bots connectés",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
@@ -1107,13 +1095,13 @@
   },
   "telegram": {
     "section_title": "Telegram",
-    "page_description": "Connectez chaque agent Multica à son propre bot Telegram. Les membres peuvent écrire au bot en privé, le mentionner dans un groupe, taper /issue pour ouvrir une tâche Multica, et suivre la réponse de l'agent en direct.",
+    "page_description": "Discutez avec les agents dans Telegram ou créez une tâche avec /issue.",
     "not_enabled_title": "Intégration Telegram non activée",
     "not_enabled_description_prefix": "Définissez",
     "not_enabled_description_suffix": "sur le serveur pour autoriser l'installation de bots Telegram.",
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour le détail.",
     "preview_title": "Installation Telegram bientôt disponible",
-    "preview_description": "La clé de chiffrement au repos est définie, mais les installations ne sont pas encore disponibles sur cette installation. Le bouton Connecter apparaîtra ici dès qu'elles le seront.",
+    "preview_description": "Les connexions Telegram ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
     "connected_bots": "Bots connectés",
     "loading": "Chargement…",
     "load_failed": "Impossible de charger les installations Telegram",
@@ -1148,7 +1136,7 @@
   },
   "repositories": {
     "section_title": "Dépôts",
-    "description": "Dépôts git associés à cet espace de travail. Les agents s'en servent pour cloner le code et y travailler.",
+    "description": "Les agents peuvent utiliser ces dépôts pour travailler sur le code.",
     "url_placeholder": "https://git.exemple.com/org/depot.git ou git@git.exemple.com:org/depot.git",
     "url_empty": "(URL vide)",
     "description_placeholder": "Description (ex. backend Go + frontend Next.js)",
@@ -1159,7 +1147,7 @@
     "github_browse_not_configured": "Le parcours des dépôts exige GITHUB_APP_ID et GITHUB_APP_PRIVATE_KEY.",
     "github_connect_failed": "Impossible de connecter GitHub. Réessayez.",
     "github_picker_title": "Choisir des dépôts GitHub",
-    "github_picker_description": "Sélectionnez les dépôts à ajouter à cet espace de travail. Les entrées manuelles existantes restent inchangées.",
+    "github_picker_description": "Les entrées manuelles existantes restent inchangées.",
     "github_account": "Compte GitHub",
     "github_search_placeholder": "Rechercher parmi les dépôts chargés",
     "github_loading": "Chargement des dépôts…",
@@ -1195,13 +1183,12 @@
     },
     "updates": {
       "title": "Mises à jour",
-      "description": "Contrôlez les mises à jour automatiques en arrière-plan, ou recherchez manuellement une nouvelle version.",
       "current_version": "Version actuelle",
       "automatic_updates_title": "Mises à jour automatiques en arrière-plan",
       "automatic_updates_description": "Vérifier peu après le lancement puis toutes les heures, et télécharger les mises à jour disponibles en arrière-plan.",
       "automatic_updates_save_failed": "Échec de l'enregistrement des réglages de mise à jour automatique",
       "check_section_title": "Rechercher des mises à jour",
-      "check_section_description": "Vérifiez maintenant, quelle que soit votre préférence de mise à jour automatique. Les mises à jour disponibles se téléchargent en arrière-plan et proposent un redémarrage une fois prêtes.",
+      "check_section_description": "Vous serez invité à redémarrer une fois le téléchargement terminé.",
       "up_to_date": "Vous avez la dernière version.",
       "downloading": "La v{{version}} se télécharge en arrière-plan — vous serez averti quand elle sera prête à installer.",
       "check_now": "Vérifier maintenant",
@@ -1209,7 +1196,6 @@
     },
     "daemon": {
       "title": "Démon",
-      "description": "Configurez le comportement du démon d'agent local avec l'application de bureau.",
       "settings_saved": "Paramètres du démon enregistrés",
       "settings_save_failed": "Échec de l'enregistrement des paramètres du démon",
       "signin_expired": "Connexion expirée",
@@ -1218,16 +1204,15 @@
       "external_description_before": "Le démon de cet appareil s'exécute en dehors de l'application, par exemple dans WSL2. L'application ne peut donc ni le démarrer ni l'arrêter. Démarrez-le ou arrêtez-le depuis cet environnement avec",
       "external_description_after": ".",
       "auto_start_title": "Démarrage automatique à l'ouverture",
-      "auto_start_description": "Démarrez le démon à la connexion. Tant que l'application est ouverte, elle supervise les démons démarrés automatiquement et manuellement.",
+      "auto_start_description": "Démarrer automatiquement à la connexion.",
       "auto_stop_title": "Arrêt automatique à la fermeture",
-      "auto_stop_description": "Arrêtez le démon à la fermeture de l'application de bureau. Désactivez cette option pour le laisser fonctionner en arrière-plan.",
+      "auto_stop_description": "Arrêter le daemon à la fermeture de Desktop.",
       "cli_status": "État du CLI",
       "cli_checking": "Vérification…",
       "cli_installed": "Le CLI multica est installé et disponible dans PATH.",
       "cli_missing": "CLI multica introuvable. Installez-le pour activer la gestion du démon.",
       "installation_guide": "Guide d'installation",
       "diagnostics_title": "Diagnostics",
-      "diagnostics_description": "Détails d'identification et de connexion. Utiles pour signaler un bug ou comprendre pourquoi un runtime n'apparaît pas.",
       "state": "État",
       "uptime": "Durée de fonctionnement",
       "daemon_id": "Identifiant du daemon",
@@ -1280,7 +1265,6 @@
       "not_running": "Le démon est arrêté",
       "not_running_description": "Démarrez le démon pour afficher les journaux ici.",
       "waiting_logs": "En attente de journaux…",
-      "waiting_logs_description": "Les nouvelles entrées apparaîtront en temps réel.",
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
       "try_again": "Veuillez réessayer."
@@ -1359,7 +1343,6 @@
     "expiry_never": "Jamais"
   },
   "integrations": {
-    "description": "Connectez vos outils et gérez chaque intégration au même endroit.",
     "code_title": "Code et dépôts",
     "messaging_title": "Canaux de messagerie",
     "apps_title": "Vos applications connectées",
