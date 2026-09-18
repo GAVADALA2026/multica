@@ -219,6 +219,9 @@ cleared_task_deliveries AS (
 cleared_outbound_messages AS (
     DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM dead)
 ),
+cleared_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
@@ -1352,3 +1355,98 @@ SELECT EXISTS (
       AND workspace_id = @workspace_id
       AND url = @storage_url
 ) AS referenced;
+
+-- ---------------------------------------------------------------------------
+-- Reply delivery ownership (channel_reply_delivery).
+--
+-- The streamed placeholder, the final answer and the failure notice run on
+-- different code paths and, across replicas, in different processes. These
+-- queries are the only thing that makes them agree on who owns a task's reply
+-- and what the provider has already accepted.
+-- ---------------------------------------------------------------------------
+
+-- name: EnsureChannelReplyDelivery :one
+-- Streaming claim. Creates the row on the first text frame and otherwise
+-- returns the row as it stands, so a frame can see that terminal delivery has
+-- already taken over (and must not open a second message).
+INSERT INTO channel_reply_delivery (
+    task_id, binding_id, installation_id, channel_type, chat_id, phase, send_state
+) VALUES ($1, $2, $3, $4, $5, 'streaming', 'none')
+ON CONFLICT (task_id) DO UPDATE SET updated_at = now()
+RETURNING *;
+
+-- name: ClaimChannelReplyDeliveryTerminal :one
+-- Terminal claim. Succeeds from any phase but 'settled', so an interrupted
+-- delivery can be resumed from chunks_sent while a second completion event for
+-- an already finished reply returns no row and is dropped.
+INSERT INTO channel_reply_delivery (
+    task_id, binding_id, installation_id, channel_type, chat_id, phase, send_state
+) VALUES ($1, $2, $3, $4, $5, 'terminal', 'none')
+ON CONFLICT (task_id) DO UPDATE SET phase = 'terminal', updated_at = now()
+WHERE channel_reply_delivery.phase <> 'settled'
+RETURNING *;
+
+-- name: MarkChannelReplyDeliverySending :execrows
+-- Claims the one and only placeholder send. Nothing may be in flight or
+-- accepted already, and terminal delivery must not have taken the reply over.
+UPDATE channel_reply_delivery
+SET send_state = 'in_flight', updated_at = now()
+WHERE task_id = $1 AND phase = 'streaming' AND send_state = 'none';
+
+-- name: RecordChannelReplyDeliveryMessage :execrows
+-- The provider returned an id: the reply now has a message every later path
+-- edits instead of re-sending.
+UPDATE channel_reply_delivery
+SET send_state = 'known', message_id = $2, chunks_sent = GREATEST(chunks_sent, 1), updated_at = now()
+WHERE task_id = $1 AND send_state = 'in_flight';
+
+-- name: ResetChannelReplyDeliverySend :execrows
+-- The provider definitively refused the send: nothing is in the chat, so the
+-- reply may be attempted again.
+UPDATE channel_reply_delivery
+SET send_state = 'none', updated_at = now()
+WHERE task_id = $1 AND send_state = 'in_flight';
+
+-- name: MarkChannelReplyDeliverySendUnknown :execrows
+-- The response was lost. The provider may or may not have posted the message
+-- and offers no idempotency key, so delivery stops here rather than risking
+-- the duplicate this whole table exists to prevent.
+UPDATE channel_reply_delivery
+SET send_state = 'unknown', updated_at = now()
+WHERE task_id = $1 AND send_state = 'in_flight';
+
+-- name: AdvanceChannelReplyDeliveryChunks :execrows
+-- Per-chunk progress, written after each chunk lands so a delivery resumed in
+-- another process continues after the last chunk instead of repeating it.
+UPDATE channel_reply_delivery
+SET chunks_sent = $2, updated_at = now()
+WHERE task_id = $1 AND chunks_sent < $2;
+
+-- name: SettleChannelReplyDelivery :execrows
+-- Delivery is over. No path may send or edit for this task afterwards.
+UPDATE channel_reply_delivery
+SET phase = 'settled', settled_reason = $2, updated_at = now()
+WHERE task_id = $1 AND phase <> 'settled';
+
+-- name: MarkChannelReplyDeliveryAwaitingRetry :execrows
+-- The attempt failed and the platform will retry it automatically. The
+-- placeholder stays in the chat and stays owned, so the retry can finish it
+-- rather than opening a second answer beside it.
+UPDATE channel_reply_delivery
+SET phase = 'awaiting_retry', updated_at = now()
+WHERE task_id = $1 AND phase IN ('streaming', 'terminal');
+
+-- name: AdoptChannelReplyDeliveryForRetry :one
+-- An automatic retry inherits the placeholder its previous attempt left in the
+-- chat. Scoped to one binding and to a row a retry actually parked, so two
+-- ordinary turns that happen to say the same thing still get one reply each.
+UPDATE channel_reply_delivery
+SET task_id = $1, phase = 'streaming', updated_at = now()
+WHERE task_id = (
+    SELECT parked.task_id FROM channel_reply_delivery parked
+    WHERE parked.binding_id = $2 AND parked.phase = 'awaiting_retry'
+    ORDER BY parked.updated_at DESC
+    LIMIT 1
+)
+AND NOT EXISTS (SELECT 1 FROM channel_reply_delivery existing WHERE existing.task_id = $1)
+RETURNING *;
