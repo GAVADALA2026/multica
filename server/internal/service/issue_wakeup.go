@@ -107,6 +107,20 @@ func (s *IssueWakeupService) Validate(in *WakeupInput, now time.Time) (pgtype.Ti
 		if in.AfterSeconds != 0 || in.At != nil || in.IntervalSeconds != 0 || in.CronExpression != "" {
 			return bad("event wakeups cannot contain a schedule")
 		}
+		// Legacy mutation-only agent filters are an alias of actor=agent. Keep
+		// mixed task/mutation subscriptions unchanged for existing API clients.
+		if in.FilterAgentID != "" && in.FilterTaskID == "" {
+			mutationOnly := true
+			for _, event := range in.EventTypes {
+				if strings.HasPrefix(event, "task.") {
+					mutationOnly = false
+				}
+			}
+			if mutationOnly {
+				in.FilterActorType, in.FilterActorID = "agent", in.FilterAgentID
+				in.FilterAgentID = ""
+			}
+		}
 		return pgtype.Timestamptz{}, nil
 	case "at":
 		if in.Mode != "once" {
@@ -579,20 +593,6 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			return err
 		}
 	}
-	receipts, err := q.ListPendingWakeupReceipts(ctx, db.ListPendingWakeupReceiptsParams{WakeupID: w.ID, Revision: w.Revision})
-	if err != nil {
-		return err
-	}
-	if len(receipts) == 0 {
-		return tx.Commit(ctx)
-	}
-	ids := make([]pgtype.UUID, 0, len(receipts))
-	for _, r := range receipts {
-		ids = append(ids, r.ID)
-	}
-	if w.Mode == "once" {
-		enabled = false
-	}
 	task, err := q.FindPendingWakeupTask(ctx, util.UUIDToString(w.ID))
 	if err == nil && task.Status == "dispatched" {
 		// A claimed prompt is immutable. Recovery belongs to the ordinary
@@ -609,18 +609,32 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		}
 		return tx.Commit(ctx)
 	}
-	previous := ""
-	if err == nil && w.Kind == "event" {
-		previous = task.HandoffNote.String
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
 	}
-	note := buildWakeupNote(w, previous, receipts)
-	if err == nil {
-		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: note, Valid: true}})
-	} else if errors.Is(err, pgx.ErrNoRows) {
+	taskExists := err == nil
+	receipts, err := q.ListPendingWakeupReceipts(ctx, db.ListPendingWakeupReceiptsParams{WakeupID: w.ID, Revision: w.Revision})
+	if err != nil {
+		return err
+	}
+	if len(receipts) == 0 {
+		return tx.Commit(ctx)
+	}
+	ids := make([]pgtype.UUID, 0, len(receipts))
+	for _, r := range receipts {
+		ids = append(ids, r.ID)
+	}
+	if w.Mode == "once" {
+		enabled = false
+	}
+	note, evidence := mergeWakeupEvidence(w, task, receipts)
+	if taskExists {
+		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: note, Valid: true}, WakeupEvidence: evidence})
+	} else {
 		if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginNamed); err != nil {
 			return err
 		}
-		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision})
+		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence})
 		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: note, Valid: true}, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
 	}
 	if err != nil {

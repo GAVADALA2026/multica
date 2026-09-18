@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,53 +15,111 @@ import (
 const wakeupNoteLimit = 40000
 const wakeupOmittedEvidence = "Some trigger details were omitted to keep this prompt bounded. Read current issue comments, runs and state before deciding what to do.\n"
 
-func buildWakeupNote(w db.IssueWakeup, previous string, receipts []db.IssueWakeupReceipt) string {
+// Keep facts as data in task.context; handoff_note is only a rendering.
+// Legacy notes remain opaque during mixed-version operation, never parsed.
+type wakeupEvidence struct {
+	Version int          `json:"version"`
+	Facts   []wakeupFact `json:"facts,omitempty"`
+	Legacy  string       `json:"legacy,omitempty"`
+	Omitted bool         `json:"omitted,omitempty"`
+}
+type wakeupFact struct {
+	EventType string          `json:"event_type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+func mergeWakeupEvidence(w db.IssueWakeup, previous db.AgentTaskQueue, receipts []db.IssueWakeupReceipt) (string, json.RawMessage) {
+	var stored struct {
+		Evidence wakeupEvidence `json:"wakeup_evidence"`
+	}
+	_ = json.Unmarshal(previous.Context, &stored)
+	evidence := stored.Evidence
+	// jsonb can reorder object keys/spacing; normalize before rendering.
+	for i := range evidence.Facts {
+		evidence.Facts[i].Payload = canonicalWakeupPayload(evidence.Facts[i].Payload)
+	}
+	if evidence.Version != 1 || renderWakeupEvidence(w, evidence) != previous.HandoffNote.String {
+		// An old dispatcher may have updated only handoff_note. Preserve its text
+		// as one bounded legacy item instead of trusting a stale structured summary.
+		evidence = wakeupEvidence{Version: 1, Legacy: previous.HandoffNote.String}
+	}
+	if w.Kind != "event" {
+		evidence = wakeupEvidence{Version: 1}
+	}
+
 	header := "Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\nTrigger facts (read current state before deciding what to do):\n"
 	budget := wakeupNoteLimit - len(header) - len(wakeupOmittedEvidence)
-	omitted := strings.Contains(previous, wakeupOmittedEvidence)
-	previous = strings.TrimPrefix(strings.TrimPrefix(previous, header), wakeupOmittedEvidence)
-	parts := []string{}
-	total := 0
-	appendPart := func(part string) {
-		parts = append(parts, part)
-		total += len(part)
-		for total > budget && len(parts) > 0 {
-			total -= len(parts[0])
-			parts = parts[1:]
-			omitted = true
+	budget = max(budget, 0)
+	total := len(evidence.Legacy)
+	for _, fact := range evidence.Facts {
+		total += len(fact.EventType) + len(fact.Payload) + 2
+	}
+	trim := func() {
+		if total > budget && evidence.Legacy != "" {
+			total -= len(evidence.Legacy)
+			evidence.Legacy = ""
+			evidence.Omitted = true
+		}
+		for total > budget && len(evidence.Facts) > 0 {
+			fact := evidence.Facts[0]
+			total -= len(fact.EventType) + len(fact.Payload) + 2
+			evidence.Facts = evidence.Facts[1:]
+			evidence.Omitted = true
 		}
 	}
-	if previous != "" {
-		appendPart(previous)
-	}
+	trim()
 	for _, r := range receipts {
 		var summary struct {
 			Count int64 `json:"coalesced_count"`
 		}
 		_ = json.Unmarshal(r.Payload, &summary)
 		if summary.Count > 1 {
-			omitted = true
+			evidence.Omitted = true
 		}
-		line := fmt.Sprintf("%s %s\n", r.EventType, r.Payload)
-		if len(line) > budget {
-			// A single large changed-key list must not hide its event and source
-			// references or prevent consumption. Do not cut JSON/UTF-8 mid-value.
+		payload := canonicalWakeupPayload(r.Payload)
+		if len(r.EventType)+len(payload)+2 > budget {
+			// Keep references as data even when a changed-field list is oversized.
 			var fields map[string]json.RawMessage
-			_ = json.Unmarshal(r.Payload, &fields)
+			_ = json.Unmarshal(payload, &fields)
 			refs := map[string]json.RawMessage{}
-			for _, key := range []string{"event_id", "occurred_at", "first_occurred_at", "coalesced_count", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id"} {
+			for _, key := range []string{"event_id", "occurred_at", "first_occurred_at", "coalesced_count", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id", "actor_type", "actor_id"} {
 				if value := fields[key]; len(value) > 0 && len(value) <= 256 {
 					refs[key] = value
 				}
 			}
-			compact, _ := json.Marshal(refs)
-			line = fmt.Sprintf("%s %s (receipt %s; additional fields omitted)\n", r.EventType, compact, util.UUIDToString(r.ID))
-			omitted = true
+			refs["receipt_id"], _ = json.Marshal(util.UUIDToString(r.ID))
+			payload, _ = json.Marshal(refs)
+			evidence.Omitted = true
 		}
-		appendPart(line)
+		evidence.Facts = append(evidence.Facts, wakeupFact{EventType: r.EventType, Payload: payload})
+		total += len(r.EventType) + len(payload) + 2
+		trim()
 	}
-	if omitted {
+	raw, _ := json.Marshal(evidence)
+	return renderWakeupEvidence(w, evidence), raw
+}
+
+func renderWakeupEvidence(w db.IssueWakeup, evidence wakeupEvidence) string {
+	header := "Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\nTrigger facts (read current state before deciding what to do):\n"
+	if evidence.Omitted {
 		header += wakeupOmittedEvidence
 	}
-	return header + strings.Join(parts, "")
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteString(evidence.Legacy)
+	for _, fact := range evidence.Facts {
+		fmt.Fprintf(&b, "%s %s\n", fact.EventType, fact.Payload)
+	}
+	return b.String()
+}
+
+func canonicalWakeupPayload(raw json.RawMessage) json.RawMessage {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return json.RawMessage(`{}`)
+	}
+	result, _ := json.Marshal(value)
+	return result
 }

@@ -116,8 +116,10 @@ The already-terminal registration snapshot additionally has `observed_at` and
 `registration_snapshot`; its `occurred_at` can be null for historical runs with
 no completion timestamp. Older queued payloads remain readable.
 
-`--filter-agent-id` matches the run's agent for run events and the actual source
-agent for mutation events. Editing another agent's comment does not make that
+`--filter-agent-id` selects the run's agent for task events. New mutation-only
+requests using this legacy flag normalize to `filter_actor_type=agent` and
+`filter_actor_id`; use actor flags for comment/issue/reaction/attachment changes.
+Existing stored rules and legacy mixed task/mutation requests remain supported. Editing another agent's comment does not make that
 agent the editor; payloads distinguish actor from author. `--task-id` accepts
 only run events. Filters never expand the subscription beyond its current issue.
 
@@ -184,6 +186,7 @@ starting a final run on the closed issue.
   PostgreSQL settings; those settings do not survive connection reuse. A client
   cannot choose source identity through a request body or an untrusted task header.
 - `context.wakeup_id` and `context.wakeup_revision` identify the new trigger.
+  Bounded structured facts live in additive `context.wakeup_evidence` (version 1).
   Its instruction/facts travel in the ordinary per-turn handoff note. Daemon
   wakeup prompts preserve this instruction even when a delivery thread exists.
   Automatic retries inherit both context and note.
@@ -337,3 +340,25 @@ old consumers can still drain the notifications. To roll the schema back, revers
 521 before dropping 520/519 and the additive indexes. This restores the prior
 capture function and removes limits without deleting rules or pending inputs.
 The base wakeup tables must still be retained while any wakeup runs reference them.
+
+## Summary compatibility and capture locks
+
+Pending-run evidence is merged as structured facts and rendered once, without
+parsing a previous prompt's headings or omission messages. The total rendered
+note still fits 40KB. Older tasks, or notes rewritten by an older dispatcher,
+are carried as one opaque bounded legacy item; overflowing history is marked
+as condensed and the latest input remains readable. Existing readers and retries
+continue using `handoff_note`; no migration or new execution lifecycle is needed.
+
+Dispatch takes the pending-task lock before locking event receipts, so waiting
+for an existing task does not hold up capture on those receipt rows. Receipt
+consumption and task enqueue/update still commit in one transaction. Source
+writes can still wait during that short critical section; this is not a promise
+of nonblocking comment writes. Splitting enqueue from consumption would require
+another delivery/recovery protocol and is intentionally avoided.
+
+Direct self-trigger protection is scoped to one rule and trusted source-run
+identity. Cross-rule cycles remain possible; avoid mutually triggering continuous
+comment subscriptions. Prefer a member actor filter for waiting on a human.
+Target agent names follow shared issue visibility, while source references and
+invocation/management authority keep their existing checks.

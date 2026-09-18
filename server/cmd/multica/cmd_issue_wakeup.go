@@ -20,7 +20,7 @@ func init() { issueCmd.AddCommand(newIssueWakeupCommand()) }
 func newIssueWakeupCommand() *cobra.Command {
 	wake := &cobra.Command{Use: "wakeup", Short: "Manage event and time wakeups that start ordinary runs"}
 	wake.AddCommand(&cobra.Command{Use: "events", Short: "List supported event types and filters", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "platform_only_event_types": eventcontract.LifecycleTypes, "platform_only_reason": "Creation precedes subscription; deletion withdraws the issue's wakeups. Cross-issue subscriptions are not supported.", "scope": "current issue", "filters": []string{"filter_agent_id", "filter_task_id (task events only)", "filter_actor_type + filter_actor_id (member or agent; mutation events only)"}, "modes": []string{"once (default)", "continuous"}})
+		return cli.PrintJSON(os.Stdout, map[string]any{"event_types": eventcontract.WakeupTypes, "platform_only_event_types": eventcontract.LifecycleTypes, "platform_only_reason": "Creation precedes subscription; deletion withdraws the issue's wakeups. Cross-issue subscriptions are not supported.", "scope": "current issue", "filters": []string{"filter_agent_id (task events; legacy mutation alias)", "filter_task_id (task events only)", "filter_actor_type + filter_actor_id (member or agent; mutation events only)"}, "modes": []string{"once (default)", "continuous"}, "loop_protection": "Events from the registering run and runs started by the same rule are excluded when source identity is available. Cross-rule cycles are not prevented; avoid mutually triggering continuous comment subscriptions."})
 	}})
 	for _, action := range []string{"list", "get", "disable", "create", "update"} {
 		action := action
@@ -36,7 +36,7 @@ func newIssueWakeupCommand() *cobra.Command {
 		c.Flags().String("output", "json", "Output format (json or table)")
 		if action == "create" || action == "update" {
 			c.Long = "Create or replace the complete configuration. Events default to once; every/cron use continuous. Updating explicitly re-enables the configuration. Runs use normal comment delivery."
-			c.Long += " To wait for another agent, prefer --task-id for one run or --filter-agent-id for that agent. To wait for a person to comment, use --event comment.created --filter-actor-type member --filter-actor-id USER_ID. Actor filters identify who made the change, not the original author of an edited comment. Without a source filter, all matching events on this issue can wake the target."
+			c.Long += " For task events, use --task-id for one run or --filter-agent-id for its agent. For comment/issue/reaction/attachment changes, use --filter-actor-type member|agent with --filter-actor-id. To wait for a person to comment, use --event comment.created --filter-actor-type member --filter-actor-id USER_ID. Actor filters identify who made the change, not the original author of an edited comment. Without a source filter, all matching events on this issue can wake the target."
 			c.Flags().String("agent-id", "", "Agent to wake (defaults to authenticated agent)")
 			c.Flags().String("instruction", "", "Instruction for the next run")
 			c.Flags().String("instruction-file", "", "Read instruction from a UTF-8 file")
@@ -45,7 +45,7 @@ func newIssueWakeupCommand() *cobra.Command {
 			c.Flags().StringSlice("event", nil, "Event types (comma-separated); see wakeup events")
 			c.Flags().String("filter-actor-type", "", "Event actor: member or agent (requires --filter-actor-id)")
 			c.Flags().String("filter-actor-id", "", "Actor user/agent UUID in this workspace; mutation events only")
-			c.Flags().String("filter-agent-id", "", "Match facts from this agent")
+			c.Flags().String("filter-agent-id", "", "Run agent filter; legacy alias of actor=agent for mutation-only events")
 			c.Flags().String("task-id", "", "Match this specific run; terminal state is checked on registration")
 			c.Flags().String("parent", "", "Comment thread for result delivery")
 			c.Flags().String("after", "", "Delay for at, e.g. 10m")

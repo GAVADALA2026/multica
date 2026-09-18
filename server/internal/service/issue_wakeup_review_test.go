@@ -15,7 +15,7 @@ import (
 func TestIssueWakeupLargeSingleFactPreservesReferences(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{"comment_id": "source-comment", "changed_fields": strings.Repeat("字段", 20000)})
 	w := db.IssueWakeup{Instruction: strings.Repeat("指", 4000)}
-	note := buildWakeupNote(w, "", []db.IssueWakeupReceipt{{EventType: "comment.updated", Payload: payload}})
+	note, _ := mergeWakeupEvidence(w, db.AgentTaskQueue{}, []db.IssueWakeupReceipt{{EventType: "comment.updated", Payload: payload}})
 	if len(note) > wakeupNoteLimit || !utf8.ValidString(note) || !strings.Contains(note, w.Instruction) || !strings.Contains(note, "source-comment") || !strings.Contains(note, wakeupOmittedEvidence) {
 		t.Fatalf("oversized fact not safely condensed: %d bytes", len(note))
 	}

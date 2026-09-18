@@ -152,3 +152,25 @@ func TestIssueWakeupActorFilterSurvivesEnableAndExplicitReplacement(t *testing.T
 		t.Fatal("explicit replacement could not clear filter")
 	}
 }
+
+func TestIssueWakeupLegacyMutationAgentFilterNormalizes(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"comment.created"}, FilterAgentID: agent, Instruction: "wait"})
+	if w.FilterAgentID.Valid || w.FilterActorType.String != "agent" || w.FilterActorID != parseTestUUID(t, agent) {
+		t.Fatalf("legacy alias not normalized: %+v", w)
+	}
+	f.Comment(t, util.UUIDToString(issue), "human")
+	if f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1", w.ID) != 0 {
+		t.Fatal("human matched legacy agent alias")
+	}
+	f.Exec(t, `INSERT INTO comment(issue_id,workspace_id,author_type,author_id,content,type) VALUES($1,$2,'agent',$3,'agent reply','comment')`, issue, f.WorkspaceID, agent)
+	wakeDispatch(t, s, w)
+	if f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID)) != 1 {
+		t.Fatal("legacy alias did not wake on agent comment")
+	}
+	// Existing clients can still combine task and mutation types in one rule.
+	in := WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"task.completed", "comment.created"}, FilterAgentID: agent, Instruction: "wait"}
+	if _, err := s.Validate(&in, time.Now()); err != nil || in.FilterAgentID != agent || in.FilterActorType != "" {
+		t.Fatalf("mixed legacy subscription changed: %+v %v", in, err)
+	}
+}

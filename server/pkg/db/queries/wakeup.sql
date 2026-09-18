@@ -142,7 +142,7 @@ RETURNING *;
 SELECT * FROM issue_wakeup WHERE id= @id;
 
 -- name: ReplaceWakeupEvidence :one
-UPDATE agent_task_queue SET handoff_note=sqlc.narg(handoff_note) WHERE id= @id AND status='queued' RETURNING *;
+UPDATE agent_task_queue SET handoff_note=sqlc.narg(handoff_note), context=COALESCE(context,'{}'::jsonb) || jsonb_build_object('wakeup_evidence', @wakeup_evidence::jsonb) WHERE id= @id AND status='queued' RETURNING *;
 -- name: NoteWakeupFailure :exec
 UPDATE issue_wakeup SET last_error=sqlc.narg(last_error),updated_at=clock_timestamp() WHERE id= @id;
 -- name: TouchWakeupDispatch :exec
