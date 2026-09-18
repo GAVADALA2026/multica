@@ -18,12 +18,12 @@ func TestIssueWakeupCollaborationCapture(t *testing.T) {
 	f, s, issue, agent := wakeFixture(t)
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", EventTypes: eventcontract.WakeupTypes, Instruction: "Read current state"})
 	count := func(event string) int {
-		return f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND event_type=$2", w.ID, event)
+		return f.Count(t, "SELECT COALESCE(sum(COALESCE((payload->>'coalesced_count')::int,1)),0) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND event_type=$2", w.ID, event)
 	}
 	assert := func(event string, n int) {
 		t.Helper()
 		if got := count(event); got != n {
-			t.Fatalf("%s: got %d receipts, want %d", event, got, n)
+			t.Fatalf("%s: got %d captured facts, want %d", event, got, n)
 		}
 	}
 	run := f.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')")})

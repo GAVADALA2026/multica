@@ -10,7 +10,7 @@ import (
 )
 
 // Retain the existing 40KB prompt budget, including the <=12KB instruction.
-// Full receipts stay linked to the task; only the prompt's evidence is condensed.
+// Consumed notifications stay linked to the task during the retention window.
 const wakeupNoteLimit = 40000
 const wakeupOmittedEvidence = "Some trigger details were omitted to keep this prompt bounded. Read current issue comments, runs and state before deciding what to do.\n"
 
@@ -34,6 +34,13 @@ func buildWakeupNote(w db.IssueWakeup, previous string, receipts []db.IssueWakeu
 		appendPart(previous)
 	}
 	for _, r := range receipts {
+		var summary struct {
+			Count int64 `json:"coalesced_count"`
+		}
+		_ = json.Unmarshal(r.Payload, &summary)
+		if summary.Count > 1 {
+			omitted = true
+		}
 		line := fmt.Sprintf("%s %s\n", r.EventType, r.Payload)
 		if len(line) > budget {
 			// A single large changed-key list must not hide its event and source
@@ -41,7 +48,7 @@ func buildWakeupNote(w db.IssueWakeup, previous string, receipts []db.IssueWakeu
 			var fields map[string]json.RawMessage
 			_ = json.Unmarshal(r.Payload, &fields)
 			refs := map[string]json.RawMessage{}
-			for _, key := range []string{"event_id", "occurred_at", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id"} {
+			for _, key := range []string{"event_id", "occurred_at", "first_occurred_at", "coalesced_count", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id"} {
 				if value := fields[key]; len(value) > 0 && len(value) <= 256 {
 					refs[key] = value
 				}

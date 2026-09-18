@@ -98,6 +98,10 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 
 func wakeupError(w http.ResponseWriter, err error) {
 	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "issue_wakeup_active_limit" {
+		writeErrorCode(w, 400, "wakeup_capacity_exceeded", pgErr.Message)
+		return
+	}
 	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
 		writeErrorCode(w, 409, "wakeup_source_busy", "source run is changing; retry registration")
 		return
@@ -121,14 +125,6 @@ func (h *Handler) ListIssueWakeups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ListIssueWakeups(r.Context(), db.ListIssueWakeupsParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
-	if err != nil {
-		wakeupError(w, err)
-		return
-	}
-	if rows == nil {
-		rows = []db.ListIssueWakeupsRow{}
-	}
 	workspaceID := uuidToString(issue.WorkspaceID)
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -140,10 +136,17 @@ func (h *Handler) ListIssueWakeups(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to resolve agent access")
 		return
 	}
-	for i := range rows {
-		if _, visible := allowed[uuidToString(rows[i].FilterAgentID)]; !visible {
-			rows[i].FilterAgentName = pgtype.Text{}
-		}
+	ids := make([]pgtype.UUID, 0, len(allowed))
+	for id := range allowed {
+		ids = append(ids, parseUUID(id))
+	}
+	rows, err := h.Queries.ListIssueWakeups(r.Context(), db.ListIssueWakeupsParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AgentIds: ids})
+	if err != nil {
+		wakeupError(w, err)
+		return
+	}
+	if rows == nil {
+		rows = []db.ListIssueWakeupsRow{}
 	}
 	writeJSON(w, 200, rows)
 }

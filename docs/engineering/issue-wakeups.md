@@ -26,8 +26,8 @@ and show enabled wakeup rules as a separate count, not a forecast of executions.
 Without an active run they show the
 next scheduled time (including a date when needed) or waiting for an event.
 A shared workspace summary request contains exact enabled counts and at most
-three previews per issue, never prompts or history. Access follows agent
-visibility and workspace membership. The issue surface polls once every ten
+three previews per issue, never prompts or history. Access follows shared issue visibility and workspace membership; private
+source-agent and source-run filters are redacted consistently. The issue surface polls once every ten
 seconds; cards select their own rows from that shared cache.
 
 Restoring an interval schedules from now; cron uses its next future occurrence,
@@ -144,7 +144,9 @@ starting a final run on the closed issue.
   issue/configuration, rechecks scope and the creator's current invoke rights,
   and consumes receipts together with ordinary task enqueue. Failure leaves the
   receipt available for retry. Claim rechecks permissions after an offline wait.
-- Event inputs merge into an unclaimed task without losing their references.
+- Event notifications merge by rule, revision and event type, keeping the first
+  occurrence time, count and latest source reference. Agents read current state
+  and comment history when intermediate references have been condensed.
   Time inputs replace the pending time note with the newest signal. A claimed
   prompt is immutable; later input becomes at most one subsequent queued task.
 - Mutations and run events from the same wakeup's run are ignored. HTTP mutation
@@ -196,7 +198,7 @@ still match. Apply this migration before enabling broad agent-created subscripti
 Rolling it back restores the previous capture function without rewriting data;
 disable affected subscriptions first to avoid registration feedback.
 
-This unmerged branch's migrations use prefixes 500–514 to follow main's 495–499.
+This unmerged branch's migrations use prefixes 500–521 to follow main's 495–499.
 Local databases that already applied the previous 495–508 wakeup filenames must
 rename those exact `schema_migrations.version` entries by +5 before updating.
 Do not rename main's migrations or rerun the table-creation migration. Fresh
@@ -235,8 +237,11 @@ consumed one-shot rules and manually disabled rules with running work. The query
 looks up runs by their wakeup context, so a retry remains visible even if the
 rule's last-task pointer refers to an older attempt. Configuration state and run
 state are separate columns. Rules on terminal issues appear under Ended once
-all their runs finish. Counts include only agents visible to the requester;
-private source-agent and source-run references are redacted.
+all their runs finish. Counts include every rule on shared issues, including rules targeting private
+agents. Reading a rule does not grant permission to invoke or configure its
+agent. Private source-agent and source-run references are redacted in inventory,
+sidebar and board summary responses alike. Instructions remain shared issue
+content and are omitted from inventory and summary responses.
 
 Trigger labels describe conditions (for example, "When Emacs's run succeeds"),
 not an outcome that has already happened. The monitored agent and specific run
@@ -256,3 +261,49 @@ sequential calls to the existing authorized disable endpoint, and retains only
 failed selections for retry. The inventory polls every ten seconds; mutations
 invalidate inventory, sidebar, board summaries, and task caches. No scheduler or
 Autopilot execution semantics change.
+
+
+## Database load and notification retention
+
+The scheduler discovers candidates from due timers and the partial pending-receipt
+index, instead of scanning disabled rule history. Each dispatch has a two-second
+budget and a 50 ms PostgreSQL lock timeout; diagnostic/fairness writes have their
+own 100 ms budgets. Contention leaves inputs pending for the next tick and does
+not spend the full batch deadline on one issue. The global inventory counts only
+unfinished runs before pagination; indexed latest-run lookups happen for the
+selected page, rather than sorting the entire completed-run history.
+
+At most 32 rules per issue and 1,000 per workspace can be enabled. These are
+activation limits: disabled history does not count, existing rules are not
+silently removed, and editing an already-enabled rule does not consume another
+slot. A database trigger serializes activation within a workspace, including
+concurrent creation on different issues. Capacity errors return HTTP 400 with
+`wakeup_capacity_exceeded`. These initial limits bound synchronous source-event
+fanout and can be revisited with measured workload data.
+
+New event captures retain at most one pending notification per rule revision
+and event type (25 currently supported types). Repeated inputs retain a count,
+first occurrence time and the latest source reference, with an explicit prompt
+instruction to read source state. This is a wakeup notification, not an immutable
+event archive or a promise to execute once per source event. Legacy pending
+receipts remain readable and drain in batches of 100. Processed receipts become
+eligible for deletion after seven days, with up to 1,000 deleted per scheduler
+tick; backlog can extend that retention. Pending inputs are never age-expired.
+Run history and source comments are unaffected. Receipt keys suppress retained
+first/latest fact duplicates; they are not a permanent deduplication ledger for
+all intermediate coalesced facts.
+
+Migrations 515–518 add concurrent lookup/expiry indexes, 519 adds a nullable
+coalescing key, 520 adds its partial unique index, and 521 enables bounded capture
+and activation limits. Apply in that order before the new server. No existing
+receipt rewrite is needed. New consumers lock receipt rows before constructing
+queue evidence. Each merge also rotates its receipt ID: an old consumer can only
+mark the version it read as processed, so a concurrent replacement remains
+pending during rolling upgrades (a redundant check is possible, lost new input
+is avoided). Existing event/task keys and API fields remain compatible.
+
+Rolling application code back leaves the database limits and coalescing active;
+old consumers can still drain the notifications. To roll the schema back, reverse
+521 before dropping 520/519 and the additive indexes. This restores the prior
+capture function and removes limits without deleting rules or pending inputs.
+The base wakeup tables must still be retained while any wakeup runs reference them.

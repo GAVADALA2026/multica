@@ -152,12 +152,18 @@ func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {
 	req.Header.Set("X-User-ID", outsider)
 	read(req, 404)
 	dbfx.Member(t, testWorkspaceID, outsider, "member")
-	if got := read(req, 200); len(got) != 0 {
-		t.Fatal("private agent summary exposed")
+	if got := read(req, 200); len(got) != 3 || got[0].ActiveCount != 5 {
+		t.Fatal("shared issue rules disappeared from summary")
 	}
-	// Detail rows predate summary visibility, but their additive source name
-	// must not reveal an agent the requesting member cannot inspect.
-	dbfx.Exec(t, "UPDATE issue_wakeup SET filter_agent_id=$2 WHERE id=$1", first.ID, agent)
+	// Rule visibility follows the shared issue; all read surfaces consistently
+	// redact private source-agent and source-run references.
+	sourceRun := dbfx.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "completed"})
+	dbfx.Exec(t, "UPDATE issue_wakeup SET filter_agent_id=$2,filter_task_id=$3 WHERE id=$1", first.ID, agent, sourceRun)
+	for _, row := range read(req, 200) {
+		if row.FilterAgentName.Valid || row.FilterTaskID.Valid {
+			t.Fatal("private source exposed in summary")
+		}
+	}
 	detail := httptest.NewRecorder()
 	testHandler.ListIssueWakeups(detail, withURLParam(req, "id", issue))
 	var details []db.ListIssueWakeupsRow
@@ -165,8 +171,11 @@ func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {
 		t.Fatalf("detail response: %d %s", detail.Code, detail.Body.String())
 	}
 	for _, row := range details {
-		if row.FilterAgentName.Valid {
-			t.Fatal("private source agent name exposed")
+		if row.FilterAgentName.Valid || row.FilterAgentID.Valid || row.FilterTaskID.Valid {
+			t.Fatal("private source exposed in detail")
+		}
+		if row.Instruction != "PRIVATE PROMPT" {
+			t.Fatal("shared issue instruction missing")
 		}
 	}
 	other := dbfx.Workspace(t, "other summary", "other-summary")
@@ -271,5 +280,19 @@ func TestIssueWakeupMutationTrustedActor(t *testing.T) {
 	dbfx.QueryRow(t, "SELECT payload->>'actor_type',payload->>'actor_id',payload->>'source_task_id' FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND event_type='issue.metadata_changed'", w.ID).Scan(&actorType, &actorID, &source)
 	if actorType != "agent" || actorID != agent || source == nil || *source != run {
 		t.Fatalf("wrong source identity %s %s %v", actorType, actorID, source)
+	}
+}
+
+func TestIssueWakeupCapacityReturnsActionableError(t *testing.T) {
+	issue := dbfx.Issue(t, "wakeup capacity response")
+	agent := dbfx.Agent(t, "wakeup capacity target", testRuntimeID)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
+	dbfx.Exec(t, `INSERT INTO issue_wakeup(id,workspace_id,issue_id,agent_id,created_by,instruction,kind,mode,event_types)
+ SELECT gen_random_uuid(),$1,$2,$3,$4,'check','event','continuous',ARRAY['comment.created'] FROM generate_series(1,32)`, testWorkspaceID, issue, agent, testUserID)
+	req := withURLParam(newRequest("POST", "/", map[string]any{"agent_id": agent, "kind": "at", "after_seconds": 600, "instruction": "check"}), "id", issue)
+	rec := httptest.NewRecorder()
+	testHandler.CreateIssueWakeup(rec, req)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "wakeup_capacity_exceeded") || !strings.Contains(rec.Body.String(), "32") {
+		t.Fatalf("capacity error %d: %s", rec.Code, rec.Body.String())
 	}
 }

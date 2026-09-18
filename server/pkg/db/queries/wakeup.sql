@@ -2,9 +2,15 @@
 INSERT INTO issue_wakeup(id,workspace_id,issue_id,agent_id,created_by,source_task_id,parent_comment_id,instruction,kind,mode,event_types,filter_agent_id,filter_task_id,interval_seconds,cron_expression,timezone,next_fire_at)
 VALUES(@id,@workspace_id,@issue_id,@agent_id,@created_by,sqlc.narg(source_task_id),sqlc.narg(parent_comment_id),@instruction,@kind,@mode,@event_types,sqlc.narg(filter_agent_id),sqlc.narg(filter_task_id),sqlc.narg(interval_seconds),sqlc.narg(cron_expression),@timezone,sqlc.narg(next_fire_at)) RETURNING *;
 -- name: ListIssueWakeups :many
-SELECT w.*, a.name AS agent_name, source.name AS filter_agent_name, t.status AS last_task_status
+SELECT w.id,w.workspace_id,w.issue_id,w.agent_id,w.created_by,w.source_task_id,w.parent_comment_id,w.instruction,
+ w.kind,w.mode,w.event_types,
+ (CASE WHEN source.id IS NOT NULL THEN w.filter_agent_id END)::uuid AS filter_agent_id,
+ (CASE WHEN EXISTS(SELECT 1 FROM agent_task_queue ft JOIN agent fa ON fa.id=ft.agent_id AND fa.workspace_id=w.workspace_id
+  WHERE ft.id=w.filter_task_id AND ft.issue_id=w.issue_id AND fa.id=ANY(@agent_ids::uuid[])) THEN w.filter_task_id END)::uuid AS filter_task_id,
+ w.interval_seconds,w.cron_expression,w.timezone,w.next_fire_at,w.enabled,w.disabled_at,w.revision,
+ w.last_task_id,w.last_error,w.created_at,w.updated_at,a.name AS agent_name,source.name AS filter_agent_name,t.status AS last_task_status
 FROM issue_wakeup w JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
-LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id
+LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY(@agent_ids::uuid[])
 LEFT JOIN agent_task_queue t ON t.id=w.last_task_id AND t.issue_id=w.issue_id AND t.agent_id=w.agent_id
 WHERE w.workspace_id= @workspace_id AND w.issue_id= @issue_id ORDER BY w.created_at,w.id;
 
@@ -12,7 +18,9 @@ WHERE w.workspace_id= @workspace_id AND w.issue_id= @issue_id ORDER BY w.created
 -- No prompts/history; at most three previews per issue plus exact counts.
 WITH ranked AS (
  SELECT w.issue_id,w.id,w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,
-  w.filter_task_id,source.name AS filter_agent_name,w.interval_seconds,w.cron_expression,w.timezone,w.next_fire_at,
+  (CASE WHEN EXISTS(SELECT 1 FROM agent_task_queue ft JOIN agent fa ON fa.id=ft.agent_id AND fa.workspace_id=w.workspace_id
+   WHERE ft.id=w.filter_task_id AND ft.issue_id=w.issue_id AND fa.id=ANY(@agent_ids::uuid[])) THEN w.filter_task_id END)::uuid AS filter_task_id,
+  source.name AS filter_agent_name,w.interval_seconds,w.cron_expression,w.timezone,w.next_fire_at,
   count(*) OVER(PARTITION BY w.issue_id) AS active_count,
   count(*) FILTER(WHERE w.kind='event') OVER(PARTITION BY w.issue_id) AS event_count,
   row_number() OVER(PARTITION BY w.issue_id ORDER BY w.next_fire_at NULLS LAST,w.created_at,w.id) AS rank
@@ -20,7 +28,7 @@ WITH ranked AS (
  JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id
  JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
  LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY(@agent_ids::uuid[])
- WHERE w.workspace_id= @workspace_id AND w.enabled AND w.agent_id=ANY(@agent_ids::uuid[])
+ WHERE w.workspace_id= @workspace_id AND w.enabled
   AND i.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 )
@@ -38,12 +46,22 @@ SELECT * FROM agent_task_queue WHERE id= @id AND issue_id= @issue_id FOR UPDATE 
 UPDATE agent_task_queue SET status='cancelled',completed_at=now(),error='Wakeup disabled or updated'
 WHERE context->>'wakeup_id'= @wakeup_id::text AND status IN ('queued','deferred') AND started_at IS NULL RETURNING *;
 -- name: ListReadyWakeups :many
-SELECT w.* FROM issue_wakeup w WHERE
- (w.enabled AND w.kind<>'event' AND w.next_fire_at<=now()) OR
- EXISTS(SELECT 1 FROM issue_wakeup_receipt r WHERE r.wakeup_id=w.id AND r.processed_at IS NULL)
+WITH candidates AS (
+ SELECT id FROM issue_wakeup WHERE enabled AND kind<>'event' AND next_fire_at<=now()
+ UNION
+ SELECT wakeup_id FROM issue_wakeup_receipt WHERE processed_at IS NULL
+)
+SELECT w.* FROM candidates c JOIN issue_wakeup w ON w.id=c.id
 ORDER BY w.updated_at,w.id LIMIT 100;
 -- name: ListPendingWakeupReceipts :many
-SELECT * FROM issue_wakeup_receipt WHERE wakeup_id= @wakeup_id AND revision= @revision AND processed_at IS NULL ORDER BY created_at,id LIMIT 100;
+SELECT * FROM issue_wakeup_receipt WHERE wakeup_id= @wakeup_id AND revision= @revision AND processed_at IS NULL ORDER BY created_at,id LIMIT 100 FOR UPDATE;
+
+-- name: DeleteExpiredWakeupReceipts :execrows
+-- Pending inputs are never expired. Bound work and avoid waiting on dispatch.
+DELETE FROM issue_wakeup_receipt WHERE id IN (
+ SELECT expired.id FROM issue_wakeup_receipt expired WHERE expired.processed_at < @cutoff
+ ORDER BY expired.processed_at,expired.id LIMIT 1000 FOR UPDATE SKIP LOCKED
+);
 -- name: RecordWakeupReceipt :one
 INSERT INTO issue_wakeup_receipt(id,wakeup_id,revision,event_key,event_type,payload)
 VALUES(@id,@wakeup_id,@revision,@event_key,@event_type,@payload)

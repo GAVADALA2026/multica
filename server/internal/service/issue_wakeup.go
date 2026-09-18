@@ -389,24 +389,46 @@ func (s *IssueWakeupService) authorize(ctx context.Context, q *db.Queries, ws, m
 // Tick uses the existing scheduler lease. Each config has a row lock as well,
 // so a manual retry or a second server cannot dispatch the same receipt twice.
 func (s *IssueWakeupService) Tick(ctx context.Context) error {
+	// Receipts are operational evidence, not the run history. Match the existing
+	// event telemetry's seven-day retention; never expire unprocessed inputs.
+	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 2*time.Second)
+	_, cleanupErr := s.Tasks.Queries.DeleteExpiredWakeupReceipts(cleanupCtx, pgtype.Timestamptz{Time: time.Now().Add(-7 * 24 * time.Hour), Valid: true})
+	cleanupCancel()
 	rows, err := s.Tasks.Queries.ListReadyWakeups(ctx)
 	if err != nil {
 		return err
 	}
 	var errs []error
+	if cleanupErr != nil {
+		errs = append(errs, fmt.Errorf("expire wakeup receipts: %w", cleanupErr))
+	}
 	for _, w := range rows {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
+		// Outcome writes must not turn a busy rule row into another batch-wide
+		// wait. Use the batch context, not dispatch's expired per-rule context.
 		if err = s.dispatch(ctx, w); err != nil {
 			errs = append(errs, fmt.Errorf("wakeup %s: %w", util.UUIDToString(w.ID), err))
-			_ = s.Tasks.Queries.NoteWakeupFailure(ctx, db.NoteWakeupFailureParams{ID: w.ID, LastError: pgtype.Text{String: truncateForSummary(err.Error(), 500), Valid: true}})
+			outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			_ = s.Tasks.Queries.NoteWakeupFailure(outcomeCtx, db.NoteWakeupFailureParams{ID: w.ID, LastError: pgtype.Text{String: truncateForSummary(err.Error(), 500), Valid: true}})
+			cancel()
 		}
-		if touchErr := s.Tasks.Queries.TouchWakeupDispatch(ctx, w.ID); touchErr != nil {
+		outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		if touchErr := s.Tasks.Queries.TouchWakeupDispatch(outcomeCtx, w.ID); touchErr != nil {
 			errs = append(errs, touchErr)
 		}
+		cancel()
 	}
 	return errors.Join(errs...)
 }
 
 func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) error {
+	// A rule gets at most two seconds including credentials and SQL. Lock waits
+	// below are shorter: even 100 contended rules consume only ~5s of the 45s
+	// batch budget, leaving time to dispatch unrelated issues.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	// Resolve optional connected-app credentials before taking database locks.
 	candidate, readErr := s.Tasks.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: prev.AgentID, WorkspaceID: prev.WorkspaceID})
 	if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
@@ -421,6 +443,9 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '50ms'"); err != nil {
+		return err
+	}
 	q := s.Tasks.Queries.WithTx(tx)
 	var fenced bool
 	if candidate.ID.Valid {

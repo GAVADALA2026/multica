@@ -140,6 +140,20 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"501_wakeup_id":                                             "issue_wakeup_id_idx",
+	"502_wakeup_issue":                                          "issue_wakeup_issue_idx",
+	"503_wakeup_due":                                            "issue_wakeup_due_idx",
+	"504_wakeup_receipt_id":                                     "issue_wakeup_receipt_id_idx",
+	"505_wakeup_receipt_key":                                    "issue_wakeup_receipt_key_idx",
+	"506_wakeup_receipt_pending":                                "issue_wakeup_receipt_pending_idx",
+	"510_wakeup_event_issue":                                    "idx_wakeup_event_issue",
+	"512_wakeup_workspace_summary":                              "idx_wakeup_workspace_enabled",
+	"513_wakeup_run_lookup":                                     "agent_task_wakeup_lookup_idx",
+	"515_wakeup_workspace_history":                              "issue_wakeup_workspace_history_idx",
+	"516_wakeup_active_runs":                                    "agent_task_wakeup_active_idx",
+	"517_wakeup_terminal_runs":                                  "agent_task_wakeup_terminal_idx",
+	"518_wakeup_receipt_expiry":                                 "issue_wakeup_receipt_expiry_idx",
+	"520_wakeup_pending_event":                                  "issue_wakeup_pending_event_idx",
 	"486_maintenance_job_id_index":                              "idx_maintenance_job_id",
 	"487_maintenance_job_idempotency_index":                     "idx_maintenance_job_idempotency",
 	"488_maintenance_job_active_index":                          "idx_maintenance_job_active",

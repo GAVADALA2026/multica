@@ -989,6 +989,7 @@ type IssueWakeupReceipt struct {
 	TaskID      pgtype.UUID        `json:"task_id"`
 	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CoalesceKey pgtype.Text        `json:"coalesce_key"`
 }
 
 type LarkBindingToken struct {

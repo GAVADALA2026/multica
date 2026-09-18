@@ -125,8 +125,13 @@ func TestWorkspaceWakeupsInventory(t *testing.T) {
 	read(req, 404)
 	dbfx.Member(t, testWorkspaceID, outsider, "member")
 	p = read(req, 200)
-	if p.Total != 0 || len(p.Agents) != 0 || p.Counts["all"] != 0 {
-		t.Fatal("private inventory exposed")
+	if p.Total != 5 || len(p.Agents) != 1 || p.Counts["all"] != 5 {
+		t.Fatal("shared issue rules disappeared from inventory")
+	}
+	for _, r := range p.Items {
+		if r.CanManage || r.FilterAgentID != nil || r.FilterAgentName != nil || r.FilterTaskID != nil {
+			t.Fatal("shared inventory granted management or private source access")
+		}
 	}
 	// The public target is visible, but the rule remains managed by its creator.
 	dbfx.Exec(t, "UPDATE agent SET visibility='workspace',permission_mode='public_to' WHERE id=$1", agent)
