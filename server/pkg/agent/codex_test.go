@@ -1414,6 +1414,33 @@ func TestCodexRawItemAgentMessageFinalAnswerWaitsForTurnCompleted(t *testing.T) 
 	}
 }
 
+func TestCodexRawItemAgentMessageDeltasPreserveOrderWithoutCompletionDuplicate(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var chunks []string
+	var completed string
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			chunks = append(chunks, msg.Content)
+		}
+	}
+	c.onAgentMessage = func(text string) { completed = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"item":{"type":"agentMessage","id":"msg-1"},"delta":"He"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"item":{"type":"agentMessage","id":"msg-1"},"delta":"l"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Hello","phase":"final_answer"}}}`)
+
+	if got := strings.Join(chunks, ""); got != "Hello" {
+		t.Fatalf("streamed text = %q, want Hello exactly once (chunks=%q)", got, chunks)
+	}
+	if completed != "Hello" {
+		t.Fatalf("completed agent message = %q, want authoritative full text", completed)
+	}
+}
+
 // TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
 // deliverable. Codex used to concatenate every agent message, so a tool-using
 // run shipped its intermediate narration to Slack and Lark along with the answer
@@ -1472,6 +1499,7 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 					streamed = append(streamed, msg.Content)
 				}
 			}
+			c.onAgentMessage = func(text string) { lastAgentMessage = text }
 			c.onFinalAnswer = func(text string) { finalAnswer = text }
 
 			for _, line := range tc.lines {
@@ -3260,6 +3288,7 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-cancel-usage","turnId":"turn-cancel-usage","item":{"type":"agentMessage","id":"msg-partial"},"delta":"partial before cancel"}}'`+"\n"+
 		`echo started > `+startedPath+"\n"+
 		`read line`+"\n"+
 		`printf '%s\n' "$line" > `+interruptPath+"\n"+
@@ -3282,8 +3311,15 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var messagesMu sync.Mutex
+	var messages []Message
+	messagesDone := make(chan struct{})
 	go func() {
-		for range session.Messages {
+		defer close(messagesDone)
+		for message := range session.Messages {
+			messagesMu.Lock()
+			messages = append(messages, message)
+			messagesMu.Unlock()
 		}
 	}()
 
@@ -3316,6 +3352,18 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for cancelled Codex result")
+	}
+	<-messagesDone
+	messagesMu.Lock()
+	var partial string
+	for _, message := range messages {
+		if message.Type == MessageText {
+			partial += message.Content
+		}
+	}
+	messagesMu.Unlock()
+	if partial != "partial before cancel" {
+		t.Fatalf("cancelled turn streamed text = %q, want its pre-cancel delta preserved", partial)
 	}
 
 	rawInterrupt, err := os.ReadFile(interruptPath)
@@ -3704,6 +3752,78 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+}
+
+// TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted is the latency
+// regression for chat: app-server emits agent text as JSON-RPC delta events
+// before the authoritative item/completed snapshot. A JSON event may itself be
+// split across pipe writes, so no text is visible until its newline-delimited
+// frame is complete; once complete, however, the adapter must not wait for the
+// later item/completed event.
+func TestCodexExecuteStreamsCompleteJSONDeltaBeforeItemCompleted(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stream"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stream","turn":{"id":"turn-stream"}}}'`+"\n"+
+		`printf '%s' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-stream","turnId":"turn-stream","item":{"type":"agentMessage","id":"msg-1"},"delta":"Hel'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`printf '%s\n' 'lo"}}'`+"\n"+
+		`sleep 0.8`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stream","turnId":"turn-stream","item":{"type":"agentMessage","id":"msg-1","text":"Hello","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-stream","turn":{"id":"turn-stream","status":"completed"}}}'`+"\n")
+
+	cfg := Config{ExecutablePath: fakePath, Logger: slog.Default()}
+	backend, err := New("codex", cfg)
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var started time.Time
+	for {
+		select {
+		case msg, ok := <-session.Messages:
+			if !ok {
+				t.Fatal("message stream closed before the delta became visible")
+			}
+			if msg.Type == MessageStatus && msg.Status == "running" {
+				started = time.Now()
+				continue
+			}
+			if msg.Type != MessageText {
+				continue
+			}
+			if started.IsZero() {
+				t.Fatal("text delta arrived before turn/started")
+			}
+			if msg.Content != "Hello" {
+				t.Fatalf("first streamed text = %q, want Hello", msg.Content)
+			}
+			elapsed := time.Since(started)
+			t.Logf("complete delta JSON became visible %s after turn/started", elapsed.Round(time.Millisecond))
+			if elapsed >= 500*time.Millisecond {
+				t.Fatalf("first streamed text arrived after %s; adapter waited for item/completed", elapsed.Round(time.Millisecond))
+			}
+			return
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for streamed text")
+		}
 	}
 }
 

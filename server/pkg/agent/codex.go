@@ -1233,6 +1233,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				semanticObserved.Store(true)
 			}
 		},
+		onAgentMessage: func(text string) {
+			// Delta events make MessageText incremental. Keep Result.Output's
+			// legacy fallback authoritative by updating it from the completed
+			// agent-message snapshot, not whichever delta happened to arrive last.
+			outputMu.Lock()
+			lastAgentMessage = text
+			outputMu.Unlock()
+		},
 		onFinalAnswer: func(text string) {
 			outputMu.Lock()
 			finalAnswer = text
@@ -2308,8 +2316,13 @@ type codexClient struct {
 	turnIDMu               sync.RWMutex
 	turnID                 string
 	onMessage              func(Message)
-	onSemanticActivity     func(description string)
-	onTurnDone             func(aborted bool)
+	// onAgentMessage receives the authoritative completed text for one agent
+	// message. onMessage may receive that text incrementally from delta events,
+	// so Result.Output fallbacks must use this callback rather than the last
+	// streamed chunk.
+	onAgentMessage     func(text string)
+	onSemanticActivity func(description string)
+	onTurnDone         func(aborted bool)
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
@@ -2324,6 +2337,12 @@ type codexClient struct {
 	// suppressing an initialize retry after observed activity) without letting
 	// filtered history mutate current-turn output or lifecycle state.
 	onDiscardedNotification func(method string, params map[string]any)
+	// agentMessageDeltas holds the exact prefix already emitted for each raw-v2
+	// agentMessage item. The app-server stdout reader is the only caller, so the
+	// map needs no lock. item/completed supplies the authoritative whole text;
+	// emitting only its unseen suffix preserves the old transcript while making
+	// each complete JSON delta visible immediately.
+	agentMessageDeltas map[string]*strings.Builder
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnCompleted        bool
@@ -3280,6 +3299,9 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 		if text != "" && c.onMessage != nil {
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
+		if text != "" && c.onAgentMessage != nil {
+			c.onAgentMessage(text)
+		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
 		command, _ := msg["command"].(string)
@@ -3464,6 +3486,27 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	}
 
 	switch {
+	case method == "item/agentMessage/delta" && itemType == "agentMessage":
+		// JSON-RPC framing remains authoritative: handleLine invokes us only
+		// after a whole newline-delimited JSON event parsed successfully. Stream
+		// the event's text payload, not arbitrary stdout bytes.
+		delta, _ := params["delta"].(string)
+		if itemID == "" || delta == "" {
+			return
+		}
+		if c.agentMessageDeltas == nil {
+			c.agentMessageDeltas = make(map[string]*strings.Builder)
+		}
+		buffer := c.agentMessageDeltas[itemID]
+		if buffer == nil {
+			buffer = &strings.Builder{}
+			c.agentMessageDeltas[itemID] = buffer
+		}
+		buffer.WriteString(delta)
+		if c.onMessage != nil {
+			c.onMessage(Message{Type: MessageText, Content: delta})
+		}
+
 	case method == "item/started" && itemType == "commandExecution":
 		command, _ := item["command"].(string)
 		if c.onMessage != nil {
@@ -3532,8 +3575,34 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
+		streamed := ""
+		if buffer := c.agentMessageDeltas[itemID]; buffer != nil {
+			streamed = buffer.String()
+		}
+		delete(c.agentMessageDeltas, itemID)
+		if text != "" && c.onAgentMessage != nil {
+			c.onAgentMessage(text)
+		}
 		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text})
+			suffix := text
+			if streamed != "" {
+				if strings.HasPrefix(text, streamed) {
+					suffix = strings.TrimPrefix(text, streamed)
+				} else {
+					// The documented delta stream is an append-only prefix of the
+					// completed snapshot. If a future protocol violates that
+					// contract, keep the authoritative snapshot visible and make
+					// the incompatibility diagnosable rather than silently dropping
+					// final content.
+					if c.cfg.Logger != nil {
+						c.cfg.Logger.Warn("codex agent-message delta did not match completed text",
+							"item_id", itemID, "streamed_bytes", len(streamed), "completed_bytes", len(text))
+					}
+				}
+			}
+			if suffix != "" {
+				c.onMessage(Message{Type: MessageText, Content: suffix})
+			}
 		}
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {

@@ -2691,6 +2691,84 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 	}
 }
 
+type firstVisibleTranscriptBackend struct {
+	emitted chan time.Time
+	release chan struct{}
+}
+
+func (b firstVisibleTranscriptBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		defer close(msgCh)
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "first visible text"}
+		b.emitted <- time.Now()
+		select {
+		case <-b.release:
+			resCh <- agent.Result{Status: "completed", Output: "done"}
+		case <-ctx.Done():
+			resCh <- agent.Result{Status: "cancelled", Error: ctx.Err().Error()}
+		}
+		close(resCh)
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// TestExecuteAndDrain_ReportsFirstVisibleMessageWithoutTickerDelay pins the
+// leading edge of the daemon-to-server path. Later chunks remain batched, but
+// the first user-visible content must not sit behind the 500 ms periodic flush.
+func TestExecuteAndDrain_ReportsFirstVisibleMessageWithoutTickerDelay(t *testing.T) {
+	emitted := make(chan time.Time, 1)
+	release := make(chan struct{})
+	reported := make(chan time.Time, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			var body struct {
+				Messages []TaskMessageData `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode messages: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if len(body.Messages) > 0 {
+				select {
+				case reported <- time.Now():
+				default:
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := d.executeAndDrain(context.Background(), firstVisibleTranscriptBackend{
+			emitted: emitted,
+			release: release,
+		}, "p", agent.ExecOptions{}, slog.Default(), "task-first-visible", "", new(atomic.Int32))
+		done <- err
+	}()
+
+	emittedAt := <-emitted
+	select {
+	case reportedAt := <-reported:
+		delay := reportedAt.Sub(emittedAt)
+		t.Logf("first visible message reached the server in %s", delay.Round(time.Millisecond))
+		if delay >= 300*time.Millisecond {
+			t.Fatalf("first visible message report delay = %s, want <300ms", delay.Round(time.Millisecond))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first visible message report")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+}
+
 // timedTranscriptBackend keeps a tool open long enough to prove the daemon
 // records event occurrence time rather than giving a whole flush batch one
 // server insertion time.
@@ -2765,20 +2843,33 @@ func TestExecuteAndDrain_ReportsFirstBufferedChunkTimestamp(t *testing.T) {
 	}
 
 	got := rec.snapshot()
-	if len(got) != 2 {
-		t.Fatalf("reported %d messages, want thinking and text: %+v", len(got), got)
+	var thinking, text strings.Builder
+	var thinkingAt, textAt time.Time
+	for _, message := range got {
+		switch message.Type {
+		case "thinking":
+			thinking.WriteString(message.Content)
+			if thinkingAt.IsZero() {
+				thinkingAt = message.CreatedAt
+			}
+		case "text":
+			text.WriteString(message.Content)
+			if textAt.IsZero() {
+				textAt = message.CreatedAt
+			}
+		}
 	}
-	if got[0].Type != "thinking" || got[0].Content != "think one think two" {
-		t.Fatalf("thinking message = %+v", got[0])
+	if thinking.String() != "think one think two" {
+		t.Fatalf("thinking content = %q, want complete ordered chunks; messages=%+v", thinking.String(), got)
 	}
-	if boundary := <-backend.thinkingSecondStartedAt; !got[0].CreatedAt.Before(boundary) {
-		t.Fatalf("thinking created_at = %s, want before second chunk started at %s", got[0].CreatedAt, boundary)
+	if boundary := <-backend.thinkingSecondStartedAt; !thinkingAt.Before(boundary) {
+		t.Fatalf("first thinking created_at = %s, want before second chunk started at %s", thinkingAt, boundary)
 	}
-	if got[1].Type != "text" || got[1].Content != "text one text two" {
-		t.Fatalf("text message = %+v", got[1])
+	if text.String() != "text one text two" {
+		t.Fatalf("text content = %q, want complete ordered chunks; messages=%+v", text.String(), got)
 	}
-	if boundary := <-backend.textSecondStartedAt; !got[1].CreatedAt.Before(boundary) {
-		t.Fatalf("text created_at = %s, want before second chunk started at %s", got[1].CreatedAt, boundary)
+	if boundary := <-backend.textSecondStartedAt; !textAt.Before(boundary) {
+		t.Fatalf("first text created_at = %s, want before second chunk started at %s", textAt, boundary)
 	}
 }
 
