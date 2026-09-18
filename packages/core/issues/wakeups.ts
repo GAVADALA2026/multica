@@ -75,6 +75,20 @@ export function useEnableIssueWakeup(workspaceId: string, issueId: string) {
   });
 }
 
+export function useEditWakeupInstruction(workspaceId: string, issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string; instruction: string; expected_instruction: string; revision: number }) =>
+      api.editIssueWakeupInstruction(issueId, id, input),
+    onSettled: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["workspace-wakeups", workspaceId] }),
+        client.invalidateQueries({ queryKey: issueWakeupsOptions(workspaceId, issueId).queryKey }),
+      ]);
+    },
+  });
+}
+
 export function workspaceWakeupsOptions(
   workspaceId: string,
   filters: WorkspaceWakeupFilters,

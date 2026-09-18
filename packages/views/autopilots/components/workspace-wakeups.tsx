@@ -47,6 +47,7 @@ import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { CollectionPageState } from "../../layout/collection-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
+import { WakeupInstructionEditor } from "../../issues/components/wakeup-instruction-editor";
 import { WakeupControl } from "../../issues/components/wakeup-control";
 import {
   isActiveWakeupRun,
@@ -194,6 +195,7 @@ function WakeupListRow({
                 : undefined
           }
         >
+          <WakeupInstructionEditor workspaceId={wsId} issueId={row.issue_id} wakeupId={row.id} disabled={busy || !row.can_manage} />
           <WakeupControl
             wakeup={row}
             task={row.task ?? undefined}

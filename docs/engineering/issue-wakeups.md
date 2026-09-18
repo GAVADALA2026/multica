@@ -362,3 +362,29 @@ identity. Cross-rule cycles remain possible; avoid mutually triggering continuou
 comment subscriptions. Prefer a member actor filter for waiting on a human.
 Target agent names follow shared issue visibility, while source references and
 invocation/management authority keep their existing checks.
+
+
+### Editing wakeup instructions
+
+The issue sidebar details and Autopilot wakeup list share a prompt editor. The
+workspace list loads the issue's prompts only when the editor opens. Saving uses
+`PATCH /api/issues/:id/wakeups/:wakeupID/instruction` with `instruction`,
+`expected_instruction`, and `revision`; success returns 204. The existing full
+replacement PUT still has its original reconfiguration/rearm semantics.
+
+Prompt-only edits preserve schedule, enabled/consumed state, creator, provenance,
+subscription revision, pending receipts and existing runs. Later dispatch uses the
+new instructions (including when merging new evidence into a still-pending run);
+saving itself does not rewrite queued or running tasks. Structured evidence keeps
+the instruction used for its last rendering, so editing does not turn structured
+facts into a nested old prompt. Pre-snapshot notes remain bounded historical
+context, explicitly subordinate to the current instruction. Closed/disabled rules may
+be edited without resuming them. The caller must be the creator or a workspace
+admin/owner and must currently be allowed to invoke the target agent.
+
+Under the issue/config locks, both the prior prompt and subscription revision
+must match; otherwise saving returns 409 and the UI retains the draft. Keeping
+the subscription revision avoids invalidating receipts and queued work on a text
+edit. This additive endpoint needs no migration and does not change existing
+clients. Deploy the API before using the editor; an older API rejects the new
+endpoint and the editor keeps the unsaved text.

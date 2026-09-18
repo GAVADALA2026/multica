@@ -184,6 +184,65 @@ type WakeupEnableInput struct {
 	Rearm    bool       `json:"rearm,omitempty"`
 }
 
+type WakeupInstructionInput struct {
+	Instruction         string `json:"instruction"`
+	ExpectedInstruction string `json:"expected_instruction"`
+	Revision            int64  `json:"revision"`
+}
+
+// EditInstruction preserves the subscription revision and queued work. Compare
+// both the revision and the prior text so concurrent edits cannot overwrite one
+// another, without invalidating captured events or rearming a consumed rule.
+func (s *IssueWakeupService) EditInstruction(ctx context.Context, issueID, id, member pgtype.UUID, in WakeupInstructionInput) error {
+	in.Instruction = strings.TrimSpace(in.Instruction)
+	if len(in.Instruction) == 0 || len(in.Instruction) > 12000 || in.Revision < 1 {
+		return fmt.Errorf("%w: instruction must be 1–12000 bytes and revision is required", ErrWakeupInput)
+	}
+	tx, err := s.Tasks.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.Tasks.Queries.WithTx(tx)
+	var workspace pgtype.UUID
+	if err = tx.QueryRow(ctx, "SELECT w.id FROM workspace w JOIN issue i ON i.workspace_id=w.id WHERE i.id=$1 FOR KEY SHARE OF w", issueID).Scan(&workspace); err != nil {
+		return err
+	}
+	issue, err := q.LockWakeupIssue(ctx, issueID)
+	if err != nil {
+		return err
+	}
+	membership, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: member, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return ErrWakeupForbidden
+	}
+	w, err := q.LockIssueWakeup(ctx, id)
+	if err != nil {
+		return err
+	}
+	if w.IssueID != issue.ID || w.WorkspaceID != issue.WorkspaceID {
+		return pgx.ErrNoRows
+	}
+	if w.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
+		return ErrWakeupForbidden
+	}
+	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: w.AgentID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return ErrWakeupForbidden
+	}
+	if err = s.authorize(ctx, q, issue.WorkspaceID, member, agent); err != nil {
+		return err
+	}
+	if w.Revision != in.Revision || w.Instruction != in.ExpectedInstruction {
+		return ErrWakeupConflict
+	}
+	_, err = tx.Exec(ctx, "UPDATE issue_wakeup SET instruction=$2,updated_at=now() WHERE id=$1 AND workspace_id=$3", id, in.Instruction, workspace)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // Enable reads the configuration under Save's locks; clients never round-trip
 // instructions or filters. The revision fences stale toggles and duplicate rearm.
 func (s *IssueWakeupService) Enable(ctx context.Context, issueID, member, source, id pgtype.UUID, in WakeupEnableInput) (db.IssueWakeup, error) {

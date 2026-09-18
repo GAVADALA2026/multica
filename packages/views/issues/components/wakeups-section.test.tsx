@@ -25,6 +25,9 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button>Transcript</button>,
 }));
+vi.mock("./wakeup-instruction-editor", () => ({
+  WakeupInstructionEditor: () => <button>Edit prompt</button>,
+}));
 beforeEach(() => {
   mutate.mockReset();
   enable.mockReset().mockResolvedValue(undefined);
@@ -76,6 +79,7 @@ describe("Wakeups sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
     await waitFor(() => expect(screen.getByText("Check CI")).toBeVisible());
     expect(screen.getByRole("button", { name: "Transcript" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit prompt" })).toBeVisible();
   });
   it("keeps a consumed one-shot queued run in the current list with withdrawal", () => {
     wakeup.enabled = false;

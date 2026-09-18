@@ -76,3 +76,18 @@ func TestIssueWakeupStructuredEvidenceSurvivesDatabaseRoundTrip(t *testing.T) {
 		t.Fatalf("summary did not survive database round trip: %s", task.Context)
 	}
 }
+
+func TestWakeupEvidenceInstructionEditDoesNotReintroduceOldPrompt(t *testing.T) {
+	w := db.IssueWakeup{Kind: "event", Instruction: "old instructions"}
+	first, raw := mergeWakeupEvidence(w, db.AgentTaskQueue{}, []db.IssueWakeupReceipt{{EventType: "comment.created", Payload: json.RawMessage(`{"comment_id":"first"}`)}})
+	ctx, _ := json.Marshal(map[string]json.RawMessage{"wakeup_evidence": raw})
+	w.Instruction = "new instructions"
+	note, raw := mergeWakeupEvidence(w, db.AgentTaskQueue{Context: ctx, HandoffNote: pgtype.Text{String: first, Valid: true}}, []db.IssueWakeupReceipt{{EventType: "comment.created", Payload: json.RawMessage(`{"comment_id":"second"}`)}})
+	var evidence wakeupEvidence
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Legacy != "" || len(evidence.Facts) != 2 || evidence.Instruction != w.Instruction || strings.Contains(note, "old instructions") || !strings.Contains(note, "new instructions") {
+		t.Fatalf("prompt edit confused structured evidence: %s", note)
+	}
+}

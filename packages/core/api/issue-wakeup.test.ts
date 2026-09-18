@@ -143,3 +143,14 @@ it("preserves actor filters and accepts older responses without them", async () 
     await expect(client.listIssueWakeups("issue")).rejects.toThrow("Could not load wakeups");
   }
 });
+
+it("edits instructions through the scoped endpoint and propagates conflicts", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  const input = { instruction: "new", expected_instruction: "old", revision: 2 };
+  await client.editIssueWakeupInstruction("issue", "wake", input);
+  expect(fetch.mock.calls[0]?.[0]).toContain("/api/issues/issue/wakeups/wake/instruction");
+  expect(fetch.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "PATCH", body: JSON.stringify(input) }));
+  fetch.mockResolvedValue(new Response('{"error":"conflict"}', { status: 409 }));
+  await expect(client.editIssueWakeupInstruction("issue", "wake", input)).rejects.toThrow();
+});

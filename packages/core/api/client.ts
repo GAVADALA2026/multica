@@ -1100,6 +1100,10 @@ export class ApiClient {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/enable`, { method: "POST", body: JSON.stringify(input) });
   }
 
+  async editIssueWakeupInstruction(issueId: string, wakeupId: string, input: { instruction: string; expected_instruction: string; revision: number }): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/instruction`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/disable`, { method: "POST" });
   }

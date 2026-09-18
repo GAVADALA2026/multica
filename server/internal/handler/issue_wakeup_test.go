@@ -339,3 +339,28 @@ func TestIssueWakeupActorFilterAPIAndProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueWakeupInstructionAPI(t *testing.T) {
+	issue := dbfx.Issue(t, "edit prompt api")
+	agent := dbfx.Agent(t, "edit prompt", testRuntimeID)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
+	rule, err := svc.Create(context.Background(), parseUUID(issue), parseUUID(testUserID), pgtype.UUID{}, service.WakeupInput{AgentID: agent, Kind: "at", AfterSeconds: 600, Instruction: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id   string
+		body map[string]any
+		want int
+	}{
+		{uuidToString(rule.ID), map[string]any{"instruction": "new", "expected_instruction": "old", "revision": rule.Revision}, 204},
+		{uuidToString(rule.ID), map[string]any{"instruction": "overwritten", "expected_instruction": "old", "revision": rule.Revision}, 409},
+		{uuidToString(rule.ID), map[string]any{"instruction": " ", "expected_instruction": "new", "revision": rule.Revision}, 400},
+		{uuidToString(rule.ID), map[string]any{"instruction": "new", "expected_instruction": "new", "revision": rule.Revision, "enabled": true}, 400},
+		{"not-a-uuid", map[string]any{"instruction": "new", "expected_instruction": "new", "revision": rule.Revision}, 400},
+	} {
+		req := withURLParams(newRequest("PATCH", "/", tc.body), "id", issue, "wakeupID", tc.id)
+		testutil.Call(t, testHandler.EditIssueWakeupInstruction, req).Want(tc.want)
+	}
+}

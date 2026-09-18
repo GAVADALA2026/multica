@@ -288,3 +288,33 @@ func (h *Handler) EnableIssueWakeup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, result)
 }
+
+func (h *Handler) EditIssueWakeupInstruction(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	var in service.WakeupInstructionInput
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 160000))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeError(w, 400, "invalid instruction body")
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originator == "" {
+		writeError(w, 403, "a human originator is required")
+		return
+	}
+	svc := service.IssueWakeupService{Tasks: h.TaskService}
+	if err := svc.EditInstruction(r.Context(), issue.ID, id, parseUUID(originator), in); err != nil {
+		wakeupError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

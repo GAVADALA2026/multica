@@ -18,6 +18,7 @@ import {
   PopoverContent,
   PopoverTitle,
 } from "@multica/ui/components/ui/popover";
+import { WakeupInstructionEditor } from "./wakeup-instruction-editor";
 import { WakeupControl } from "./wakeup-control";
 import { TranscriptButton } from "../../common/task-transcript";
 import { useT } from "../../i18n";
@@ -46,6 +47,7 @@ function WakeupRow({
   onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
 }) {
   const { t } = useT("issues");
+  const workspaceId = useCurrentWorkspace()?.id ?? "";
   const text = useWakeupText();
   const status = task?.status ?? wakeup.last_task_status;
   const activeRun = isActiveWakeupRun(status);
@@ -121,9 +123,10 @@ function WakeupRow({
             {t(($) => $.wakeups.scope_title)}:{" "}
             {t(($) => $.wakeups.scope_current)}
           </p>
-          <p className="text-caption font-medium">
-            {t(($) => $.wakeups.instruction_title)}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-caption font-medium">{t(($) => $.wakeups.instruction_title)}</p>
+            <WakeupInstructionEditor workspaceId={workspaceId} issueId={wakeup.issue_id} wakeupId={wakeup.id} />
+          </div>
           <p className="whitespace-pre-wrap break-words text-caption">
             {wakeup.instruction}
           </p>

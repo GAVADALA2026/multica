@@ -15,6 +15,8 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaceWakeups: vi.fn(),
     disableIssueWakeup: vi.fn(),
     enableIssueWakeup: vi.fn(),
+    listIssueWakeups: vi.fn(),
+    editIssueWakeupInstruction: vi.fn(),
   },
 }));
 
@@ -219,4 +221,23 @@ it("makes read-only rules non-selectable and surfaces inventory failures", async
     "Could not load wakeups",
   );
   expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+});
+
+
+it("opens the shared prompt editor from a manageable row without loading all prompts", async () => {
+  const [first, second] = rows;
+  if (!first || !second) throw new Error("Missing wakeup fixtures");
+  vi.mocked(api.listIssueWakeups).mockResolvedValue([{ ...first, instruction: "Inspect the result" }]);
+  vi.mocked(api.editIssueWakeupInstruction).mockResolvedValue(undefined);
+  second.can_manage = false;
+  mount();
+  const buttons = await screen.findAllByRole("button", { name: "Edit prompt" });
+  expect(buttons[1]).toBeDisabled();
+  expect(api.listIssueWakeups).not.toHaveBeenCalled();
+  if (!buttons[0]) throw new Error("Missing edit button");
+  fireEvent.click(buttons[0]);
+  const input = await screen.findByRole("textbox", { name: "What to do when woken" });
+  fireEvent.change(input, { target: { value: "Inspect and summarize" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.editIssueWakeupInstruction).toHaveBeenCalledWith("issue-a", "a", { instruction: "Inspect and summarize", expected_instruction: "Inspect the result", revision: 1 }));
 });
