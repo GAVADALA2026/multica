@@ -79,6 +79,14 @@ const (
 	// their default separate without slowing failures for lightweight RPCs.
 	defaultCodexThreadHandshakeTimeout = 60 * time.Second
 	codexVersionDiagnosticTimeout      = 2 * time.Second
+	// Keep a raw agent-message tail small enough that a slow daemon does not
+	// make the stdout reader retain token-sized channel entries indefinitely.
+	// At one sixty-fourth of the scanner's maximum completed-snapshot line, any
+	// reconcilable item occupies at most 65 of the 256 message slots (the leading
+	// delta plus 64 aggregates), reserving the rest for status and tool events.
+	// A single provider event may be larger, in which case that event is flushed
+	// as one chunk rather than split at an arbitrary byte boundary.
+	codexAgentMessageAggregateBytes = agentStreamMaxLineBytes / 64
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -1198,6 +1206,18 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// race between the lifecycle goroutine writing and the reader reading.
 	turnDone := make(chan bool, 1) // true = aborted
 
+	observeMessage := func(msg Message) {
+		logCodexAgentMessage(b.cfg.Logger, msg)
+		activity := describeCodexSemanticActivity(msg)
+		if activity == "status:running" {
+			firstItemWait.start(time.Now())
+		}
+		trySendString(semanticActivityCh, activity)
+		if activity != "" {
+			semanticObserved.Store(true)
+		}
+	}
+
 	c := &codexClient{
 		cfg:                    b.cfg,
 		stdin:                  stdin,
@@ -1217,21 +1237,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			semanticObserved.Store(true)
 		},
 		onMessage: func(msg Message) {
-			logCodexAgentMessage(b.cfg.Logger, msg)
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				lastAgentMessage = msg.Content
-				outputMu.Unlock()
-			}
-			activity := describeCodexSemanticActivity(msg)
-			if activity == "status:running" {
-				firstItemWait.start(time.Now())
-			}
+			observeMessage(msg)
 			trySend(msgCh, msg)
-			trySendString(semanticActivityCh, activity)
-			if activity != "" {
-				semanticObserved.Store(true)
-			}
+		},
+		onAgentMessageChunk: func(text string) bool {
+			msg := Message{Type: MessageText, Content: text}
+			observeMessage(msg)
+			// Agent text is the user-visible transcript, so unlike auxiliary
+			// progress events it participates in reconciliation. A false return
+			// leaves the text pending for completed/terminal/EOF retry. Keep the
+			// send non-blocking because Session.Messages is optional; bounded
+			// coalescing prevents a token burst from filling the channel while
+			// preserving the reader's EOF and cancellation liveness.
+			return trySend(msgCh, msg)
 		},
 		onAgentMessage: func(text string) {
 			// Delta events make MessageText incremental. Keep Result.Output's
@@ -1271,6 +1289,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			c.handleLine(line)
 		}
+		// A cancelled or crashed app-server may close stdout without an
+		// item/completed snapshot. Preserve every complete delta JSON event
+		// already parsed; an incomplete final JSON token is ignored by
+		// handleLine and can never enter this buffer.
+		c.flushAgentMessageDeltas()
 		if err := scanner.Err(); err != nil {
 			// %w on BOTH: callers match errCodexProcessExited to decide the
 			// process is gone, and bufio.ErrTooLong to tell "we could not read
@@ -2316,10 +2339,14 @@ type codexClient struct {
 	turnIDMu               sync.RWMutex
 	turnID                 string
 	onMessage              func(Message)
+	// onAgentMessageChunk reports whether a text chunk was handed to the
+	// daemon-facing message channel. Raw delta reconciliation advances only on
+	// true, so channel pressure cannot turn observed provider bytes into a false
+	// delivered prefix. Unit clients may leave this nil and use onMessage.
+	onAgentMessageChunk func(text string) bool
 	// onAgentMessage receives the authoritative completed text for one agent
-	// message. onMessage may receive that text incrementally from delta events,
-	// so Result.Output fallbacks must use this callback rather than the last
-	// streamed chunk.
+	// message. onAgentMessageChunk may deliver that text incrementally, so
+	// Result.Output fallbacks must use this callback rather than the last chunk.
 	onAgentMessage     func(text string)
 	onSemanticActivity func(description string)
 	onTurnDone         func(aborted bool)
@@ -2337,12 +2364,12 @@ type codexClient struct {
 	// suppressing an initialize retry after observed activity) without letting
 	// filtered history mutate current-turn output or lifecycle state.
 	onDiscardedNotification func(method string, params map[string]any)
-	// agentMessageDeltas holds the exact prefix already emitted for each raw-v2
-	// agentMessage item. The app-server stdout reader is the only caller, so the
-	// map needs no lock. item/completed supplies the authoritative whole text;
-	// emitting only its unseen suffix preserves the old transcript while making
-	// each complete JSON delta visible immediately.
-	agentMessageDeltas map[string]*strings.Builder
+	// agentMessageStreams tracks raw-v2 agent text on the single stdout reader.
+	// The first delta is handed off immediately; subsequent deltas are aggregated
+	// into bounded chunks and reconciled against item/completed. delivered is
+	// advanced only after onAgentMessageChunk confirms daemon handoff.
+	agentMessageStreams map[string]*codexAgentMessageStream
+	agentMessageOrder   []string
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnCompleted        bool
@@ -2357,6 +2384,11 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+}
+
+type codexAgentMessageStream struct {
+	delivered strings.Builder
+	pending   strings.Builder
 }
 
 // codexTurnNotificationGate keeps resume-time history replay from mutating the
@@ -3425,6 +3457,11 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.extractUsageFromMap(turn)
 		}
 
+		// Some cancellation and transport-failure paths do not emit an
+		// item/completed snapshot. Flush the aggregate of every complete delta
+		// notification before publishing the terminal boundary.
+		c.flushAgentMessageDeltas()
+
 		if c.onTurnDone != nil {
 			c.onTurnDone(aborted)
 		}
@@ -3474,14 +3511,142 @@ func (c *codexClient) isNotificationFromOtherThread(params map[string]any) bool 
 	return currentThreadID != "" && threadID != currentThreadID
 }
 
+func (c *codexClient) emitAgentMessageChunk(text string) bool {
+	if text == "" {
+		return true
+	}
+	if c.onAgentMessageChunk != nil {
+		return c.onAgentMessageChunk(text)
+	}
+	if c.onMessage != nil {
+		c.onMessage(Message{Type: MessageText, Content: text})
+		return true
+	}
+	return false
+}
+
+func (c *codexClient) agentMessageStream(itemID string) *codexAgentMessageStream {
+	if c.agentMessageStreams == nil {
+		c.agentMessageStreams = make(map[string]*codexAgentMessageStream)
+	}
+	stream := c.agentMessageStreams[itemID]
+	if stream == nil {
+		stream = &codexAgentMessageStream{}
+		c.agentMessageStreams[itemID] = stream
+		c.agentMessageOrder = append(c.agentMessageOrder, itemID)
+	}
+	return stream
+}
+
+func (c *codexClient) handleAgentMessageDelta(itemID, delta string) {
+	if itemID == "" || delta == "" {
+		return
+	}
+
+	stream := c.agentMessageStream(itemID)
+	// The leading delta is the latency-critical event. Deliver it immediately;
+	// coalesce the rest so a burst of token notifications cannot fill the
+	// daemon channel before its consumer is scheduled.
+	if stream.delivered.Len() == 0 && stream.pending.Len() == 0 {
+		if c.emitAgentMessageChunk(delta) {
+			stream.delivered.WriteString(delta)
+			return
+		}
+	}
+
+	stream.pending.WriteString(delta)
+	if stream.pending.Len() >= codexAgentMessageAggregateBytes {
+		c.flushAgentMessageStream(stream)
+	}
+}
+
+func (c *codexClient) flushAgentMessageStream(stream *codexAgentMessageStream) bool {
+	if stream == nil || stream.pending.Len() == 0 {
+		return true
+	}
+	text := stream.pending.String()
+	if !c.emitAgentMessageChunk(text) {
+		return false
+	}
+	stream.delivered.WriteString(text)
+	stream.pending.Reset()
+	return true
+}
+
+// flushAgentMessageDeltas preserves complete delta events when a turn is
+// cancelled or stdout ends before item/completed. agentMessageOrder retains
+// provider order; iterating the map directly would make two unfinished items
+// nondeterministic.
+func (c *codexClient) flushAgentMessageDeltas() {
+	for _, itemID := range c.agentMessageOrder {
+		stream := c.agentMessageStreams[itemID]
+		if stream == nil {
+			continue
+		}
+		if c.flushAgentMessageStream(stream) {
+			delete(c.agentMessageStreams, itemID)
+		}
+	}
+}
+
+func (c *codexClient) completeAgentMessage(itemID, text string) {
+	stream := c.agentMessageStreams[itemID]
+	if text == "" {
+		if c.flushAgentMessageStream(stream) {
+			delete(c.agentMessageStreams, itemID)
+		}
+		return
+	}
+
+	delivered := ""
+	if stream != nil {
+		delivered = stream.delivered.String()
+		// The completed snapshot supersedes bytes that were observed but not
+		// handed to the daemon. Reconcile from the acknowledged prefix only.
+		stream.pending.Reset()
+	} else {
+		stream = c.agentMessageStream(itemID)
+	}
+
+	if !strings.HasPrefix(text, delivered) {
+		// Already-persisted text cannot be retracted without a new event/schema.
+		// Appending the full snapshot would duplicate it, so retain the live
+		// transcript exactly as delivered and use onAgentMessage below as the
+		// authoritative Result.Output fallback. The warning makes protocol drift
+		// diagnosable without corrupting the append-only audit stream.
+		if c.cfg.Logger != nil {
+			c.cfg.Logger.Warn("codex agent-message delta did not match completed text",
+				"item_id", itemID, "delivered_bytes", len(delivered), "completed_bytes", len(text))
+		}
+		delete(c.agentMessageStreams, itemID)
+		return
+	}
+
+	suffix := strings.TrimPrefix(text, delivered)
+	if suffix == "" || c.emitAgentMessageChunk(suffix) {
+		delete(c.agentMessageStreams, itemID)
+		return
+	}
+	// A process cancellation can race the final handoff. Keep the authoritative
+	// suffix so the stdout-EOF flush gets one more chance without duplicating the
+	// prefix that was already accepted.
+	stream.pending.WriteString(suffix)
+}
+
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
+	if method == "item/agentMessage/delta" {
+		// Unlike item/started and item/completed, the real app-server delta
+		// schema is flat: {threadId, turnId, itemId, delta}.
+		itemType = "agentMessage"
+		itemID, _ = params["itemId"].(string)
+	}
 	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
 	}
-	if item == nil {
+	if item == nil && method != "item/agentMessage/delta" {
 		return
 	}
 
@@ -3491,21 +3656,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		// after a whole newline-delimited JSON event parsed successfully. Stream
 		// the event's text payload, not arbitrary stdout bytes.
 		delta, _ := params["delta"].(string)
-		if itemID == "" || delta == "" {
-			return
-		}
-		if c.agentMessageDeltas == nil {
-			c.agentMessageDeltas = make(map[string]*strings.Builder)
-		}
-		buffer := c.agentMessageDeltas[itemID]
-		if buffer == nil {
-			buffer = &strings.Builder{}
-			c.agentMessageDeltas[itemID] = buffer
-		}
-		buffer.WriteString(delta)
-		if c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: delta})
-		}
+		c.handleAgentMessageDelta(itemID, delta)
 
 	case method == "item/started" && itemType == "commandExecution":
 		command, _ := item["command"].(string)
@@ -3575,35 +3726,10 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
-		streamed := ""
-		if buffer := c.agentMessageDeltas[itemID]; buffer != nil {
-			streamed = buffer.String()
-		}
-		delete(c.agentMessageDeltas, itemID)
 		if text != "" && c.onAgentMessage != nil {
 			c.onAgentMessage(text)
 		}
-		if text != "" && c.onMessage != nil {
-			suffix := text
-			if streamed != "" {
-				if strings.HasPrefix(text, streamed) {
-					suffix = strings.TrimPrefix(text, streamed)
-				} else {
-					// The documented delta stream is an append-only prefix of the
-					// completed snapshot. If a future protocol violates that
-					// contract, keep the authoritative snapshot visible and make
-					// the incompatibility diagnosable rather than silently dropping
-					// final content.
-					if c.cfg.Logger != nil {
-						c.cfg.Logger.Warn("codex agent-message delta did not match completed text",
-							"item_id", itemID, "streamed_bytes", len(streamed), "completed_bytes", len(text))
-					}
-				}
-			}
-			if suffix != "" {
-				c.onMessage(Message{Type: MessageText, Content: suffix})
-			}
-		}
+		c.completeAgentMessage(itemID, text)
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {
 			// The gate exists so a subagent or a replayed history turn cannot
