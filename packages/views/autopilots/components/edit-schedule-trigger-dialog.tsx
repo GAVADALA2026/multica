@@ -64,21 +64,32 @@ function EditScheduleTriggerDialogBody({
   const [submitting, setSubmitting] = useState(false);
   const scheduleGate = useScheduleSubmitGate(wsId);
 
-  // Snapshotted at mount, and compared against the editor's own output rather
-  // than the stored string: `parseCron` → `toCron` normalizes (a bare cron on a
-  // zoned row comes back carrying its `TZ=` prefix), so the stored text differs
-  // from the editor's rendering of the very same schedule. Sending that
-  // normalization as an edit would read as a substantive change server-side —
-  // republishing the rule version and moving this trigger's accountability to
-  // whoever opened the dialog, which MUL-4302 settled must not happen on a
-  // label-only or no-op save.
-  const initialCronRef = useRef(toCron(initialCfg));
-  const initialTimezoneRef = useRef(initialCfg.timezone);
+  // What "changed" is measured against, snapshotted at mount — never read live
+  // off `trigger`. The detail query refreshes under an open dialog (a teammate
+  // saving this same row), and a prop moving under an untouched control would
+  // read as this user's edit: Save would then send the value they never set,
+  // back over the one that had just landed.
+  //
+  // The cron baseline is the editor's own rendering of the stored expression,
+  // not the stored text: `parseCron` → `toCron` normalizes (a bare cron on a
+  // zoned row comes back carrying its `TZ=` prefix), so comparing against the
+  // stored string would call an untouched schedule edited. Server-side that
+  // reads as a substantive change — republishing the rule version and moving
+  // this trigger's accountability to whoever opened the dialog, which MUL-4302
+  // settled must not happen on a label-only or no-op save.
+  const baseline = useRef({
+    cron: toCron(initialCfg),
+    timezone: initialCfg.timezone,
+    // Trimmed like the value submit sends, so a stored label carrying stray
+    // whitespace is not already an edit the moment the dialog opens.
+    label: (trigger.label ?? "").trim(),
+    enabled: trigger.enabled,
+  });
   const scheduleDirty =
-    toCron(config) !== initialCronRef.current ||
-    config.timezone !== initialTimezoneRef.current;
-  const labelDirty = label.trim() !== (trigger.label ?? "");
-  const enabledDirty = enabled !== trigger.enabled;
+    toCron(config) !== baseline.current.cron ||
+    config.timezone !== baseline.current.timezone;
+  const labelDirty = label.trim() !== baseline.current.label;
+  const enabledDirty = enabled !== baseline.current.enabled;
   const dirty = scheduleDirty || labelDirty || enabledDirty;
   // The cron gate only stands between the user and a write that carries a cron.
   // A row whose stored expression the server can no longer preview is exactly

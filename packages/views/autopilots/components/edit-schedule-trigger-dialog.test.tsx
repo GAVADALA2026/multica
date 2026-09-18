@@ -68,17 +68,19 @@ function trigger(overrides: Partial<AutopilotTrigger> = {}): AutopilotTrigger {
 function renderDialog(trig: AutopilotTrigger = trigger()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onOpenChange = vi.fn();
-  const result = renderWithI18n(
+  const tree = (next: AutopilotTrigger) => (
     <QueryClientProvider client={qc}>
       <EditScheduleTriggerDialog
         open
         onOpenChange={onOpenChange}
         autopilotId={AUTOPILOT_ID}
-        trigger={trig}
+        trigger={next}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { ...result, onOpenChange };
+  const result = renderWithI18n(tree(trig));
+  // The detail query refreshing under an open dialog: new props, same mount.
+  return { ...result, onOpenChange, refreshProps: (next: AutopilotTrigger) => result.rerender(tree(next)) };
 }
 
 const saveButton = () => screen.getByRole("button", { name: "Save" });
@@ -213,5 +215,38 @@ describe("EditScheduleTriggerDialog sends only what the user changed", () => {
     preview.release?.();
     await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
     expect(mockUpdateTrigger.mock.calls[0]?.[0].label).toBeUndefined();
+  });
+
+  it("does not call a stored label with stray whitespace an edit", () => {
+    renderDialog(trigger({ label: "  Morning sweep  " }));
+
+    // The baseline is trimmed the way submit trims, so opening the dialog on a
+    // historical label does not by itself arm Save.
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it("leaves alone a field a teammate changed under the open dialog", async () => {
+    const user = userEvent.setup();
+    const { refreshProps } = renderDialog(trigger({ label: "Old name" }));
+
+    // A teammate renames this row and pauses it; the detail query refreshes and
+    // the dialog takes the new props without remounting, so its untouched
+    // controls still hold what it opened on.
+    refreshProps(trigger({ label: "Renamed by teammate", enabled: false }));
+
+    // This user has edited nothing, so there is nothing of theirs to save.
+    expect(saveButton()).toBeDisabled();
+
+    // And when they do edit one field, only that field travels: the rename and
+    // the pause stay as the teammate left them instead of being reverted to
+    // what this dialog happened to be showing.
+    await user.click(screen.getByRole("button", { name: "At a time" }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    const patch = mockUpdateTrigger.mock.calls[0]?.[0];
+    expect(patch.label).toBeUndefined();
+    expect(patch.enabled).toBeUndefined();
+    expect(patch.cron_expression).toBeDefined();
   });
 });
