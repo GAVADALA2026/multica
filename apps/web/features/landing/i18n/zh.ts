@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.5.0",
         date: "2026-09-18",
-        title: "法语界面、Autopilot 日程编辑、Inbox 完整归档、登录状态更持久",
+        title: "法语界面、智能体运行更稳更省、Inbox 完整归档、登录状态更持久",
         changes: [],
         features: [
           "界面语言可以选法语，网页端和桌面端都支持。",
@@ -307,6 +307,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "Autopilot 的每条日程都能单独编辑或暂停，不用删掉重建。",
         ],
         improvements: [
+          "智能体接着上一轮继续时，不用再把整个 Issue 和评论重读一遍。",
           "一直在使用时登录状态会自动延长，不再每 30 天被强制退出。",
           "Inbox 的归档可以一直往回翻到最早的通知，筛选和链接也覆盖全部。",
           "各处重复的说明文字精简了，Chat 列表的初始宽度与 Inbox 一致。",

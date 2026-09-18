@@ -272,7 +272,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.5.0",
           date: "2026-09-18",
-          title: "フランス語の画面、オートパイロットのスケジュール編集、Inbox のアーカイブ全件、より長く続くログイン",
+          title: "フランス語の画面、より安定して無駄のないエージェント実行、Inbox のアーカイブ全件、より長く続くログイン",
           changes: [],
           features: [
             "画面の言語にフランス語を選べます。Web でもデスクトップアプリでも使えます。",
@@ -283,6 +283,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             "オートパイロットのスケジュールを 1 つずつ編集・一時停止でき、消して作り直す必要がありません。",
           ],
           improvements: [
+            "エージェントが作業を再開するとき、Issue とコメントを最初から読み直しません。",
             "使い続けている間はログインが延長され、30 日ごとに強制的にログアウトされません。",
             "Inbox のアーカイブを一番古い通知までたどれ、絞り込みもリンクも全体に届きます。",
             "重複した説明文がなくなり、Chat の一覧の初期の幅が Inbox と揃いました。",

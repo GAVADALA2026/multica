@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.5.0",
           date: "2026-09-18",
-          title: "프랑스어 화면, 오토파일럿 일정 편집, Inbox 보관함 전체, 더 오래 유지되는 로그인",
+          title: "프랑스어 화면, 더 안정적이고 군더더기 없는 에이전트 실행, Inbox 보관함 전체, 더 오래 유지되는 로그인",
           changes: [],
           features: [
             "화면 언어로 프랑스어를 고를 수 있고, 웹과 데스크톱 앱 모두 지원합니다.",
@@ -282,6 +282,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "오토파일럿의 일정을 하나씩 고치거나 잠시 멈출 수 있어, 지우고 다시 만들지 않아도 됩니다.",
           ],
           improvements: [
+            "에이전트가 작업을 이어갈 때 Issue와 댓글을 처음부터 다시 읽지 않습니다.",
             "계속 사용하면 로그인이 연장되어, 30일마다 강제로 로그아웃되지 않습니다.",
             "Inbox 보관함을 가장 오래된 알림까지 넘겨볼 수 있고, 필터와 링크도 전체를 다룹니다.",
             "중복된 설명 문구가 사라지고, Chat 목록의 처음 너비가 Inbox와 같아졌습니다.",

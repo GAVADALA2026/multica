@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.5.0",
         date: "2026-09-18",
-        title: "French interface, Autopilot schedule editing, the full Inbox archive, and longer-lasting sign-ins",
+        title: "French interface, steadier and leaner agent runs, the full Inbox archive, and longer-lasting sign-ins",
         changes: [],
         features: [
           "Set the interface language to French, on the web and in the desktop app.",
@@ -307,6 +307,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Edit or pause any one of an Autopilot's schedules, instead of deleting it and starting over.",
         ],
         improvements: [
+          "An agent picking a task back up gets straight to work, instead of re-reading the whole Issue and every comment.",
           "Staying active keeps you signed in, instead of logging you out every 30 days.",
           "The Inbox archive scrolls all the way back, and filters and links reach every notification.",
           "Repetitive on-screen explanations are gone, and the Chat list opens at the same width as the Inbox.",
