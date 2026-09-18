@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -233,6 +234,281 @@ func TestTerminalReportReplaysAfterDaemonRestart(t *testing.T) {
 	}
 	if replayed != report {
 		t.Fatalf("restart replay = %+v, want %+v", replayed, report)
+	}
+}
+
+func TestTerminalReportEnqueueFailureStillAttemptsHTTP(t *testing.T) {
+	cfg := Config{
+		ServerBaseURL:  "https://api.example.test",
+		WorkspacesRoot: t.TempDir(),
+		DaemonID:       "daemon-read-only-queue",
+	}
+	d := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := os.MkdirAll(filepath.Dir(d.terminalReports.dir), 0o700); err != nil {
+		t.Fatalf("create queue parent: %v", err)
+	}
+	// A regular file where the namespace directory must be deterministically
+	// exercises an unwritable/unusable outbox even when tests run as root.
+	if err := os.WriteFile(d.terminalReports.dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("create invalid queue path: %v", err)
+	}
+
+	var calls atomic.Int32
+	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
+		calls.Add(1)
+		if got.taskID != "task-online" || got.output != "deliver me" {
+			t.Fatalf("direct report = %+v", got)
+		}
+		return nil
+	}
+	if err := d.reportTerminalTask(context.Background(), terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-online", output: "deliver me",
+	}); err != nil {
+		t.Fatalf("online delivery failed because enqueue failed: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("HTTP attempts = %d, want 1 despite enqueue failure", got)
+	}
+}
+
+func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *testing.T) {
+	d := New(Config{
+		ServerBaseURL:  "https://api.example.test",
+		WorkspacesRoot: t.TempDir(),
+		DaemonID:       "daemon-quarantine",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	base := time.Date(2026, time.September, 18, 0, 0, 0, 0, time.UTC)
+	now := base
+	d.terminalReportNow = func() time.Time { return now }
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-rejected", output: "original successful answer",
+		branchName: "agent/original", sessionID: "session-original",
+	}
+	var completeCalls, fallbackCalls atomic.Int32
+	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
+		switch got.kind {
+		case terminalTaskReportComplete:
+			completeCalls.Add(1)
+			return &requestError{Method: http.MethodPost, Path: "/complete", StatusCode: http.StatusForbidden, Body: "forbidden"}
+		case terminalTaskReportFail:
+			fallbackCalls.Add(1)
+			return nil
+		default:
+			t.Fatalf("unexpected terminal report kind %d", got.kind)
+			return nil
+		}
+	}
+
+	if err := d.reportTerminalTask(context.Background(), report); err == nil {
+		t.Fatal("permanently rejected completion unexpectedly succeeded")
+	}
+	now = base.Add(5 * time.Minute)
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 1 || delivered != 0 {
+		t.Fatalf("second rejection replay = pending:%d delivered:%d, want 1/0", pending, delivered)
+	}
+	now = base.Add(terminalReportPermanentRejectionAge)
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 0 || delivered != 0 {
+		t.Fatalf("quarantine replay = pending:%d delivered:%d, want 0/0", pending, delivered)
+	}
+	if got := completeCalls.Load(); got != terminalReportPermanentRejectionLimit {
+		t.Fatalf("completion attempts = %d, want %d", got, terminalReportPermanentRejectionLimit)
+	}
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("failure compensation attempts = %d, want 1", got)
+	}
+
+	stats, err := d.terminalReports.stats()
+	if err != nil {
+		t.Fatalf("terminal report stats: %v", err)
+	}
+	if stats.PendingCount != 0 || stats.FailedCount != 1 || stats.FailedBytes == 0 {
+		t.Fatalf("queue stats = %+v, want one non-empty failed record", stats)
+	}
+	body, err := os.ReadFile(filepath.Join(d.terminalReports.failedDir(), terminalReportFileName(report.taskID)))
+	if err != nil {
+		t.Fatalf("read failed terminal report: %v", err)
+	}
+	record, err := decodePersistedTerminalReport(body)
+	if err != nil {
+		t.Fatalf("decode failed terminal report: %v", err)
+	}
+	got, err := record.terminalReport()
+	if err != nil {
+		t.Fatalf("validate failed terminal report: %v", err)
+	}
+	if got != report {
+		t.Fatalf("quarantined payload = %+v, want original %+v", got, report)
+	}
+	if record.PermanentRejectionCount != terminalReportPermanentRejectionLimit || record.QuarantinedAt == nil {
+		t.Fatalf("quarantine metadata = %+v", record)
+	}
+	// failed/ is not part of list(), so another replay pass cannot hot-loop it.
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 0 || delivered != 0 {
+		t.Fatalf("post-quarantine replay = pending:%d delivered:%d, want 0/0", pending, delivered)
+	}
+}
+
+func TestTerminalReportPermanentRejectionClassification(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"bad request", &requestError{StatusCode: http.StatusBadRequest}, true},
+		{"forbidden", &requestError{StatusCode: http.StatusForbidden}, true},
+		{"semantic missing task", &requestError{StatusCode: http.StatusNotFound, Body: "task not found"}, true},
+		{"generic missing route", &requestError{StatusCode: http.StatusNotFound, Body: "not found"}, false},
+		{"expired auth", &requestError{StatusCode: http.StatusUnauthorized}, false},
+		{"rate limited", &requestError{StatusCode: http.StatusTooManyRequests}, false},
+		{"conflict", &requestError{StatusCode: http.StatusConflict}, false},
+		{"server failure", &requestError{StatusCode: http.StatusBadGateway}, false},
+		{"transport", errors.New("connection reset"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, got := terminalReportPermanentRejection(tc.err)
+			if got != tc.want {
+				t.Fatalf("classification = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTerminalReportForegroundAndReplayDoNotSendConcurrently(t *testing.T) {
+	d := New(Config{
+		ServerBaseURL:  "https://api.example.test",
+		WorkspacesRoot: t.TempDir(),
+		DaemonID:       "daemon-in-flight",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "task-race", output: "once"}
+	if err := d.terminalReports.enqueue(report); err != nil {
+		t.Fatalf("seed pending report: %v", err)
+	}
+
+	started := make(chan struct{})
+	releaseSend := make(chan struct{})
+	var calls atomic.Int32
+	d.terminalReportSend = func(_ context.Context, _ terminalTaskReport, _ []time.Duration) error {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-releaseSend
+		return nil
+	}
+	foregroundDone := make(chan error, 1)
+	go func() { foregroundDone <- d.reportTerminalTask(context.Background(), report) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("foreground terminal send did not start")
+	}
+
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 1 || delivered != 0 {
+		t.Fatalf("racing replay = pending:%d delivered:%d, want 1/0", pending, delivered)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("concurrent terminal sends = %d, want exactly one in flight", got)
+	}
+	close(releaseSend)
+	if err := <-foregroundDone; err != nil {
+		t.Fatalf("foreground terminal report: %v", err)
+	}
+	if items, err := d.terminalReports.list(); err != nil || len(items) != 0 {
+		t.Fatalf("pending reports after foreground ack = %d, %v", len(items), err)
+	}
+}
+
+func TestTerminalReportCorruptRecordRemainsVisibleAcrossReplayPasses(t *testing.T) {
+	d := New(Config{
+		ServerBaseURL:  "https://api.example.test",
+		WorkspacesRoot: t.TempDir(),
+		DaemonID:       "daemon-corrupt",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := d.terminalReports.ensureDir(); err != nil {
+		t.Fatalf("prepare terminal report queue: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d.terminalReports.dir, "corrupt.json"), []byte("private-corrupt-payload"), 0o600); err != nil {
+		t.Fatalf("write corrupt record: %v", err)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 1 || delivered != 0 {
+			t.Fatalf("replay pass %d = pending:%d delivered:%d, want 1/0", pass, pending, delivered)
+		}
+	}
+	stats, err := d.terminalReports.stats()
+	if err != nil {
+		t.Fatalf("terminal report stats: %v", err)
+	}
+	if stats.PendingCount != 1 || stats.PendingBytes == 0 {
+		t.Fatalf("corrupt record stats = %+v", stats)
+	}
+}
+
+func TestTerminalReportFutureVersionIsRetainedAcrossDowngrade(t *testing.T) {
+	store := newTerminalReportStore(Config{
+		ServerBaseURL: "https://api.example.test", WorkspacesRoot: t.TempDir(), DaemonID: "older-daemon",
+	})
+	if err := store.ensureDir(); err != nil {
+		t.Fatalf("prepare terminal report queue: %v", err)
+	}
+	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "future-task", output: "future payload"}
+	record, err := persistedTerminalReport(report, time.Now())
+	if err != nil {
+		t.Fatalf("build terminal report: %v", err)
+	}
+	record.Version = terminalReportRecordVersion + 1
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("marshal future report: %v", err)
+	}
+	path := filepath.Join(store.dir, terminalReportFileName(report.taskID))
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write future report: %v", err)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		items, listErr := store.list()
+		if listErr == nil || !strings.Contains(listErr.Error(), "unsupported terminal report version") {
+			t.Fatalf("list pass %d error = %v, want unsupported-version warning", pass, listErr)
+		}
+		if len(items) != 0 {
+			t.Fatalf("list pass %d replayed future-version record: %+v", pass, items)
+		}
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("future-version record removed on pass %d: %v", pass, readErr)
+		}
+		if string(got) != string(body) {
+			t.Fatalf("future-version record changed on pass %d", pass)
+		}
+	}
+}
+
+func TestTerminalReportFindsOtherNamespacesWithoutAdoptingThem(t *testing.T) {
+	cfg := Config{ServerBaseURL: "https://api.example.test", WorkspacesRoot: t.TempDir(), DaemonID: "current"}
+	store := newTerminalReportStore(cfg)
+	otherDir := filepath.Join(store.root, "different-identity")
+	if err := os.MkdirAll(filepath.Join(otherDir, "failed"), 0o700); err != nil {
+		t.Fatalf("create other namespace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "old.json"), []byte("pending"), 0o600); err != nil {
+		t.Fatalf("write other pending record: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "failed", "old.json"), []byte("failed"), 0o600); err != nil {
+		t.Fatalf("write other failed record: %v", err)
+	}
+	namespaces, err := store.otherNamespaceStats()
+	if err != nil {
+		t.Fatalf("scan namespaces: %v", err)
+	}
+	if len(namespaces) != 1 || namespaces[0].name != "different-identity" ||
+		namespaces[0].stats.PendingCount != 1 || namespaces[0].stats.FailedCount != 1 {
+		t.Fatalf("other namespace stats = %+v", namespaces)
+	}
+	if items, err := store.list(); err != nil || len(items) != 0 {
+		t.Fatalf("current namespace adopted other reports: %d, %v", len(items), err)
 	}
 }
 

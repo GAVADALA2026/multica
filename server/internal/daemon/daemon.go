@@ -392,6 +392,9 @@ type Daemon struct {
 	terminalReports      *terminalReportStore
 	terminalReportSend   terminalReportSendFunc
 	terminalReportWakeup chan struct{}
+	terminalReportNow    func() time.Time
+	terminalReportMu     sync.Mutex
+	terminalReportFlight map[string]struct{}
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -705,6 +708,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:                    logger,
 		terminalReports:           newTerminalReportStore(cfg),
 		terminalReportWakeup:      make(chan struct{}, 1),
+		terminalReportNow:         time.Now,
+		terminalReportFlight:      make(map[string]struct{}),
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
@@ -6294,18 +6299,39 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 }
 
 // reportTerminalTask is the only path that sends complete/fail callbacks. It
-// persists the exact report before the first network attempt and removes it
-// only after a successful response. A crash after the server commit but before
-// local acknowledgement merely replays the same idempotent terminal request.
+// attempts to persist the exact report before the first network request and
+// removes a persisted copy only after a successful response. A crash after the
+// server commit but before local acknowledgement merely replays the same
+// idempotent terminal request. If persistence itself fails, the direct request
+// still runs so a healthy server is not held hostage by the local disk.
 //
 // It deliberately preserves context values while discarding cancellation and
 // parent deadlines: daemon shutdown cancels the root context before pollLoop's
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	if _, err := persistedTerminalReport(report, time.Now()); err != nil {
+		return err
+	}
+	release, ok := d.beginTerminalReportDelivery(report.taskID)
+	if !ok {
+		return fmt.Errorf("terminal task report for %s is already being delivered", report.taskID)
+	}
+	defer release()
+
+	persisted := false
 	if d.terminalReports != nil {
 		if err := d.terminalReports.enqueue(report); err != nil {
-			return fmt.Errorf("persist terminal task report: %w", err)
+			// Durability is an availability improvement, not a prerequisite for
+			// the online callback. A read-only/full disk must not turn a request
+			// that the server could accept right now into a stuck task.
+			d.logger.Error("persist terminal task report; continuing with direct delivery",
+				"task", report.taskID,
+				"kind", report.kind,
+				"error", err,
+			)
+		} else {
+			persisted = true
 		}
 	}
 
@@ -6313,10 +6339,17 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	defer cancel()
 	err := d.sendTerminalTaskReport(ctx, report, defaultTerminalRetrySchedule)
 	if err != nil {
-		d.signalTerminalReportReplay()
+		quarantined := false
+		if persisted {
+			item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
+			quarantined = d.handleTerminalReportDeliveryError(ctx, item, err)
+		}
+		if persisted && !quarantined {
+			d.signalTerminalReportReplay()
+		}
 		return err
 	}
-	if d.terminalReports == nil {
+	if !persisted {
 		return nil
 	}
 	item := pendingTerminalTaskReport{fileName: terminalReportFileName(report.taskID), report: report}
@@ -6325,6 +6358,31 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 		return fmt.Errorf("acknowledge terminal task report: %w", err)
 	}
 	return nil
+}
+
+func (d *Daemon) beginTerminalReportDelivery(taskID string) (func(), bool) {
+	d.terminalReportMu.Lock()
+	if d.terminalReportFlight == nil {
+		d.terminalReportFlight = make(map[string]struct{})
+	}
+	if _, exists := d.terminalReportFlight[taskID]; exists {
+		d.terminalReportMu.Unlock()
+		return nil, false
+	}
+	d.terminalReportFlight[taskID] = struct{}{}
+	d.terminalReportMu.Unlock()
+	return func() {
+		d.terminalReportMu.Lock()
+		delete(d.terminalReportFlight, taskID)
+		d.terminalReportMu.Unlock()
+	}, true
+}
+
+func (d *Daemon) terminalReportClock() time.Time {
+	if d.terminalReportNow != nil {
+		return d.terminalReportNow()
+	}
+	return time.Now()
 }
 
 func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTaskReport, schedule []time.Duration) error {
