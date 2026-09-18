@@ -52,13 +52,13 @@ const defaultPiTurnErrorGrace = 10 * time.Minute
 
 // piTurnErrorGuard owns the only timer associated with a pending Pi turn
 // error. The stream goroutine records protocol activity; the timer callback
-// only cancels the already-owned process context after re-checking the state.
-// It never emits a Message, so observing the provider error cannot refresh the
+// invokes the execution's bounded stop path after re-checking the state. It
+// never emits a Message, so observing the provider error cannot refresh the
 // daemon's independent lastActivityAt watchdog clock.
 type piTurnErrorGuard struct {
 	mu            sync.Mutex
 	grace         time.Duration
-	cancelProcess context.CancelFunc
+	expireRun     func()
 	timer         *time.Timer
 	generation    uint64
 	lastError     string
@@ -68,8 +68,18 @@ type piTurnErrorGuard struct {
 	stopped       bool
 }
 
-func newPiTurnErrorGuard(grace time.Duration, cancelProcess context.CancelFunc) *piTurnErrorGuard {
-	return &piTurnErrorGuard{grace: grace, cancelProcess: cancelProcess}
+func newPiTurnErrorGuard(grace time.Duration, expireRun func()) *piTurnErrorGuard {
+	return &piTurnErrorGuard{grace: grace, expireRun: expireRun}
+}
+
+// closePiReadPipe interrupts a scanner/copy blocked in Read before releasing
+// the adapter's descriptor. The deadline matters on Unix, where Close from a
+// different goroutine need not interrupt a syscall already in the kernel.
+func closePiReadPipe(pipe io.ReadCloser) {
+	if deadlinePipe, ok := pipe.(interface{ SetReadDeadline(time.Time) error }); ok {
+		_ = deadlinePipe.SetReadDeadline(time.Now())
+	}
+	_ = pipe.Close()
 }
 
 // observeEvent records a parseable Pi protocol event. Recovery events clear a
@@ -154,15 +164,15 @@ func (g *piTurnErrorGuard) expire(generation uint64) {
 		return
 	}
 	g.graceExpired = true
-	g.terminal = true
 	g.stopped = true
-	cancelProcess := g.cancelProcess
+	expireRun := g.expireRun
 	g.mu.Unlock()
 
-	// CommandContext owns process-tree cancellation for every runtime command.
-	// Cancelling this child context ends Pi without cancelling runCtx, so final
-	// classification remains the provider failure rather than "aborted".
-	cancelProcess()
+	// The callback owns both process-tree cancellation and the adapter's local
+	// pipes. terminal remains false until the result goroutine has escaped its
+	// scanner/Wait path and can publish a Result, so a liveness watcher can never
+	// mistake "we decided to stop" for "finalization is guaranteed to finish".
+	expireRun()
 }
 
 func (g *piTurnErrorGuard) finish() (lastError string, graceExpired bool) {
@@ -415,6 +425,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		closePiReadPipe(stdout)
 		releasePiSessionFileLock(sessionLock)
 		cancelProcess()
 		cancel()
@@ -424,17 +435,35 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	// Watch stderr as well as log it. When Pi refuses a resume it exits before
 	// emitting a single JSON event, so stderr is the only place the reason
-	// exists and Result.ResumeRejected has nothing else to be built from.
+	// exists and Result.ResumeRejected has nothing else to be built from. Own the
+	// pipe directly instead of letting os/exec hide it behind a copy goroutine:
+	// an escaped descendant can inherit stderr too, and the error-grace path must
+	// be able to release every read that could hold Result finalization open.
+	stderrRead, err := cmd.StderrPipe()
+	if err != nil {
+		closeStdin()
+		closePiReadPipe(stdout)
+		releasePiSessionFileLock(sessionLock)
+		cancelProcess()
+		cancel()
+		return nil, fmt.Errorf("%s stderr pipe: %w", label, err)
+	}
 	stderrWatch := newPiStderrWatcher(newLogWriter(b.cfg.Logger, "["+label+":stderr] "))
-	cmd.Stderr = stderrWatch
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
+		closePiReadPipe(stdout)
+		closePiReadPipe(stderrRead)
 		releasePiSessionFileLock(sessionLock)
 		cancelProcess()
 		cancel()
 		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(stderrWatch, stderrRead)
+		close(stderrDone)
+	}()
 
 	b.cfg.Logger.Info(label+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -444,7 +473,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if turnErrorGrace <= 0 {
 		turnErrorGrace = defaultPiTurnErrorGrace
 	}
-	turnErrors := newPiTurnErrorGuard(turnErrorGrace, cancelProcess)
+	turnErrors := newPiTurnErrorGuard(turnErrorGrace, func() {
+		b.cfg.Logger.Info(label + " turn error recovery grace expired; stopping runtime")
+		// CommandContext owns process-tree cancellation for every runtime
+		// command. An escaped descendant can nevertheless retain stdout/stderr
+		// write ends after that group dies, so close the adapter-owned pipes too:
+		// finalization must not depend on an unowned process eventually exiting.
+		cancelProcess()
+		closeStdin()
+		closePiReadPipe(stdout)
+		closePiReadPipe(stderrRead)
+	})
 
 	// Write concurrently with stdout consumption. A large prompt can fill the
 	// stdin pipe while the child fills stdout; serialising those operations can
@@ -456,13 +495,14 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		writeErrCh <- err
 	}()
 
-	// Close both pipes when the context is cancelled. Closing stdin releases a
-	// writer blocked on a child that stopped reading; closing stdout releases the
-	// stream scanner.
+	// Close every adapter-owned pipe when the context is cancelled. Closing stdin
+	// releases a writer blocked on a child that stopped reading; closing the read
+	// pipes releases the stdout scanner and stderr copier.
 	go func() {
 		<-runCtx.Done()
 		closeStdin()
-		_ = stdout.Close()
+		closePiReadPipe(stdout)
+		closePiReadPipe(stderrRead)
 	}()
 
 	go func() {
@@ -597,6 +637,19 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
 			output.WriteString(d)
 			trySend(msgCh, Message{Type: MessageText, Content: d})
+		}
+
+		// Finish the user-owned stderr read before Wait closes StderrPipe. Normal
+		// exit gets the same 10s backstop cmd.WaitDelay used to provide when
+		// os/exec owned the copier. Cancellation and error-grace expiry close
+		// stderrRead above, so their finalization does not pay it.
+		stderrTimer := time.NewTimer(cmd.WaitDelay)
+		select {
+		case <-stderrDone:
+			stderrTimer.Stop()
+		case <-stderrTimer.C:
+			closePiReadPipe(stderrRead)
+			<-stderrDone
 		}
 
 		waitErr := cmd.Wait()

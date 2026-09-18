@@ -9604,6 +9604,48 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			}
 		}
 	}
+	// awaitTerminalResult gives a backend that advertises an authoritative
+	// terminal boundary one bounded chance to hand over its result after a
+	// cancellation won the outer select. Result delivery is the linearization
+	// point: TerminalObserved must be published before that send, so checking it
+	// afterwards preserves a provider outcome without racing a flag read. A
+	// delivered non-authoritative result is still returned to the idle-watchdog
+	// caller for re-tagging; ordinary upstream cancellation deliberately ignores
+	// it and keeps the existing generic cancelled disposition.
+	awaitTerminalResult := func(trigger string) (result agent.Result, delivered, authoritative bool) {
+		if !handsOverTerminal {
+			return agent.Result{}, false, false
+		}
+		if trigger == "idle_watchdog" {
+			// Keep this event stable: besides operator diagnostics, the terminal
+			// race regression uses it as the hand-off linearization probe.
+			taskLog.Info("idle watchdog fired; waiting for the backend to hand over its result",
+				"budget", terminalResultHandoffBudget.String())
+		} else {
+			taskLog.Info("waiting for the backend to hand over its result after cancellation",
+				"trigger", trigger,
+				"budget", terminalResultHandoffBudget.String())
+		}
+		timer := time.NewTimer(terminalResultHandoffBudget)
+		defer timer.Stop()
+		select {
+		case result, ok := <-session.Result:
+			if !ok {
+				return agent.Result{}, false, false
+			}
+			return result, true, terminalObserved()
+		case <-timer.C:
+			if trigger == "idle_watchdog" {
+				taskLog.Warn("backend did not hand over a result within the budget; classifying by liveness",
+					"budget", terminalResultHandoffBudget.String())
+			} else {
+				taskLog.Warn("backend did not hand over a result within the budget; classifying by cancellation trigger",
+					"trigger", trigger,
+					"budget", terminalResultHandoffBudget.String())
+			}
+			return agent.Result{}, false, false
+		}
+	}
 
 	select {
 	case result := <-session.Result:
@@ -9647,38 +9689,20 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			// Such a backend always closes Result, so a wedged one still ends
 			// this wait promptly through the closed channel rather than the
 			// budget.
-			if handsOverTerminal {
-				taskLog.Info("idle watchdog fired; waiting for the backend to hand over its result",
-					"budget", terminalResultHandoffBudget.String())
-				select {
-				case result, ok := <-session.Result:
-					if ok && terminalObserved() {
-						// The backend had already read its authoritative
-						// result, so this is the real outcome, not a hang.
-						return result, toolCount.Load(), nil
-					}
-					if ok {
-						// The backend's wait goroutine (e.g. claude.go)
-						// translates the SIGKILL we delivered via agentCancel
-						// into Status="aborted". Re-tag it as "idle_watchdog"
-						// so runTask routes the disposition through a dedicated
-						// failure_reason, not the generic "agent_error" bucket
-						// the aborted path falls into.
-						result.Status = "idle_watchdog"
-						if result.Error == "" {
-							result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
-						}
-						return result, toolCount.Load(), nil
-					}
-					// Closed with no value: the backend gave up without an
-					// outcome, so the liveness verdict is the only one left.
-				case <-time.After(terminalResultHandoffBudget):
-					// A backend that neither delivers nor closes is itself the
-					// hang. Linearizing here keeps the branch bounded whatever
-					// a backend does.
-					taskLog.Warn("backend did not hand over a result within the budget; classifying by liveness",
-						"budget", terminalResultHandoffBudget.String())
+			if result, delivered, authoritative := awaitTerminalResult("idle_watchdog"); authoritative {
+				// The backend had already read its authoritative result, so
+				// this is the real outcome, not a hang.
+				return result, toolCount.Load(), nil
+			} else if delivered {
+				// The backend's wait goroutine (e.g. claude.go) translates the
+				// SIGKILL we delivered via agentCancel into Status="aborted".
+				// Re-tag it so runTask routes the disposition through the
+				// dedicated liveness failure_reason.
+				result.Status = "idle_watchdog"
+				if result.Error == "" {
+					result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 				}
+				return result, toolCount.Load(), nil
 			}
 			return agent.Result{
 				Status: "idle_watchdog",
@@ -9691,6 +9715,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
 		// drain deadline expiring on its own.
 		if errors.Is(drainCtx.Err(), context.Canceled) {
+			if result, _, authoritative := awaitTerminalResult("upstream_context"); authoritative {
+				return result, toolCount.Load(), nil
+			}
 			return agent.Result{
 				Status: "cancelled",
 				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
