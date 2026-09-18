@@ -3601,27 +3601,29 @@ func (c *codexClient) completeAgentMessage(itemID, text string) {
 	delivered := ""
 	if stream != nil {
 		delivered = stream.delivered.String()
-		// The completed snapshot supersedes bytes that were observed but not
-		// handed to the daemon. Reconcile from the acknowledged prefix only.
-		stream.pending.Reset()
 	} else {
 		stream = c.agentMessageStream(itemID)
 	}
 
 	if !strings.HasPrefix(text, delivered) {
 		// Already-persisted text cannot be retracted without a new event/schema.
-		// Appending the full snapshot would duplicate it, so retain the live
-		// transcript exactly as delivered and use onAgentMessage below as the
-		// authoritative Result.Output fallback. The warning makes protocol drift
-		// diagnosable without corrupting the append-only audit stream.
+		// Appending the full snapshot would duplicate it, but every complete delta
+		// event still belongs in the append-only transcript. Flush pending normally;
+		// if the channel refuses it, leave the stream intact for terminal/EOF retry.
+		// onAgentMessage remains the authoritative Result.Output fallback.
 		if c.cfg.Logger != nil {
 			c.cfg.Logger.Warn("codex agent-message delta did not match completed text",
 				"item_id", itemID, "delivered_bytes", len(delivered), "completed_bytes", len(text))
 		}
-		delete(c.agentMessageStreams, itemID)
+		if c.flushAgentMessageStream(stream) {
+			delete(c.agentMessageStreams, itemID)
+		}
 		return
 	}
 
+	// With an acknowledged prefix match, the completed snapshot supersedes
+	// observed-but-unacknowledged bytes and supplies their authoritative suffix.
+	stream.pending.Reset()
 	suffix := strings.TrimPrefix(text, delivered)
 	if suffix == "" || c.emitAgentMessageChunk(suffix) {
 		delete(c.agentMessageStreams, itemID)

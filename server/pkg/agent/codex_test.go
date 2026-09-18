@@ -1452,7 +1452,7 @@ func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
 			name:                 "mismatch keeps append-only stream without duplicating snapshot",
 			deltas:               []string{"Hx", "llo"},
 			completed:            "Hello",
-			wantStream:           "Hx",
+			wantStream:           "Hxllo",
 			wantAuthoritativeOut: "Hello",
 		},
 	}
@@ -1490,6 +1490,62 @@ func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
 				t.Fatalf("authoritative output = %q, want %q", completed, tt.wantAuthoritativeOut)
 			}
 		})
+	}
+}
+
+func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	messages := make(chan Message, 2)
+	c.onAgentMessageChunk = func(text string) bool {
+		return trySend(messages, Message{Type: MessageText, Content: text})
+	}
+	var completed string
+	c.onAgentMessage = func(text string) { completed = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hx"}}`)
+	// Fill the remaining slot after Hx was accepted. The mismatch path's first
+	// attempt to hand off pending "llo" must fail without clearing it.
+	messages <- Message{Type: MessageStatus, Status: "filler"}
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"llo"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Hello"}}}`)
+
+	stream := c.agentMessageStreams["msg-1"]
+	if stream == nil {
+		t.Fatal("rejected mismatch pending stream was deleted")
+	}
+	if got := stream.pending.String(); got != "llo" {
+		t.Fatalf("rejected mismatch pending = %q, want retained llo", got)
+	}
+	first := <-messages
+	if first.Type != MessageText || first.Content != "Hx" {
+		t.Fatalf("first delivered message = %+v, want Hx", first)
+	}
+
+	// Consuming Hx frees one slot. The terminal flush must retry llo exactly
+	// once, then clear the stream without appending completed="Hello".
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
+	var tail strings.Builder
+	for len(messages) > 0 {
+		msg := <-messages
+		if msg.Type == MessageText {
+			tail.WriteString(msg.Content)
+		}
+	}
+	c.flushAgentMessageDeltas()
+	if len(messages) != 0 {
+		t.Fatalf("second terminal/EOF flush duplicated text: %+v", <-messages)
+	}
+	if got := first.Content + tail.String(); got != "Hxllo" {
+		t.Fatalf("append-only mismatch transcript = %q, want Hxllo", got)
+	}
+	if completed != "Hello" {
+		t.Fatalf("authoritative completed output = %q, want Hello", completed)
+	}
+	if c.agentMessageStreams["msg-1"] != nil {
+		t.Fatal("mismatch stream remained after successful terminal retry")
 	}
 }
 
