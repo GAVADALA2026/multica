@@ -13,10 +13,22 @@ const mockUpdateTrigger = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 
+// The submit path validates over the network before it writes. Parking that
+// round trip holds the dialog mid-flight, in the window a label typed after
+// Save used to fall into.
+const preview = vi.hoisted(() => ({ release: null as null | (() => void), hold: false }));
+
 vi.mock("@multica/core/autopilots/queries", () => ({
   cronPreviewOptions: (wsId: string, expr: string, tz: string) => ({
     queryKey: ["cron-preview", wsId, expr, tz],
-    queryFn: async () => ({ next_runs: ["2126-07-14T01:00:00Z"] }),
+    queryFn: async () => {
+      if (preview.hold) {
+        await new Promise<void>((resolve) => {
+          preview.release = resolve;
+        });
+      }
+      return { next_runs: ["2126-07-14T01:00:00Z"] };
+    },
     retry: false,
   }),
 }));
@@ -70,12 +82,16 @@ function renderDialog(trig: AutopilotTrigger = trigger()) {
 }
 
 const saveButton = () => screen.getByRole("button", { name: "Save" });
+const labelInput = () => screen.getByPlaceholderText("e.g. Weekday morning");
+const enabledSwitch = () => screen.getByRole("switch", { name: "Enabled" });
+
+beforeEach(() => {
+  mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-evening" });
+  preview.hold = false;
+  preview.release = null;
+});
 
 describe("EditScheduleTriggerDialog", () => {
-  beforeEach(() => {
-    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-evening" });
-  });
-
   it("opens on the schedule the row already runs, not on a default", () => {
     renderDialog();
 
@@ -100,39 +116,9 @@ describe("EditScheduleTriggerDialog", () => {
       autopilotId: AUTOPILOT_ID,
       triggerId: "trg-evening",
       timezone: "Asia/Bangkok",
-      enabled: true,
     });
     expect(patch.cron_expression).toContain("Asia/Bangkok");
-    // An untouched label is left out of the PATCH: sending this dialog's
-    // reading of it back would turn an absent label into an empty one.
-    expect(patch.label).toBeUndefined();
     expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it("sends the label once the user gives the schedule one", async () => {
-    const user = userEvent.setup();
-    renderDialog();
-
-    await user.type(screen.getByPlaceholderText("e.g. Weekday morning"), "Evening sweep");
-    await user.click(saveButton());
-
-    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
-    expect(mockUpdateTrigger.mock.calls[0]?.[0].label).toBe("Evening sweep");
-  });
-
-  it("pauses the schedule without deleting it", async () => {
-    const user = userEvent.setup();
-    renderDialog();
-
-    await user.click(screen.getByRole("switch", { name: "Enabled" }));
-    await user.click(saveButton());
-
-    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
-    const patch = mockUpdateTrigger.mock.calls[0]?.[0];
-    expect(patch.enabled).toBe(false);
-    // The cron survives the pause — this is the disabled badge the detail page
-    // already renders, not a delete.
-    expect(patch.cron_expression).toContain("*/3");
   });
 
   it("keeps the dialog open when the write fails, with the server's reason", async () => {
@@ -140,11 +126,92 @@ describe("EditScheduleTriggerDialog", () => {
     const { onOpenChange } = renderDialog();
     mockUpdateTrigger.mockRejectedValueOnce(new Error("cron_expression is invalid"));
 
+    await user.click(screen.getByRole("button", { name: "At a time" }));
     await user.click(saveButton());
 
     await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
     const { toast } = await import("sonner");
     expect(toast.error).toHaveBeenCalledWith("cron_expression is invalid");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});
+
+// The PATCH is partial on purpose. A changed cron / timezone / enabled reads
+// server-side as a substantive edit: it republishes the rule version and moves
+// this trigger's accountability to whoever saved (`UpdateAutopilotTrigger` in
+// server/internal/handler/autopilot.go, MUL-4302). Since `parseCron` → `toCron`
+// hands an untouched schedule back normalized — `TZ=` prefix and all, textually
+// different from the stored row — resending it would make a rename look like a
+// schedule change and carry that responsibility along with it.
+describe("EditScheduleTriggerDialog sends only what the user changed", () => {
+  it("sends the label alone when only the label was touched", async () => {
+    const user = userEvent.setup();
+    // Stored without the prefix the editor adds back, so a resend would be
+    // visibly a different string to the server.
+    renderDialog(trigger({ cron_expression: "0 */3 * * *", label: "Old name" }));
+
+    await user.clear(labelInput());
+    await user.type(labelInput(), "Evening sweep");
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-evening",
+      label: "Evening sweep",
+    });
+  });
+
+  it("pauses a schedule without resending the schedule", async () => {
+    const user = userEvent.setup();
+    renderDialog(trigger({ cron_expression: "0 */3 * * *" }));
+
+    await user.click(enabledSwitch());
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    // The cron stays where it is — pausing is not an edit to it, and the row
+    // keeps running the same schedule if it is switched back on.
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-evening",
+      enabled: false,
+    });
+  });
+
+  it("has nothing to save until something changes", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    // A no-op PATCH is not free: the server recomputes and rewrites the row's
+    // next_run_at from whatever it is sent, so opening and saving a dialog the
+    // user never edited would still move a reading they never touched.
+    expect(saveButton()).toBeDisabled();
+
+    await user.click(enabledSwitch());
+    expect(saveButton()).toBeEnabled();
+
+    await user.click(enabledSwitch());
+    expect(saveButton()).toBeDisabled();
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+  });
+
+  it("takes no label the in-flight write could not carry", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    preview.hold = true;
+
+    await user.click(screen.getByRole("button", { name: "At a time" }));
+    await user.click(saveButton());
+
+    // Parked mid-validation: submit has already read the label it will send, so
+    // the input locks rather than accepting one this write cannot carry and the
+    // closing dialog would swallow.
+    await waitFor(() => expect(labelInput()).toBeDisabled());
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+
+    preview.release?.();
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0].label).toBeUndefined();
   });
 });

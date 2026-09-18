@@ -256,7 +256,7 @@ function SkippedRunsGroup({
   );
 }
 
-function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
+export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t, i18n } = useT("autopilots");
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
@@ -391,7 +391,11 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             )}
           </div>
         )}
-        {trigger.next_run_at && (
+        {/* A disabled trigger keeps the next_run_at it had — the dispatcher
+            filters on `enabled` instead of clearing it — so the row would
+            otherwise carry the Disabled badge and a promise to run at 09:00
+            in the same breath. The badge is the true one. */}
+        {trigger.next_run_at && trigger.enabled && (
           <div className="text-caption text-muted-foreground">
             {t(($) => $.trigger_row.next_label, {
               date: formatInTimeZone(

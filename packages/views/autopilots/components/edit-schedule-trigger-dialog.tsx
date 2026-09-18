@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useUpdateAutopilotTrigger } from "@multica/core/autopilots/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
@@ -57,40 +57,63 @@ function EditScheduleTriggerDialogBody({
   // the structured model comes back as an advanced config holding the raw
   // fields, which the editor renders in its expression row. So every schedule
   // row is editable here, not only the ones the pickers can describe.
-  const [config, setConfig] = useState<ScheduleConfig>(() =>
-    parseCron(trigger.cron_expression ?? "", trigger.timezone ?? "UTC"),
-  );
+  const initialCfg = parseCron(trigger.cron_expression ?? "", trigger.timezone ?? "UTC");
+  const [config, setConfig] = useState<ScheduleConfig>(initialCfg);
   const [label, setLabel] = useState(trigger.label ?? "");
   const [enabled, setEnabled] = useState(trigger.enabled);
   const [submitting, setSubmitting] = useState(false);
   const scheduleGate = useScheduleSubmitGate(wsId);
-  const canSubmit = !submitting && scheduleGate.scheduleValid;
+
+  // Snapshotted at mount, and compared against the editor's own output rather
+  // than the stored string: `parseCron` → `toCron` normalizes (a bare cron on a
+  // zoned row comes back carrying its `TZ=` prefix), so the stored text differs
+  // from the editor's rendering of the very same schedule. Sending that
+  // normalization as an edit would read as a substantive change server-side —
+  // republishing the rule version and moving this trigger's accountability to
+  // whoever opened the dialog, which MUL-4302 settled must not happen on a
+  // label-only or no-op save.
+  const initialCronRef = useRef(toCron(initialCfg));
+  const initialTimezoneRef = useRef(initialCfg.timezone);
+  const scheduleDirty =
+    toCron(config) !== initialCronRef.current ||
+    config.timezone !== initialTimezoneRef.current;
+  const labelDirty = label.trim() !== (trigger.label ?? "");
+  const enabledDirty = enabled !== trigger.enabled;
+  const dirty = scheduleDirty || labelDirty || enabledDirty;
+  // The cron gate only stands between the user and a write that carries a cron.
+  // A row whose stored expression the server can no longer preview is exactly
+  // the one a user reaches for this dialog to switch OFF, and a rejection of an
+  // expression they are not sending must not be what stops them.
+  const canSubmit = !submitting && dirty && (!scheduleDirty || scheduleGate.scheduleValid);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      if (!(await scheduleGate.ensureAccepted(config))) {
-        setSubmitting(false);
-        return;
+      let cronExpr: string | null = null;
+      if (scheduleDirty) {
+        if (!(await scheduleGate.ensureAccepted(config))) {
+          setSubmitting(false);
+          return;
+        }
+        cronExpr = toCron(config);
+        if (!cronExpr.trim()) {
+          setSubmitting(false);
+          return;
+        }
       }
-      const cronExpr = toCron(config);
-      if (!cronExpr.trim()) {
-        setSubmitting(false);
-        return;
-      }
-      // Only what this dialog owns, and of that only what moved: the PATCH
-      // preserves any field it is not sent, so an untouched label is left
-      // alone instead of being rewritten as this dialog's reading of it —
-      // which would turn an absent label into an empty one.
-      const trimmedLabel = label.trim();
+      // Only the fields that moved. The PATCH preserves everything it is not
+      // sent, so a field left out here keeps whatever the row has now — which
+      // is also what makes this dialog safe to have open while someone else
+      // edits the same trigger: it can only overwrite what its user touched.
       await updateTrigger.mutateAsync({
         autopilotId,
         triggerId: trigger.id,
-        cron_expression: cronExpr,
-        timezone: config.timezone || undefined,
-        enabled,
-        label: trimmedLabel === (trigger.label ?? "") ? undefined : trimmedLabel,
+        ...(cronExpr !== null
+          ? { cron_expression: cronExpr, timezone: config.timezone || undefined }
+          : {}),
+        ...(labelDirty ? { label: label.trim() } : {}),
+        ...(enabledDirty ? { enabled } : {}),
       });
       toast.success(t(($) => $.edit_trigger_dialog.toast_updated));
       onOpenChange(false);
@@ -135,7 +158,13 @@ function EditScheduleTriggerDialogBody({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder={t(($) => $.edit_trigger_dialog.label_placeholder)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-body outline-none focus:ring-1 focus:ring-ring"
+              // Same lock as the editor above, for the same reason: submit reads
+              // the label going in and validates over the network before
+              // writing, so a label typed inside that window would be dropped —
+              // silently, under the success toast for the write that shipped
+              // without it.
+              disabled={submitting}
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-body outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
           </div>
 
