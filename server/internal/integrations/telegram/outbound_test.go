@@ -30,6 +30,206 @@ type fakeTelegramOutboundQueries struct {
 	binding       db.ChannelChatSessionBinding
 	bindings      map[[16]byte]db.ChannelChatSessionBinding
 	installation  db.ChannelInstallation
+
+	// Reply-delivery ownership, with the same conditional semantics as the
+	// SQL: these are what let two Outbound instances in a test stand in for
+	// two backend replicas sharing one database.
+	deliveryMu    sync.Mutex
+	deliveries    map[[16]byte]db.ChannelReplyDelivery
+	deliveryOrder map[[16]byte]int64
+	deliverySeq   int64
+	deliveryErrOn map[string]error
+}
+
+func deliveryKey(id pgtype.UUID) [16]byte { return id.Bytes }
+
+// deliveryFault lets a test fail one ownership query by name.
+func (f *fakeTelegramOutboundQueries) deliveryFault(name string) error {
+	if f.deliveryErrOn == nil {
+		return nil
+	}
+	return f.deliveryErrOn[name]
+}
+
+func (f *fakeTelegramOutboundQueries) EnsureChannelReplyDelivery(_ context.Context, arg db.EnsureChannelReplyDeliveryParams) (db.ChannelReplyDelivery, error) {
+	f.deliveryMu.Lock()
+	defer f.deliveryMu.Unlock()
+	if err := f.deliveryFault("ensure"); err != nil {
+		return db.ChannelReplyDelivery{}, err
+	}
+	key := deliveryKey(arg.TaskID)
+	if row, ok := f.deliveries[key]; ok {
+		f.touchLocked(key)
+		return row, nil
+	}
+	row := db.ChannelReplyDelivery{
+		TaskID: arg.TaskID, BindingID: arg.BindingID, InstallationID: arg.InstallationID,
+		ChannelType: arg.ChannelType, ChatID: arg.ChatID,
+		Phase: deliveryPhaseStreaming, SendState: deliverySendNone,
+	}
+	f.putLocked(key, row)
+	return row, nil
+}
+
+func (f *fakeTelegramOutboundQueries) ClaimChannelReplyDeliveryTerminal(_ context.Context, arg db.ClaimChannelReplyDeliveryTerminalParams) (db.ChannelReplyDelivery, error) {
+	f.deliveryMu.Lock()
+	defer f.deliveryMu.Unlock()
+	if err := f.deliveryFault("claim_terminal"); err != nil {
+		return db.ChannelReplyDelivery{}, err
+	}
+	key := deliveryKey(arg.TaskID)
+	row, ok := f.deliveries[key]
+	if !ok {
+		row = db.ChannelReplyDelivery{
+			TaskID: arg.TaskID, BindingID: arg.BindingID, InstallationID: arg.InstallationID,
+			ChannelType: arg.ChannelType, ChatID: arg.ChatID,
+			Phase: deliveryPhaseTerminal, SendState: deliverySendNone,
+		}
+		f.putLocked(key, row)
+		return row, nil
+	}
+	if row.Phase == deliveryPhaseSettled {
+		return db.ChannelReplyDelivery{}, pgx.ErrNoRows
+	}
+	row.Phase = deliveryPhaseTerminal
+	f.putLocked(key, row)
+	return row, nil
+}
+
+func (f *fakeTelegramOutboundQueries) AdoptChannelReplyDeliveryForRetry(_ context.Context, arg db.AdoptChannelReplyDeliveryForRetryParams) (db.ChannelReplyDelivery, error) {
+	f.deliveryMu.Lock()
+	defer f.deliveryMu.Unlock()
+	if err := f.deliveryFault("adopt"); err != nil {
+		return db.ChannelReplyDelivery{}, err
+	}
+	if _, exists := f.deliveries[deliveryKey(arg.TaskID)]; exists {
+		return db.ChannelReplyDelivery{}, pgx.ErrNoRows
+	}
+	var (
+		parkedKey [16]byte
+		parked    db.ChannelReplyDelivery
+		found     bool
+	)
+	for key, row := range f.deliveries {
+		if row.Phase != "awaiting_retry" || row.BindingID != arg.BindingID {
+			continue
+		}
+		if found && f.deliveryOrder[key] < f.deliveryOrder[parkedKey] {
+			continue
+		}
+		parkedKey, parked, found = key, row, true
+	}
+	if !found {
+		return db.ChannelReplyDelivery{}, pgx.ErrNoRows
+	}
+	delete(f.deliveries, parkedKey)
+	delete(f.deliveryOrder, parkedKey)
+	parked.TaskID = arg.TaskID
+	parked.Phase = deliveryPhaseStreaming
+	f.putLocked(deliveryKey(arg.TaskID), parked)
+	return parked, nil
+}
+
+func (f *fakeTelegramOutboundQueries) MarkChannelReplyDeliverySending(_ context.Context, taskID pgtype.UUID) (int64, error) {
+	return f.updateDelivery("mark_sending", taskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.Phase != deliveryPhaseStreaming || row.SendState != deliverySendNone {
+			return false
+		}
+		row.SendState = deliverySendInFlight
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) RecordChannelReplyDeliveryMessage(_ context.Context, arg db.RecordChannelReplyDeliveryMessageParams) (int64, error) {
+	return f.updateDelivery("record_message", arg.TaskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.SendState != deliverySendInFlight {
+			return false
+		}
+		row.SendState = deliverySendKnown
+		row.MessageID = arg.MessageID
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) ResetChannelReplyDeliverySend(_ context.Context, taskID pgtype.UUID) (int64, error) {
+	return f.updateDelivery("reset_send", taskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.SendState != deliverySendInFlight {
+			return false
+		}
+		row.SendState = deliverySendNone
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) MarkChannelReplyDeliverySendUnknown(_ context.Context, taskID pgtype.UUID) (int64, error) {
+	return f.updateDelivery("mark_unknown", taskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.SendState != deliverySendInFlight {
+			return false
+		}
+		row.SendState = deliverySendUnknown
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) AdvanceChannelReplyDeliveryChunks(_ context.Context, arg db.AdvanceChannelReplyDeliveryChunksParams) (int64, error) {
+	return f.updateDelivery("advance_chunks", arg.TaskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.ChunksSent >= arg.ChunksSent {
+			return false
+		}
+		row.ChunksSent = arg.ChunksSent
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) SettleChannelReplyDelivery(_ context.Context, arg db.SettleChannelReplyDeliveryParams) (int64, error) {
+	return f.updateDelivery("settle", arg.TaskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.Phase == deliveryPhaseSettled {
+			return false
+		}
+		row.Phase = deliveryPhaseSettled
+		row.SettledReason = arg.SettledReason
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) MarkChannelReplyDeliveryAwaitingRetry(_ context.Context, taskID pgtype.UUID) (int64, error) {
+	return f.updateDelivery("await_retry", taskID, func(row *db.ChannelReplyDelivery) bool {
+		if row.Phase != deliveryPhaseStreaming && row.Phase != deliveryPhaseTerminal {
+			return false
+		}
+		row.Phase = "awaiting_retry"
+		return true
+	})
+}
+
+func (f *fakeTelegramOutboundQueries) updateDelivery(name string, taskID pgtype.UUID, apply func(*db.ChannelReplyDelivery) bool) (int64, error) {
+	f.deliveryMu.Lock()
+	defer f.deliveryMu.Unlock()
+	if err := f.deliveryFault(name); err != nil {
+		return 0, err
+	}
+	key := deliveryKey(taskID)
+	row, ok := f.deliveries[key]
+	if !ok || !apply(&row) {
+		return 0, nil
+	}
+	f.putLocked(key, row)
+	return 1, nil
+}
+
+func (f *fakeTelegramOutboundQueries) putLocked(key [16]byte, row db.ChannelReplyDelivery) {
+	if f.deliveries == nil {
+		f.deliveries = make(map[[16]byte]db.ChannelReplyDelivery)
+		f.deliveryOrder = make(map[[16]byte]int64)
+	}
+	f.deliveries[key] = row
+	f.deliverySeq++
+	f.deliveryOrder[key] = f.deliverySeq
+}
+
+func (f *fakeTelegramOutboundQueries) touchLocked(key [16]byte) {
+	f.deliverySeq++
+	f.deliveryOrder[key] = f.deliverySeq
 }
 
 func (f *fakeTelegramOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
@@ -1239,7 +1439,11 @@ func TestOutboundRejectedTerminalReplyReleasesStreamSchedule(t *testing.T) {
 	}
 }
 
-func TestOutboundEmptyTerminalReplySkipsQueueAndClearsStream(t *testing.T) {
+// An empty completion has no answer to deliver, but it still ends the turn: it
+// releases local state at once and queues the close that stops a late text
+// frame from reopening the reply. The close is a database write, so it runs on
+// a worker rather than on the synchronous bus.
+func TestOutboundEmptyTerminalReplyClearsStreamAndQueuesTheClose(t *testing.T) {
 	o := NewOutbound(newTelegramOutboundQueries(), nil, "", nil, nil)
 	e := telegramTestEventFor(3, 2, "")
 	schedule := &chatSchedule{key: chatScheduleKey{botKey: "bot", chatID: 42}, refs: 1}
@@ -1247,15 +1451,31 @@ func TestOutboundEmptyTerminalReplySkipsQueueAndClearsStream(t *testing.T) {
 	o.chats[schedule.key] = schedule
 
 	o.enqueueTerminalReply(e)
-	o.terminalMu.Lock()
-	count := o.queuedTerminalReplyCount
-	o.terminalMu.Unlock()
 	o.mu.Lock()
 	_, streamExists := o.streams[e.TaskID]
 	refs := schedule.refs
 	o.mu.Unlock()
-	if count != 0 || streamExists || refs != 0 {
-		t.Fatalf("empty reply count=%d stream=%v schedule refs=%d", count, streamExists, refs)
+	if streamExists || refs != 0 {
+		t.Fatalf("empty reply left local state behind: stream=%v schedule refs=%d", streamExists, refs)
+	}
+
+	o.terminalMu.Lock()
+	queued := o.terminalSessions[e.ChatSessionID]
+	o.terminalMu.Unlock()
+	if queued == nil || len(queued.queue) != 1 {
+		t.Fatalf("empty reply did not queue its close: %+v", queued)
+	}
+	reply := queued.queue[0]
+	if !reply.settleOnly || reply.settleReason != "empty_reply" {
+		t.Fatalf("queued reply is not a close: settleOnly=%v reason=%q", reply.settleOnly, reply.settleReason)
+	}
+	if reply.byteSize != 0 {
+		t.Fatalf("empty reply charged %d bytes to the queue budget", reply.byteSize)
+	}
+
+	// The close must settle the reply without asking Telegram for anything.
+	if result := o.sendNextTerminalRequest(context.Background(), reply); !result.done || result.err != nil {
+		t.Fatalf("close did not settle: %+v", result)
 	}
 }
 
