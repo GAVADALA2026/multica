@@ -84,6 +84,9 @@ const (
 	// At one sixty-fourth of the scanner's maximum completed-snapshot line, any
 	// reconcilable item occupies at most 65 of the 256 message slots (the leading
 	// delta plus 64 aggregates), reserving the rest for status and tool events.
+	// Since this threshold is 512 KiB, a normal message will not reach it: only
+	// its leading delta is usually handed off during generation, while the
+	// remaining deltas stay pending until item/completed reconciles the item.
 	// A single provider event may be larger, in which case that event is flushed
 	// as one chunk rather than split at an arbitrary byte boundary.
 	codexAgentMessageAggregateBytes = agentStreamMaxLineBytes / 64

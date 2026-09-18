@@ -1493,6 +1493,50 @@ func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
 	}
 }
 
+func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var chunks []string
+	c.onAgentMessageChunk = func(text string) bool {
+		chunks = append(chunks, text)
+		return true
+	}
+	var authoritative string
+	c.onAgentMessage = func(text string) { authoritative = text }
+
+	deltas := []string{"The ", "answer ", "is 42."}
+	completed := strings.Join(deltas, "")
+	if len(completed) >= codexAgentMessageAggregateBytes {
+		t.Fatalf("fixture is %d bytes, want below %d-byte aggregation threshold", len(completed), codexAgentMessageAggregateBytes)
+	}
+	for _, delta := range deltas {
+		c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
+	}
+
+	if len(chunks) != 1 || chunks[0] != deltas[0] {
+		t.Fatalf("chunks before item/completed = %q, want only leading delta %q", chunks, deltas[0])
+	}
+
+	c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":%q}}}`, completed))
+
+	wantTail := strings.Join(deltas[1:], "")
+	if len(chunks) != 2 || chunks[1] != wantTail {
+		t.Fatalf("chunks after item/completed = %q, want leading delta then tail %q exactly once", chunks, wantTail)
+	}
+	if got := strings.Join(chunks, ""); got != completed {
+		t.Fatalf("joined transcript = %q, want %q", got, completed)
+	}
+	if authoritative != completed {
+		t.Fatalf("authoritative output = %q, want %q", authoritative, completed)
+	}
+	c.flushAgentMessageDeltas()
+	if len(chunks) != 2 {
+		t.Fatalf("EOF flush duplicated tail: chunks=%q", chunks)
+	}
+}
+
 func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing.T) {
 	t.Parallel()
 
